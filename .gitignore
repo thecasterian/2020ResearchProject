@@ -1,1 +1,9 @@
+# ignore executable
+*
+!*.*
+!*/
 *.exe
+!Makefile
+
+# ignore txt file
+*.txt
