@@ -6,13 +6,13 @@
 #define Re 400
 #define dt 0.005
 
-#define N 64
-#define numtstep 2500
-
-const double PI =  3.1415926535897932384626;
+#define N 32
+#define beta 1
+#define numtstep 10
 
 double xc[N+2], yc[N+2];
 double dx[N+2], dy[N+2];
+double dx_bar[N+2], dy_bar[N+2];
 
 typedef double mat[N+2][N+2];
 typedef double mat1[N+1][N+2];
@@ -32,10 +32,16 @@ double psi[N+1][N+1];
 
 // for tdma
 mat C1, C2, RHS1, RHS2;
+double kx[N+2], ky[N+2];
 double a[N+2], b[N+2], c[N+2], d[N+2], x[N+2];
 
-const double h = 1. / N;
-const double k = 1. + Re * h*h / dt;
+double tanh_stretch(double xi) {
+    return 1 - tanh(beta * (1 - 2*xi)) / tanh(beta);
+}
+
+double sq(double x) {
+    return x * x;
+}
 
 double fill(double *begin, double *end, double value) {
     for (double *p = begin; p != end; p++)
@@ -55,7 +61,35 @@ double tdma(int n) {
 }
 
 int main(void) {
-    // initialize
+    // generate grid
+    for (int i = 1; i <= N; i++) {
+        // double left = tanh_stretch(1.* (i-1) / N);
+        // double right = tanh_stretch(1. * i / N);
+
+        double left = 1. * (i-1) / N;
+        double right = 1. * i / N;
+
+        dx[i] = dy[i] = right - left;
+        xc[i] = yc[i] = (right + left) / 2;
+    }
+
+    // grid boundaries
+    dx[0] = dx[1]; dx[N+1] = dx[N];
+    xc[0] = -xc[1]; xc[N+1] = 2 - xc[N];
+    dy[0] = dy[1]; dy[N+1] = dy[N];
+    yc[0] = -yc[1]; yc[N+1] = 2 - yc[N];
+    for (int i = 1; i <= N; i++) {
+        dx_bar[i] = (xc[i+1]-xc[i-1]) / 2;
+        dy_bar[i] = (yc[i+1]-yc[i-1]) / 2;
+    }
+
+    // tdma coefficients
+    for (int i = 1; i <= N; i++) {
+        kx[i] = 1 + Re * sq(dx_bar[i]) / dt;
+        ky[i] = 1 + Re * sq(dy_bar[i]) / dt;
+    }
+
+    // initialize flow
     for (int i = 0; i <= N; i++) {
         U1[i][N+1] = 2;
     }
@@ -63,16 +97,18 @@ int main(void) {
         u1[i][N+1] = 2;
     }
 
-    const double w_opt = 2 / (1 + sin(PI / (N+1)));
-
     for (int tstep = 1; tstep <= numtstep; tstep++) {
         // calculate N
         for (int i = 1; i <= N; i++) {
             for (int j = 1; j <= N; j++) {
-                N1[i][j] = (U1[i][j] * (u1[i+1][j]+u1[i][j])/2 - U1[i-1][j] * (u1[i][j]+u1[i-1][j])/2) / h
-                    + (U2[i][j] * (u1[i][j+1]+u1[i][j])/2 - U2[i][j-1] * (u1[i][j]+u1[i][j-1])/2) / h;
-                N2[i][j] = (U1[i][j] * (u2[i+1][j]+u2[i][j])/2 - U1[i-1][j] * (u2[i][j]+u2[i-1][j])/2) / h
-                    + (U2[i][j] * (u2[i][j+1]+u2[i][j])/2 - U2[i][j-1] * (u2[i][j]+u2[i][j-1])/2) / h;
+                N1[i][j] = (U1[i][j] * (u1[i+1][j]*dx[i]+u1[i][j]*dx[i+1])/(dx[i]+dx[i+1])
+                            - U1[i-1][j] * (u1[i][j]*dx[i-1]+u1[i-1][j]*dx[i])/(dx[i-1]+dx[i])) / dx[i]
+                    + (U2[i][j] * (u1[i][j+1]*dy[j]+u1[i][j]*dy[j+1])/(dy[j]+dy[j+1])
+                       - U2[i][j-1] * (u1[i][j]*dy[j-1]+u1[i][j-1]*dy[j])/(dy[j-1]+dy[j])) / dy[j];
+                N2[i][j] = (U1[i][j] * (u2[i+1][j]*dx[i]+u2[i][j]*dx[i+1])/(dx[i]+dx[i+1])
+                            - U1[i-1][j] * (u2[i][j]*dx[i-1]+u2[i-1][j]*dx[i])/(dx[i-1]+dx[i])) / dx[i]
+                    + (U2[i][j] * (u2[i][j+1]*dy[j]+u2[i][j]*dy[j+1])/(dy[j]+dy[j+1])
+                       - U2[i][j-1] * (u2[i][j]*dy[j-1]+u2[i][j-1]*dy[j])/(dy[j-1]+dy[j])) / dy[j];
             }
         }
 
@@ -80,22 +116,27 @@ int main(void) {
         for (int i = 1; i <= N; i++) {
             for (int j = 1; j <= N; j++) {
                 RHS1[i][j] = -dt/2 * (3*N1[i][j] - N1_prev[i][j])
-                    - dt * (p[i+1][j]-p[i-1][j]) / (2*h)
-                    + dt/Re * (u1[i+1][j]+u1[i-1][j]+u1[i][j+1]+u1[i][j-1]-4*u1[i][j]) / (h*h);
+                    - dt * (p[i+1][j]-p[i-1][j]) / (2*dx_bar[i])
+                    + dt/Re * ((u1[i-1][j]-2*u1[i][j]+u1[i+1][j]) / sq(dx_bar[i])
+                               + (u1[i][j-1]-2*u1[i][j]+u1[i][j+1]) / sq(dy_bar[j]));
                 RHS2[i][j] = -dt/2 * (3*N2[i][j] - N2_prev[i][j])
-                    - dt * (p[i][j+1]-p[i][j-1]) / (2*h)
-                    + dt/Re * (u2[i+1][j]+u2[i-1][j]+u2[i][j+1]+u2[i][j-1]-4*u2[i][j]) / (h*h);
+                    - dt * (p[i][j+1]-p[i][j-1]) / (2*dy_bar[j])
+                    + dt/Re * ((u2[i-1][j]-2*u2[i][j]+u2[i+1][j]) / sq(dx_bar[i])
+                                 + (u2[i][j-1]-2*u2[i][j]+u2[i][j+1]) / sq(dy_bar[j]));
             }
         }
 
         // calcuate C
         for (int j = 1; j <= N; j++) {
             fill(a+2, a+N+1, 1);
-            b[1] = b[N] = -(2*k+1);
-            fill(b+2, b+N, -2*k);
+            b[1] = -(2*kx[1]+1);
+            for (int i = 2; i <= N-1; i++) {
+                b[i] = -2*kx[i];
+            }
+            b[N] = -(2*kx[N]+1);
             fill(c+1, c+N, 1);
             for (int i = 1; i <= N; i++) {
-                d[i] = -2*(k-1) * RHS1[i][j];
+                d[i] = -2*(kx[i]-1) * RHS1[i][j];
             }
             tdma(N);
 
@@ -105,11 +146,14 @@ int main(void) {
         }
         for (int j = 1; j <= N; j++) {
             fill(a+2, a+N+1, 1);
-            b[1] = b[N] = -(2*k+1);
-            fill(b+2, b+N, -2*k);
+            b[1] = -(2*kx[1]+1);
+            for (int i = 2; i <= N-1; i++) {
+                b[i] = -2*kx[i];
+            }
+            b[N] = -(2*kx[N]+1);
             fill(c+1, c+N, 1);
             for (int i = 1; i <= N; i++) {
-                d[i] = -2*(k-1) * RHS2[i][j];
+                d[i] = -2*(kx[i]-1) * RHS2[i][j];
             }
             tdma(N);
 
@@ -121,11 +165,14 @@ int main(void) {
         // calculate u_star
         for (int i = 1; i <= N; i++) {
             fill(a+2, a+N+1, 1);
-            b[1] = b[N] = -(2*k+1);
-            fill(b+2, b+N, -2*k);
+            b[1] = -(2*ky[1]+1);
+            for (int j = 2; j <= N-1; j++) {
+                b[j] = -2*ky[j];
+            }
+            b[N] = -(2*ky[N]+1);
             fill(c+1, c+N, 1);
             for (int j = 1; j <= N; j++) {
-                d[j] = -2*(k-1) * C1[i][j];
+                d[j] = -2*(ky[j]-1) * C1[i][j];
             }
             tdma(N);
 
@@ -135,11 +182,14 @@ int main(void) {
         }
         for (int i = 1; i <= N; i++) {
             fill(a+2, a+N+1, 1);
-            b[1] = b[N] = -(2*k+1);
-            fill(b+2, b+N, -2*k);
+            b[1] = -(2*ky[1]+1);
+            for (int j = 2; j <= N-1; j++) {
+                b[j] = -2*ky[j];
+            }
+            b[N] = -(2*ky[N]+1);
             fill(c+1, c+N, 1);
             for (int j = 1; j <= N; j++) {
-                d[j] = -2*(k-1) * C2[i][j];
+                d[j] = -2*(ky[j]-1) * C2[i][j];
             }
             tdma(N);
 
@@ -151,29 +201,30 @@ int main(void) {
         // calculate u_tilde
         for (int i = 1; i <= N; i++) {
             for (int j = 1; j <= N; j++) {
-                u1_tilde[i][j] = u1_star[i][j] + dt * (p[i+1][j]-p[i-1][j]) / (2*h);
-                u2_tilde[i][j] = u2_star[i][j] + dt * (p[i][j+1]-p[i][j-1]) / (2*h);
+                u1_tilde[i][j] = u1_star[i][j] + dt * (p[i+1][j]-p[i-1][j]) / (2*dx_bar[i]);
+                u2_tilde[i][j] = u2_star[i][j] + dt * (p[i][j+1]-p[i][j-1]) / (2*dy_bar[j]);
             }
         }
 
         // calculate U_star
         for (int i = 1; i <= N-1; i++) {
             for (int j = 1; j <= N; j++) {
-                U1_star[i][j] = (u1_tilde[i][j]+u1_tilde[i+1][j]) / 2
-                    - dt * (p[i+1][j]-p[i][j]) / h;
+                U1_star[i][j] = (dx[i+1]*u1_tilde[i][j]+dx[i]*u1_tilde[i+1][j]) / (dx[i]+dx[i+1]);
+                    - dt * (p[i+1][j]-p[i][j]) / (xc[i+1]-xc[i]);
             }
         }
         for (int i = 1; i <= N; i++) {
             for (int j = 1; j <= N-1; j++) {
-                U2_star[i][j] = (u2_tilde[i][j]+u2_tilde[i][j+1]) / 2
-                    - dt * (p[i][j+1]-p[i][j]) / h;
+                U2_star[i][j] = (dy[j+1]*u2_tilde[i][j]+dy[j]*u2_tilde[i][j+1]) / (dy[j]+dy[j+1]);
+                    - dt * (p[i][j+1]-p[i][j]) / (yc[j+1]-yc[j]);
             }
         }
 
         // calculate Q
         for (int i = 1; i <= N; i++) {
             for (int j = 1; j <= N; j++) {
-                Q[i][j] = (U1_star[i][j]-U1_star[i-1][j] + U2_star[i][j]-U2_star[i][j-1]) / (dt*h);
+                Q[i][j] = (U1_star[i][j]-U1_star[i-1][j]) / (dt*dx[i])
+                    + (U2_star[i][j]-U2_star[i][j-1]) / (dt*dy[j]);
             }
         }
 
@@ -195,10 +246,10 @@ int main(void) {
                     if (i == 1 && j == 1) {
                         continue;
                     }
-                    double corr = .25 * (p_prime[i+1][j]+p_prime[i][j+1]+p_prime[i-1][j]+p_prime[i][j-1] - h*h*Q[i][j]) - p_prime[i][j];
-                    double tmp = p_prime[i][j] + w_opt * corr;
-                    res += fabs(p_prime[i][j] - tmp);
-                    p_prime[i][j] = tmp;
+                    p_prime[i][j]
+                        = ((p_prime[i-1][j]+p_prime[i+1][j])/sq(dx_bar[i])
+                           + (p_prime[i][j-1]+p_prime[i][j+1])/sq(dy_bar[j]) - Q[i][j])
+                        / (2/sq(dx_bar[i]) + 2/sq(dy_bar[j]));
                 }
             }
             if (res / N / N <= 1e-7) {
@@ -220,20 +271,20 @@ int main(void) {
         // calculate u_next
         for (int i = 1; i <= N; i++) {
             for (int j = 1; j <= N; j++) {
-                u1_next[i][j] = u1_star[i][j] - dt * (p_prime[i+1][j]-p_prime[i-1][j]) / (2*h);
-                u2_next[i][j] = u2_star[i][j] - dt * (p_prime[i][j+1]-p_prime[i][j-1]) / (2*h);
+                u1_next[i][j] = u1_star[i][j] - dt * (p_prime[i+1][j]-p_prime[i-1][j]) / (2*dx_bar[i]);
+                u2_next[i][j] = u2_star[i][j] - dt * (p_prime[i][j+1]-p_prime[i][j-1]) / (2*dy_bar[j]);
             }
         }
 
         // calculate U_next
         for (int i = 1; i <= N-1; i++) {
             for (int j = 1; j <= N; j++) {
-                U1_next[i][j] = U1_star[i][j] - dt * (p_prime[i+1][j]-p_prime[i][j]) / h;
+                U1_next[i][j] = U1_star[i][j] - dt * (p_prime[i+1][j]-p_prime[i][j]) / (xc[i+1]-xc[i]);
             }
         }
         for (int i = 1; i <= N; i++) {
             for (int j = 1; j <= N-1; j++) {
-                U2_next[i][j] = U2_star[i][j] - dt * (p_prime[i][j+1]-p_prime[i][j]) / h;
+                U2_next[i][j] = U2_star[i][j] - dt * (p_prime[i][j+1]-p_prime[i][j]) / (yc[j+1]-yc[j]);
             }
         }
 
@@ -276,7 +327,7 @@ int main(void) {
     // calculate streamfunction
     for (int i = 1; i <= N-1; i++) {
         for (int j = 1; j <= N-1; j++) {
-            psi[i][j] = psi[i][j-1] + h * U1[i][j];
+            psi[i][j] = psi[i][j-1] + dy[j] * U1[i][j];
         }
     }
 
