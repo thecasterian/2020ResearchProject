@@ -6,10 +6,8 @@
 #define Re 400
 #define dt 0.005
 
-#define N 128
+#define N 64
 #define numtstep 2500
-
-const double PI =  3.1415926535897932384626;
 
 typedef double mat[N+2][N+2];
 typedef double mat1[N+1][N+2];
@@ -60,8 +58,6 @@ int main(void) {
         u1[i][N+1] = 2;
     }
 
-    const double w_opt = 2 / (1 + sin(PI / (N+1)));
-
     for (int tstep = 1; tstep <= numtstep; tstep++) {
         // calculate N
         for (int i = 1; i <= N; i++) {
@@ -83,6 +79,22 @@ int main(void) {
                     - dt * (p[i][j+1]-p[i][j-1]) / (2*h)
                     + dt/Re * (u2[i+1][j]+u2[i-1][j]+u2[i][j+1]+u2[i][j-1]-4*u2[i][j]) / (h*h);
             }
+        }
+
+        printf("%lf\n", dt/Re / (h*h));
+
+        for (int i = 1; i <= N; i++) {
+            for (int j = 1; j <= N; j++) {
+                printf("%lf ", RHS1[i][j]);
+            }
+            printf("\n");
+        }
+        printf("\n");
+        for (int i = 1; i <= N; i++) {
+            for (int j = 1; j <= N; j++) {
+                printf("%lf ", RHS2[i][j]);
+            }
+            printf("\n");
         }
 
         // calcuate C
@@ -175,6 +187,7 @@ int main(void) {
         }
 
         // solve for p_prime
+        memset(p_prime, 0, sizeof(p_prime));
         double res;
         for (int k = 1; k <= 1000000; k++) {
             res = 0;
@@ -192,8 +205,7 @@ int main(void) {
                     if (i == 1 && j == 1) {
                         continue;
                     }
-                    double corr = .25 * (p_prime[i+1][j]+p_prime[i][j+1]+p_prime[i-1][j]+p_prime[i][j-1] - h*h*Q[i][j]) - p_prime[i][j];
-                    double tmp = p_prime[i][j] + w_opt * corr;
+                    double tmp = .25 * (p_prime[i+1][j]+p_prime[i][j+1]+p_prime[i-1][j]+p_prime[i][j-1] - h*h*Q[i][j]) - p_prime[i][j];
                     res += fabs(p_prime[i][j] - tmp);
                     p_prime[i][j] = tmp;
                 }

@@ -10,3 +10,8 @@
 
 # ignore txt file
 *.txt
+
+# ignore latex files
+*.aux
+*.log
+*.synctex.gz

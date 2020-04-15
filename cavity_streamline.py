@@ -1,11 +1,15 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
+def tanh_stretch(xi, beta):
+    return .5 - .5*np.tanh(beta * (1 - 2*xi)) / np.tanh(beta)
+
 psi = np.loadtxt("./cavity_result.txt")
 n = psi.shape[0] - 1
+m = psi.shape[1] - 1
 
-x = np.linspace(0, 1, n+1)
-y = np.linspace(0, 1, n+1)
+x = tanh_stretch(np.linspace(0, 1, n+1), 2)
+y = tanh_stretch(np.linspace(0, 1, m+1), 2)
 Y, X = np.meshgrid(x, y)
 
 plt.figure(figsize=(8, 8))
