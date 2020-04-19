@@ -3,49 +3,58 @@
 #include <string.h>
 #include <math.h>
 
-#define Nx 32
-#define Ny 32
-
-#define Re 400.
-#define dt 0.005
-#define numtstep 2500
-
-#define betax 2
-#define betay 2
-
-#define Nm ((Nx > Ny) ? (Nx) : (Ny))
+// input variables
+int Nx, Ny;
+double *xf, *yf;                                // Nx+1, Ny+1
+double Re;
+double dt;
+int numtstep;
 
 // grid geometry
-double xc[Nx+2], yc[Ny+2];
-double dx[Nx+2], dy[Ny+2];
+double *xc, *dx;                                // Nx+2
+double *yc, *dy;                                // Ny+2
 
-// (Nx+2) x (Ny+2)
-typedef double mat[(Nx+2)*(Ny+2)];
-// (Nx+1) x (Ny+2)
-typedef double mat1[(Nx+1)*(Ny+2)];
-// (Nx+2) x (Ny+1)
-typedef double mat2[(Nx+2)*(Ny+1)];
+// pressure and velocity
+double *p, *p_next, *p_prime;                   // (Nx+2) x (Ny+2)
+double *u1, *u1_next, *u1_star, *u1_tilde;      // (Nx+2) x (Ny+2)
+double *u2, *u2_next, *u2_star, *u2_tilde;      // (Nx+2) x (Ny+2)
+double *U1, *U1_next, *U1_star;                 // (Nx+1) x (Ny+2)
+double *U2, *U2_next, *U2_star;                 // (Nx+2) x (Ny+1)
 
-mat p, p_next, p_prime;
-mat u1, u1_next, u1_star, u1_tilde;
-mat u2, u2_next, u2_star, u2_tilde;
-mat1 U1, U1_next, U1_star;
-mat2 U2, U2_next, U2_star;
-
-mat1 N1, N1_prev;
-mat2 N2, N2_prev;
-mat Q;
-
-double psi[Nx+1][Ny+1];
+// auxiliary
+double *N1, *N1_prev;                           // (Nx+2) x (Ny+2)
+double *N2, *N2_prev;                           // (Nx+2) x (Ny+2)
+double *Q;                                      // (Nx+2) x (Ny+2)
+double *psi;                                    // (Nx+1) x (Ny+1)
 
 // for tdma
-mat C1, C2, RHS1, RHS2;
-double kx_W[Nx+2], kx_P[Nx+2], kx_E[Nx+2];
-double ky_S[Ny+2], ky_P[Ny+2], ky_N[Ny+2];
-double a[Nm+2], b[Nm+2], c[Nm+2], d[Nm+2], e[Nm+2], x[Nm+2], y[Nm+2];
+double *C1, *C2, *RHS1, *RHS2;                  // (Nx+2) x (Ny+2)
+double *kx_W, *kx_P, *kx_E;                     // Nx+2
+double *ky_S, *ky_P, *ky_N;                     // Ny+2
+double *a, *b, *c, *d, *e, *x, *y;              // max(Nx, Ny)+2
 
-double tanh_stretch(double xi, double beta) {
-    return 0.5 - 0.5 * tanh(beta * (1 - 2*xi)) / tanh(beta);
+// set of arrays
+double **arr0[] = {                             // arrays with size of (Nx+2) x (Ny+2)
+    &p, &p_next, &p_prime,
+    &u1, &u1_next, &u1_star, &u1_tilde,
+    &u2, &u2_next, &u2_star, &u2_tilde,
+    &N1, &N1_prev,
+    &N2, &N2_prev,
+    &Q,
+    &C1, &C2, &RHS1, &RHS2
+};
+double **arr1[] = {                             // arrays with size of (Nx+1) x (Ny+2)
+    &U1, &U1_next, &U1_star
+};
+double **arr2[] = {                             // arrays with size of (Nx+2) x (Ny+1)
+    &U2, &U2_next, &U2_star
+};
+double **arr_tdma[] = {                         // arrays with size of max(Nx, Ny)+2
+    &a, &b, &c, &d, &e, &x, &y
+};
+
+double *falloc(size_t size) {
+    return (double *)calloc(sizeof(double), size);
 }
 
 double tdma(int n) {
@@ -63,28 +72,86 @@ double tdma(int n) {
     }
 }
 
-int main(void) {
-    // generate grid
+void calc_N(void) {
     for (int i = 1; i <= Nx; i++) {
-        double left = tanh_stretch(1.* (i-1) / Nx, betax);
-        double right = tanh_stretch(1. * i / Nx, betax);
+        for (int j = 1; j <= Ny; j++) {
+            double u1_e = (u1[i*(Ny+2)+j] * dx[i+1] + u1[(i+1)*(Ny+2)+j] * dx[i]) / (dx[i] + dx[i+1]);
+            double u2_e = (u2[i*(Ny+2)+j] * dx[i+1] + u2[(i+1)*(Ny+2)+j] * dx[i]) / (dx[i] + dx[i+1]);
+            double u1_w = (u1[(i-1)*(Ny+2)+j] * dx[i] + u1[i*(Ny+2)+j] * dx[i-1]) / (dx[i-1] + dx[i]);
+            double u2_w = (u2[(i-1)*(Ny+2)+j] * dx[i] + u2[i*(Ny+2)+j] * dx[i-1]) / (dx[i-1] + dx[i]);
+            double u1_n = (u1[i*(Ny+2)+j] * dy[j+1] + u1[i*(Ny+2)+j+1] * dy[j]) / (dy[j] + dy[j+1]);
+            double u2_n = (u2[i*(Ny+2)+j] * dy[j+1] + u2[i*(Ny+2)+j+1] * dy[j]) / (dy[j] + dy[j+1]);
+            double u1_s = (u1[i*(Ny+2)+j-1] * dy[j] + u1[i*(Ny+2)+j] * dy[j-1]) / (dy[j-1] + dy[j]);
+            double u2_s = (u2[i*(Ny+2)+j-1] * dy[j] + u2[i*(Ny+2)+j] * dy[j-1]) / (dy[j-1] + dy[j]);
 
-        dx[i] = right - left;
-        xc[i] = (right + left) / 2;
+            N1[i*(Ny+2)+j] = (U1[i*(Ny+2)+j]*u1_e - U1[(i-1)*(Ny+2)+j]*u1_w) / dx[i] + (U2[i*(Ny+1)+j]*u1_n - U2[i*(Ny+1)+j-1]*u1_s) / dy[j];
+            N2[i*(Ny+2)+j] = (U1[i*(Ny+2)+j]*u2_e - U1[(i-1)*(Ny+2)+j]*u2_w) / dx[i] + (U2[i*(Ny+1)+j]*u2_n - U2[i*(Ny+1)+j-1]*u2_s) / dy[j];
+        }
+    }
+}
+
+int main(void) {
+    FILE *fp_in = fopen("cavity.in", "r");
+
+    // read inputs
+    fscanf(fp_in, "%*s %d", &Nx);
+    xf = malloc(sizeof(double) * (Nx+1));
+    for (int i = 0; i <= Nx; i++) {
+        fscanf(fp_in, "%lf", &xf[i]);
+    }
+    fscanf(fp_in, "%*s %d", &Ny);
+    yf = malloc(sizeof(double) * (Ny+1));
+    for (int j = 0; j <= Ny; j++) {
+        fscanf(fp_in, "%lf", &yf[j]);
+    }
+
+    fscanf(fp_in, "%*s %lf", &Re);
+    fscanf(fp_in, "%*s %lf %*s %d", &dt, &numtstep);
+
+    fclose(fp_in);
+
+    // allocate arrays
+    xc = falloc(Nx+2);
+    dx = falloc(Nx+2);
+    yc = falloc(Ny+2);
+    dy = falloc(Ny+2);
+    for (int k = 0; k < sizeof(arr0)/sizeof(double **); k++) {
+        *(arr0[k]) = falloc((Nx+2) * (Ny+2));
+    }
+    for (int k = 0; k < sizeof(arr1)/sizeof(double **); k++) {
+        *(arr1[k]) = falloc((Nx+1) * (Ny+2));
+    }
+    for (int k = 0; k < sizeof(arr2)/sizeof(double **); k++) {
+        *(arr2[k]) = falloc((Nx+2) * (Ny+1));
+    }
+    psi = falloc((Nx+1) * (Ny+1));
+    kx_W = falloc(Nx+2);
+    kx_P = falloc(Nx+2);
+    kx_E = falloc(Nx+2);
+    ky_S = falloc(Ny+2);
+    ky_P = falloc(Ny+2);
+    ky_N = falloc(Ny+2);
+    for (int k = 0; k < sizeof(arr_tdma)/sizeof(double **); k++) {
+        *(arr_tdma[k]) = falloc((Nx > Ny ? Nx : Ny) + 2);
+    }
+
+    // calculate grid variables
+    for (int i = 1; i <= Nx; i++) {
+        dx[i] = xf[i] - xf[i-1];
+        xc[i] = (xf[i] + xf[i-1]) / 2;
     }
     for (int j = 1; j <= Ny; j++) {
-        double left = tanh_stretch(1. * (j-1) / Ny, betay);
-        double right = tanh_stretch(1. * j / Ny, betay);
-
-        dy[j] = right - left;
-        yc[j] = (right + left) / 2;
+        dy[j] = yf[j] - yf[j-1];
+        yc[j] = (yf[j] + yf[j-1]) / 2;
     }
-
-    // grid boundaries
-    dx[0] = dx[1]; dx[Nx+1] = dx[Nx];
-    xc[0] = -xc[1]; xc[Nx+1] = 2 - xc[Nx];
-    dy[0] = dy[1]; dy[Ny+1] = dy[Ny];
-    yc[0] = -yc[1]; yc[Ny+1] = 2 - yc[Ny];
+    dx[0] = dx[1];
+    dx[Nx+1] = dx[Nx];
+    dy[0] = dy[1];
+    dy[Ny+1] = dy[Ny];
+    xc[0] = 2*xf[0] - xc[1];
+    xc[Nx+1] = 2*xf[Nx] - xc[Nx];
+    yc[0] = 2*yf[0] - yc[1];
+    yc[Ny+1] = 2*yf[Ny] - yc[Ny];
 
     // tdma coefficients
     for (int i = 1; i <= Nx; i++) {
@@ -105,24 +172,13 @@ int main(void) {
     for (int i = 1; i <= Nx; i++) {
         u1[i*(Ny+2)+Ny+1] = 2;
     }
+    calc_N();
+    memcpy(N1_prev, N1, sizeof(double)*(Nx+2)*(Ny+2));
+    memcpy(N2_prev, N2, sizeof(double)*(Nx+2)*(Ny+2));
 
     for (int tstep = 1; tstep <= numtstep; tstep++) {
         // calculate N
-        for (int i = 1; i <= Nx; i++) {
-            for (int j = 1; j <= Ny; j++) {
-                double u1_e = (u1[i*(Ny+2)+j] * dx[i+1] + u1[(i+1)*(Ny+2)+j] * dx[i]) / (dx[i] + dx[i+1]);
-                double u2_e = (u2[i*(Ny+2)+j] * dx[i+1] + u2[(i+1)*(Ny+2)+j] * dx[i]) / (dx[i] + dx[i+1]);
-                double u1_w = (u1[(i-1)*(Ny+2)+j] * dx[i] + u1[i*(Ny+2)+j] * dx[i-1]) / (dx[i-1] + dx[i]);
-                double u2_w = (u2[(i-1)*(Ny+2)+j] * dx[i] + u2[i*(Ny+2)+j] * dx[i-1]) / (dx[i-1] + dx[i]);
-                double u1_n = (u1[i*(Ny+2)+j] * dy[j+1] + u1[i*(Ny+2)+j+1] * dy[j]) / (dy[j] + dy[j+1]);
-                double u2_n = (u2[i*(Ny+2)+j] * dy[j+1] + u2[i*(Ny+2)+j+1] * dy[j]) / (dy[j] + dy[j+1]);
-                double u1_s = (u1[i*(Ny+2)+j-1] * dy[j] + u1[i*(Ny+2)+j] * dy[j-1]) / (dy[j-1] + dy[j]);
-                double u2_s = (u2[i*(Ny+2)+j-1] * dy[j] + u2[i*(Ny+2)+j] * dy[j-1]) / (dy[j-1] + dy[j]);
-
-                N1[i*(Ny+2)+j] = (U1[i*(Ny+2)+j]*u1_e - U1[(i-1)*(Ny+2)+j]*u1_w) / dx[i] + (U2[i*(Ny+1)+j]*u1_n - U2[i*(Ny+1)+j-1]*u1_s) / dy[j];
-                N2[i*(Ny+1)+j] = (U1[i*(Ny+2)+j]*u2_e - U1[(i-1)*(Ny+2)+j]*u2_w) / dx[i] + (U2[i*(Ny+1)+j]*u2_n - U2[i*(Ny+1)+j-1]*u2_s) / dy[j];
-            }
-        }
+        calc_N();
 
         // calculate RHS
         for (int i = 1; i <= Nx; i++) {
@@ -132,7 +188,7 @@ int main(void) {
                     + 2 * (kx_W[i]*u1[(i-1)*(Ny+2)+j] + kx_E[i]*u1[(i+1)*(Ny+2)+j]
                            + ky_S[j]*u1[i*(Ny+2)+j-1] + ky_N[j]*u1[i*(Ny+2)+j+1]
                            - (kx_W[i]+kx_E[i]+ky_S[j]+ky_N[j])*u1[i*(Ny+2)+j]);
-                RHS2[i*(Ny+2)+j] = -dt/2 * (3*N2[i*(Ny+1)+j] - N2_prev[i*(Ny+1)+j])
+                RHS2[i*(Ny+2)+j] = -dt/2 * (3*N2[i*(Ny+2)+j] - N2_prev[i*(Ny+2)+j])
                     - dt * (p[i*(Ny+2)+j+1] - p[i*(Ny+2)+j-1]) / (yc[j+1] - yc[j-1])
                     + 2 * (kx_W[i]*u2[(i-1)*(Ny+2)+j] + kx_E[i]*u2[(i+1)*(Ny+2)+j]
                            + ky_S[j]*u2[i*(Ny+2)+j-1] + ky_N[j]*u2[i*(Ny+2)+j+1]
@@ -309,11 +365,11 @@ int main(void) {
         memcpy(u2, u2_next, sizeof(double)*(Nx+2)*(Ny+2));
         memcpy(U1, U1_next, sizeof(double)*(Nx+1)*(Ny+2));
         memcpy(U2, U2_next, sizeof(double)*(Nx+2)*(Ny+1));
-        memcpy(N1_prev, N1, sizeof(double)*(Nx+1)*(Ny+2));
-        memcpy(N2_prev, N2, sizeof(double)*(Nx+2)*(Ny+1));
+        memcpy(N1_prev, N1, sizeof(double)*(Nx+2)*(Ny+2));
+        memcpy(N2_prev, N2, sizeof(double)*(Nx+2)*(Ny+2));
         memset(p_prime, 0, sizeof(double)*(Nx+2)*(Ny+2));
 
-        if (tstep % 50 == 0) {
+        if (tstep % 5 == 0) {
             printf("tstep: %d\n", tstep);
         }
     }
@@ -321,16 +377,16 @@ int main(void) {
     // calculate streamfunction
     for (int i = 1; i <= Nx-1; i++) {
         for (int j = 1; j <= Ny-1; j++) {
-            psi[i][j] = psi[i][j-1] + dy[j] * U1[i*(Ny+2)+j];
+            psi[i*(Ny+1)+j] = psi[i*(Ny+1)+j-1] + dy[j] * U1[i*(Ny+2)+j];
         }
     }
 
-    FILE *fp = fopen("cavity_result.txt", "w");
+    FILE *fp_out = fopen("cavity_result.txt", "w");
     for (int i = 0; i <= Nx; i++) {
         for (int j = 0; j <= Ny; j++) {
-            fprintf(fp, "%.14lf ", psi[i][j]);
+            fprintf(fp_out, "%.14lf ", psi[i*(Ny+1)+j]);
         }
-        fprintf(fp, "\n");
+        fprintf(fp_out, "\n");
     }
-    fclose(fp);
+    fclose(fp_out);
 }

@@ -6,8 +6,8 @@
 #define Re 400
 #define dt 0.005
 
-#define N 64
-#define numtstep 2500
+#define N 8
+#define numtstep 1
 
 typedef double mat[N+2][N+2];
 typedef double mat1[N+1][N+2];
@@ -19,8 +19,8 @@ mat u2, u2_next, u2_star, u2_tilde;
 mat1 U1, U1_next, U1_star;
 mat2 U2, U2_next, U2_star;
 
-mat1 N1, N1_prev;
-mat2 N2, N2_prev;
+mat N1, N1_prev;
+mat N2, N2_prev;
 mat Q;
 
 double psi[N+1][N+1];
