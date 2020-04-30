@@ -2,6 +2,17 @@
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
+#include <assert.h>
+
+#define RESET_ATTR      "\x1B[0m"
+#define BOLD_TEXT       "\x1B[1m"
+#define RED_TEXT        "\x1B[31m"
+#define GREEN_TEXT      "\x1B[32m"
+#define YELLOW_TEXT     "\x1B[33m"
+#define BLUE_TEXT       "\x1B[34m"
+#define MAGENTA_TEXT    "\x1B[35m"
+#define CYAN_TEXT       "\x1B[36m"
+#define WHITE_TEXT      "\x1B[37m"
 
 // input variables
 int Nx, Ny;
@@ -54,7 +65,9 @@ double **arr_tdma[] = {                         // arrays with size of max(Nx, N
 };
 
 double *falloc(size_t size) {
-    return (double *)calloc(sizeof(double), size);
+    double *res = (double *)calloc(sizeof(double), size);
+    assert(res != NULL);
+    return res;
 }
 
 double tdma(int n) {
@@ -84,8 +97,10 @@ void calc_N(void) {
             double u1_s = (u1[i*(Ny+2)+j-1] * dy[j] + u1[i*(Ny+2)+j] * dy[j-1]) / (dy[j-1] + dy[j]);
             double u2_s = (u2[i*(Ny+2)+j-1] * dy[j] + u2[i*(Ny+2)+j] * dy[j-1]) / (dy[j-1] + dy[j]);
 
-            N1[i*(Ny+2)+j] = (U1[i*(Ny+2)+j]*u1_e - U1[(i-1)*(Ny+2)+j]*u1_w) / dx[i] + (U2[i*(Ny+1)+j]*u1_n - U2[i*(Ny+1)+j-1]*u1_s) / dy[j];
-            N2[i*(Ny+2)+j] = (U1[i*(Ny+2)+j]*u2_e - U1[(i-1)*(Ny+2)+j]*u2_w) / dx[i] + (U2[i*(Ny+1)+j]*u2_n - U2[i*(Ny+1)+j-1]*u2_s) / dy[j];
+            N1[i*(Ny+2)+j] = (U1[i*(Ny+2)+j]*u1_e - U1[(i-1)*(Ny+2)+j]*u1_w) / dx[i]
+                + (U2[i*(Ny+1)+j]*u1_n - U2[i*(Ny+1)+j-1]*u1_s) / dy[j];
+            N2[i*(Ny+2)+j] = (U1[i*(Ny+2)+j]*u2_e - U1[(i-1)*(Ny+2)+j]*u2_w) / dx[i]
+                + (U2[i*(Ny+1)+j]*u2_n - U2[i*(Ny+1)+j-1]*u2_s) / dy[j];
         }
     }
 }
@@ -94,19 +109,19 @@ int main(void) {
     FILE *fp_in = fopen("cavity.in", "r");
 
     // read inputs
-    fscanf(fp_in, "%*s %d", &Nx);
+    assert(fscanf(fp_in, "%*s %d", &Nx) == 1);
     xf = malloc(sizeof(double) * (Nx+1));
     for (int i = 0; i <= Nx; i++) {
-        fscanf(fp_in, "%lf", &xf[i]);
+        assert(fscanf(fp_in, "%lf", &xf[i]) == 1);
     }
-    fscanf(fp_in, "%*s %d", &Ny);
+    assert(fscanf(fp_in, "%*s %d", &Ny) == 1);
     yf = malloc(sizeof(double) * (Ny+1));
     for (int j = 0; j <= Ny; j++) {
-        fscanf(fp_in, "%lf", &yf[j]);
+        assert(fscanf(fp_in, "%lf", &yf[j]) == 1);
     }
 
-    fscanf(fp_in, "%*s %lf", &Re);
-    fscanf(fp_in, "%*s %lf %*s %d", &dt, &numtstep);
+    assert(fscanf(fp_in, "%*s %lf", &Re) == 1);
+    assert(fscanf(fp_in, "%*s %lf %*s %d", &dt, &numtstep) == 2);
 
     fclose(fp_in);
 
@@ -294,10 +309,17 @@ int main(void) {
                     if (i == 1 && j == 1) {
                         continue;
                     }
+
                     double tmp = 1. / (kx_W[i] + kx_E[i] + ky_S[j] + ky_N[j]) * (
                         kx_W[i] * p_prime[(i-1)*(Ny+2)+j] + kx_E[i] * p_prime[(i+1)*(Ny+2)+j]
                         + ky_S[j] * p_prime[i*(Ny+2)+j-1] + ky_N[j] * p_prime[i*(Ny+2)+j+1] - Q[i*(Ny+2)+j]
                     );
+
+                    if (isnan(tmp) || isinf(tmp)) {
+                        fprintf(stderr, BOLD_TEXT RED_TEXT "ERROR: floating point error!\n");
+                        exit(0);
+                    }
+
                     res += fabs(tmp - p_prime[i*(Ny+2)+j]);
                     p_prime[i*(Ny+2)+j] = tmp;
                 }
@@ -307,7 +329,7 @@ int main(void) {
             }
         }
         if (res / (Nx * Ny) > 1e-9) {
-            printf("not converged!\n");
+            printf(RED_TEXT "not converged!\n");
         }
 
         // calculate p_next
