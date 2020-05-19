@@ -15,3 +15,7 @@
 *.aux
 *.log
 *.synctex.gz
+
+# glvis
+!glvis
+vis
