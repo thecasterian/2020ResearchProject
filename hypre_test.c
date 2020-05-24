@@ -8,6 +8,8 @@
 
 const double h = 1. / 32;
 
+void print_vector(HYPRE_StructVector v, int myid);
+
 int main(int argc, char *argv[])
 {
    int myid, num_procs;
@@ -104,7 +106,7 @@ int main(int argc, char *argv[])
          double values[64];
          for (int i = 0; i < 64; i += 2)
          {
-            values[i] = 5.;
+            values[i] = 3.;
             values[i+1] = 0.;
          }
          {
@@ -125,18 +127,21 @@ int main(int argc, char *argv[])
             int stencil_indices[2] = {0, 4};
             HYPRE_StructMatrixSetBoxValues(A, ilower, iupper, 2, stencil_indices, values);
          }
-         values[0] = 6.;
+         values[0] = 2.;
          {
             /* upper left corner */
             int i[2] = {1, 32};
             int stencil_indices[1] = {0};
             HYPRE_StructMatrixSetBoxValues(A, i, i, 1, stencil_indices, values);
          }
+         values[0] = 1.;
+         for (int i = 1; i <= 4; i++)
+            values[i] = 0.;
          {
             /* lower left corner */
             int i[2] = {1, 1};
-            int stencil_indices[1] = {0};
-            HYPRE_StructMatrixSetBoxValues(A, i, i, 1, stencil_indices, values);
+            int stencil_indices[5] = {0, 1, 2, 3, 4};
+            HYPRE_StructMatrixSetBoxValues(A, i, i, 5, stencil_indices, values);
          }
       }
       else if (myid == 1)
@@ -144,7 +149,7 @@ int main(int argc, char *argv[])
          double values[64];
          for (int i = 0; i < 64; i += 2)
          {
-            values[i] = 5.;
+            values[i] = 3.;
             values[i+1] = 0.;
          }
          {
@@ -165,7 +170,7 @@ int main(int argc, char *argv[])
             int stencil_indices[2] = {0, 3};
             HYPRE_StructMatrixSetBoxValues(A, ilower, iupper, 2, stencil_indices, values);
          }
-         values[0] = 6.;
+         values[0] = 2.;
          {
             /* upper right corner */
             int i[2] = {32, 32};
@@ -197,7 +202,8 @@ int main(int argc, char *argv[])
          int ilower[2] = {1, 1}, iupper[2] = {16, 32};
          double values[512]; /* 512 grid points */
 
-         for (int i = 0; i < 512; i++)
+         values[0] = 0;
+         for (int i = 1; i < 512; i++)
             values[i] = h*h;
          HYPRE_StructVectorSetBoxValues(b, ilower, iupper, values);
 
@@ -231,17 +237,19 @@ int main(int argc, char *argv[])
 
       /* Set some parameters */
       HYPRE_StructPCGSetTol(solver, 1.e-6); /* convergence tolerance */
-      HYPRE_StructPCGSetPrintLevel(solver, 1); /* amount of info. printed */
+      HYPRE_StructPCGSetPrintLevel(solver, 2); /* amount of info. printed */
 
       /* Setup and solve */
       HYPRE_StructPCGSetup(solver, A, b, x);
       HYPRE_StructPCGSolve(solver, A, b, x);
    }
 
-   /* GLVis */
-   GLVis_PrintStructGrid(grid, "vis/test.mesh", myid, NULL, NULL);
-   GLVis_PrintStructVector(x, "vis/test.sol", myid);
-   GLVis_PrintData("vis/test.data", myid, num_procs);
+   /* Print result */
+   print_vector(x, myid);
+
+   GLVis_PrintStructGrid(grid, "vis/ex1.mesh", myid, NULL, NULL);
+   GLVis_PrintStructVector(x, "vis/ex1.sol", myid);
+   GLVis_PrintData("vis/ex1.data", myid, num_procs);
 
    /* Free memory */
    HYPRE_StructGridDestroy(grid);
@@ -258,4 +266,52 @@ int main(int argc, char *argv[])
    MPI_Finalize();
 
    return 0;
+}
+
+void print_vector(HYPRE_StructVector v, int myid) {
+   FILE *file;
+   char solfile[256];
+
+   hypre_StructGrid *grid = ((hypre_StructVector*)v)->grid;
+   assert(grid->ndim == 2);
+
+   hypre_BoxArray *boxes;
+   hypre_Box *box;
+
+   int ilower[2], iupper[2];
+
+   sprintf(solfile, "vis/hypre_test.%d.txt", myid);
+   file = fopen(solfile, "w");
+
+   /* extract and save the vector values on each cell */
+   boxes = hypre_StructGridBoxes(grid);
+   for (int b = 0; b < hypre_BoxArraySize(boxes); b++)
+   {
+      box = hypre_BoxArrayBox(boxes, b);
+      int ni = hypre_BoxSizeD(box, 0);
+      int nj = hypre_BoxSizeD(box, 1);
+      assert(hypre_BoxSizeD(box, 2) == 1);
+
+      ilower[0] = hypre_BoxIMinD(box, 0);
+      ilower[1] = hypre_BoxIMinD(box, 1);
+      iupper[0] = hypre_BoxIMaxD(box, 0);
+      iupper[1] = hypre_BoxIMaxD(box, 1);
+
+      fprintf(file, "%d %d\n", ni, nj);
+      fprintf(file, "[%d %d] [%d %d]\n\n", ilower[0], ilower[1], iupper[0], iupper[1]);
+
+      double *values = (double*)malloc(ni*nj*sizeof(double));
+
+      HYPRE_StructVectorGetBoxValues(v, ilower, iupper, values);
+
+      for (int j = 0; j < nj; j++) {
+         for (int i = 0; i < ni; i++)
+            fprintf(file, "%.14e ", values[i + j*ni]);
+         fprintf(file, "\n");
+      }
+
+      free(values);
+   }
+
+   fclose(file);
 }
