@@ -294,6 +294,14 @@ int main(void) {
             printf(RED_TEXT "not converged!\n");
         }
 
+        for (int i = 1; i <= Nx; i++) {
+            for (int j = 1; j <= Ny; j++) {
+                printf("%.8lf ", p_prime[i][j]);
+            }
+            printf("\n");
+        }
+        printf("\n");
+
         /* Calculate p_next */
         for (int i = 1; i <= Nx; i++) {
             for (int j = 1; j <= Ny; j++) {

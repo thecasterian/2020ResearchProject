@@ -104,7 +104,8 @@ int main(int argc, char **argv) {
     HYPRE_StructMatrix matrix;
     HYPRE_StructVector rhsvec;
     HYPRE_StructVector resvec;
-    HYPRE_StructSolver structsolver;
+    HYPRE_StructSolver solver;
+    HYPRE_StructSolver precond;
 
     /*===== Calculate grid variables =========================================*/
     for (int i = 1; i <= Nx; i++) {
@@ -296,13 +297,24 @@ int main(int argc, char **argv) {
     }
     /* Setup solver */
     {
-        /* Create an empty PCG Struct solver */
-        HYPRE_StructPCGCreate(MPI_COMM_WORLD, &structsolver);
+        HYPRE_StructPCGCreate(MPI_COMM_WORLD, &solver);
+        HYPRE_StructPCGSetMaxIter(solver, 50);
+        HYPRE_StructPCGSetTol(solver, 1.0e-06);
+        HYPRE_StructPCGSetTwoNorm(solver, 1);
+        HYPRE_StructPCGSetRelChange(solver, 0);
+        HYPRE_StructPCGSetPrintLevel(solver, 1); /* print each CG iteration */
+        HYPRE_StructPCGSetLogging(solver, 1);
 
-        /* Convergence tolerance */
-        HYPRE_StructPCGSetTol(structsolver, 1.e-6);
-        /* Info. level */
-        HYPRE_StructPCGSetPrintLevel(structsolver, 0);
+        /* Use symmetric SMG as preconditioner */
+        HYPRE_StructSMGCreate(MPI_COMM_WORLD, &precond);
+        HYPRE_StructSMGSetMemoryUse(precond, 0);
+        HYPRE_StructSMGSetMaxIter(precond, 1);
+        HYPRE_StructSMGSetTol(precond, 0.0);
+        HYPRE_StructSMGSetZeroGuess(precond);
+        HYPRE_StructSMGSetNumPreRelax(precond, 1);
+        HYPRE_StructSMGSetNumPostRelax(precond, 1);
+
+        HYPRE_StructPCGSetPrecond(solver, HYPRE_StructSMGSolve, HYPRE_StructSMGSetup, precond);
     }
 
     /*===== Initialize flow ==================================================*/
@@ -475,8 +487,8 @@ int main(int argc, char **argv) {
             HYPRE_StructVectorAssemble(rhsvec);
             HYPRE_StructVectorAssemble(resvec);
 
-            HYPRE_StructPCGSetup(structsolver, matrix, rhsvec, resvec);
-            HYPRE_StructPCGSolve(structsolver, matrix, rhsvec, resvec);
+            HYPRE_StructPCGSetup(solver, matrix, rhsvec, resvec);
+            HYPRE_StructPCGSolve(solver, matrix, rhsvec, resvec);
 
             HYPRE_StructVectorGetBoxValues(resvec, ilower, iupper, values);
             m = 0;
@@ -487,6 +499,14 @@ int main(int argc, char **argv) {
                 }
             }
         }
+
+        // for (int i = 1; i <= Nx; i++) {
+        //     for (int j = 1; j <= Ny; j++) {
+        //         printf("%.8lf ", p_prime[i][j]);
+        //     }
+        //     printf("\n");
+        // }
+        // printf("\n");
 
         /* Calculate p_next */
         for (int i = 1; i <= Nx; i++) {
@@ -576,7 +596,7 @@ int main(int argc, char **argv) {
     HYPRE_StructMatrixDestroy(matrix);
     HYPRE_StructVectorDestroy(rhsvec);
     HYPRE_StructVectorDestroy(resvec);
-    HYPRE_StructPCGDestroy(structsolver);
+    HYPRE_StructPCGDestroy(solver);
 
     /* Finalize Hypre */
     HYPRE_Finalize();
