@@ -72,26 +72,28 @@ int main(int argc, char **argv) {
     /* Max. of Nx and Ny */
     const int Nm = Nx > Ny ? Nx : Ny;
 
+    typedef double mat[Nx+2][Ny+2];
+    typedef double mat1[Nx+1][Ny+2];
+    typedef double mat2[Nx+2][Ny+1];
+
     /* Grid variables */
     double xc[Nx+2], dx[Nx+2];
     double yc[Ny+2], dy[Ny+2];
 
     /* Pressure and velocities */
-    double p[Nx+2][Ny+2], p_next[Nx+2][Ny+2], p_prime[Nx+2][Ny+2];
-    double u1[Nx+2][Ny+2], u1_next[Nx+2][Ny+2], u1_star[Nx+2][Ny+2], u1_tilde[Nx+2][Ny+2];
-    double u2[Nx+2][Ny+2], u2_next[Nx+2][Ny+2], u2_star[Nx+2][Ny+2], u2_tilde[Nx+2][Ny+2];
+    mat p, p_next, p_prime;
+    mat u1, u1_next, u1_star, u1_tilde;
+    mat u2, u2_next, u2_star, u2_tilde;
 
-    double U1[Nx+1][Ny+2], U1_next[Nx+1][Ny+2], U1_star[Nx+1][Ny+2];
-    double U2[Nx+2][Ny+1], U2_next[Nx+2][Ny+1], U2_star[Nx+2][Ny+1];
+    mat1 U1, U1_next, U1_star;
+    mat2 U2, U2_next, U2_star;
 
     /* Auxilary variables */
-    double N1[Nx+2][Ny+2], N1_prev[Nx+2][Ny+2];
-    double N2[Nx+2][Ny+2], N2_prev[Nx+2][Ny+2];
-    double Q[Nx+2][Ny+2];
+    mat N1, N1_prev, N2, N2_prev, Q;
     double psi[Nx+1][Ny+1];
 
     /* For TDMA */
-    double C1[Nx+2][Ny+2], C2[Nx+2][Ny+2], RHS1[Nx+2][Ny+2], RHS2[Nx+2][Ny+2];
+    mat C1, C2, RHS1, RHS2;
     double kx_W[Nx+2], kx_P[Nx+2], kx_E[Nx+2];
     double ky_S[Ny+2], ky_P[Ny+2], ky_N[Ny+2];
     double a[Nm+2], b[Nm+2], c[Nm+2], d[Nm+2], e[Nm+2], x[Nm+2], y[Nm+2];
@@ -464,7 +466,6 @@ int main(int argc, char **argv) {
                     m++;
                 }
             }
-
             HYPRE_StructVectorSetBoxValues(rhsvec, ilower, iupper, values);
 
             for (int i = 0; i < Nx*Ny; i++)
