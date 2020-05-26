@@ -192,9 +192,11 @@ int main(int argc, char **argv) {
                 int ilower[2] = {1, Ny}, iupper[2] = {Nx, Ny};
                 int stencil_indices[2] = {0, 1};
 
+                int m = 0;
                 for (int i = 1; i <= Nx; i++) {
-                    values[2*i] = kx_W[i] + kx_E[i] + ky_S[Ny];
-                    values[2*i+1] = 0;
+                    values[2*m] = kx_W[i] + kx_E[i] + ky_S[Ny];
+                    values[2*m+1] = 0;
+                    m++;
                 }
 
                 HYPRE_StructMatrixSetBoxValues(matrix, ilower, iupper, 2, stencil_indices, values);
@@ -204,9 +206,11 @@ int main(int argc, char **argv) {
                 int ilower[2] = {Nx, 1}, iupper[2] = {Nx, Ny};
                 int stencil_indices[2] = {0, 2};
 
+                int m = 0;
                 for (int j = 1; j <= Ny; j++) {
-                    values[2*j] = kx_W[Nx] + ky_S[j] + ky_N[j];
-                    values[2*j+1] = 0;
+                    values[2*m] = kx_W[Nx] + ky_S[j] + ky_N[j];
+                    values[2*m+1] = 0;
+                    m++;
                 }
 
                 HYPRE_StructMatrixSetBoxValues(matrix, ilower, iupper, 2, stencil_indices, values);
@@ -216,9 +220,11 @@ int main(int argc, char **argv) {
                 int ilower[2] = {1, 1}, iupper[2] = {Nx, 1};
                 int stencil_indices[2] = {0, 3};
 
+                int m = 0;
                 for (int i = 1; i <= Nx; i++) {
-                    values[2*i] = kx_W[i] + kx_E[i] + ky_N[1];
-                    values[2*i+1] = 0;
+                    values[2*m] = kx_W[i] + kx_E[i] + ky_N[1];
+                    values[2*m+1] = 0;
+                    m++;
                 }
 
                 HYPRE_StructMatrixSetBoxValues(matrix, ilower, iupper, 2, stencil_indices, values);
@@ -228,9 +234,11 @@ int main(int argc, char **argv) {
                 int ilower[2] = {1, 1}, iupper[2] = {1, Ny};
                 int stencil_indices[2] = {0, 4};
 
+                int m = 0;
                 for (int j = 1; j <= Ny; j++) {
-                    values[2*j] = kx_E[1] + ky_S[j] + ky_N[j];
-                    values[2*j+1] = 0;
+                    values[2*m] = kx_E[1] + ky_S[j] + ky_N[j];
+                    values[2*m+1] = 0;
+                    m++;
                 }
 
                 HYPRE_StructMatrixSetBoxValues(matrix, ilower, iupper, 2, stencil_indices, values);
