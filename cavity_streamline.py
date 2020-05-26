@@ -10,7 +10,7 @@ fp_in.close()
 
 Y, X = np.meshgrid(y, x)
 
-psi = np.loadtxt("./cavity_result.txt")
+psi = np.loadtxt("./result/cavity_result.txt")
 
 plt.figure(figsize=(8, 8))
 plt.contour(X, Y, psi,

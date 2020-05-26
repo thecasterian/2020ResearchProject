@@ -4,17 +4,9 @@
 #include <math.h>
 #include <assert.h>
 
-#define RESET_ATTR      "\x1B[0m"
-#define BOLD_TEXT       "\x1B[1m"
-#define RED_TEXT        "\x1B[31m"
-#define GREEN_TEXT      "\x1B[32m"
-#define YELLOW_TEXT     "\x1B[33m"
-#define BLUE_TEXT       "\x1B[34m"
-#define MAGENTA_TEXT    "\x1B[35m"
-#define CYAN_TEXT       "\x1B[36m"
-#define WHITE_TEXT      "\x1B[37m"
+#include "HYPRE_struct_ls.h"
 
-inline void tdma(int n, double *a, double *b, double *c, double *d, double *e, double *x, double *y) {
+void tdma(int n, double *a, double *b, double *c, double *d, double *e, double *x, double *y) {
     for (int k = 2; k <= n; k++) {
         double m = a[k] / b[k-1];
         b[k] -= m * c[k-1];
@@ -29,37 +21,62 @@ inline void tdma(int n, double *a, double *b, double *c, double *d, double *e, d
     }
 }
 
-int main(void) {
-    /* Read input file */
+int main(int argc, char **argv) {
+    /*===== Initialize program and parse arguments ===========================*/
+    /* Initialize MPI */
+    int myid, num_procs;
+
+    MPI_Init(&argc, &argv);
+    MPI_Comm_rank(MPI_COMM_WORLD, &myid);
+    MPI_Comm_size(MPI_COMM_WORLD, &num_procs);
+
+    /* Initialize HYPRE */
+    HYPRE_Init();
+
+    /* For the present, the number of process must be 1 */
+    if (num_procs != 1) {
+        if (myid == 0)
+            printf("Must run with 1 processors!\n");
+        MPI_Finalize();
+        return 0;
+    }
+
+    /*===== Read input file ==================================================*/
+    /* Input parameters */
     int Nx, Ny;
     double Re, dt;
     int numtstep;
 
     FILE *fp_in = fopen("cavity.in", "r");
 
-    assert(fscanf(fp_in, "%*s %d", &Nx) == 1);
+    /* Read grid geometry */
+    fscanf(fp_in, "%*s %d", &Nx);
     double xf[Nx+1];
     for (int i = 0; i <= Nx; i++) {
-        assert(fscanf(fp_in, "%lf", &xf[i]) == 1);
+        fscanf(fp_in, "%lf", &xf[i]);
     }
 
-    assert(fscanf(fp_in, "%*s %d", &Ny) == 1);
+    fscanf(fp_in, "%*s %d", &Ny);
     double yf[Ny+1];
     for (int j = 0; j <= Ny; j++) {
-        assert(fscanf(fp_in, "%lf", &yf[j]) == 1);
+        fscanf(fp_in, "%lf", &yf[j]);
     }
 
-    assert(fscanf(fp_in, "%*s %lf", &Re) == 1);
-    assert(fscanf(fp_in, "%*s %lf %*s %d", &dt, &numtstep) == 2);
+    /* Read Re, dt, numtstep */
+    fscanf(fp_in, "%*s %lf", &Re);
+    fscanf(fp_in, "%*s %lf %*s %d", &dt, &numtstep);
 
     fclose(fp_in);
 
-    /* Define variables */
+    /*===== Define variables =================================================*/
+    /* Max. of Nx and Ny */
     const int Nm = Nx > Ny ? Nx : Ny;
 
+    /* Grid variables */
     double xc[Nx+2], dx[Nx+2];
     double yc[Ny+2], dy[Ny+2];
 
+    /* Pressure and velocities */
     double p[Nx+2][Ny+2], p_next[Nx+2][Ny+2], p_prime[Nx+2][Ny+2];
     double u1[Nx+2][Ny+2], u1_next[Nx+2][Ny+2], u1_star[Nx+2][Ny+2], u1_tilde[Nx+2][Ny+2];
     double u2[Nx+2][Ny+2], u2_next[Nx+2][Ny+2], u2_star[Nx+2][Ny+2], u2_tilde[Nx+2][Ny+2];
@@ -67,36 +84,27 @@ int main(void) {
     double U1[Nx+1][Ny+2], U1_next[Nx+1][Ny+2], U1_star[Nx+1][Ny+2];
     double U2[Nx+2][Ny+1], U2_next[Nx+2][Ny+1], U2_star[Nx+2][Ny+1];
 
+    /* Auxilary variables */
     double N1[Nx+2][Ny+2], N1_prev[Nx+2][Ny+2];
     double N2[Nx+2][Ny+2], N2_prev[Nx+2][Ny+2];
     double Q[Nx+2][Ny+2];
     double psi[Nx+1][Ny+1];
 
+    /* For TDMA */
     double C1[Nx+2][Ny+2], C2[Nx+2][Ny+2], RHS1[Nx+2][Ny+2], RHS2[Nx+2][Ny+2];
     double kx_W[Nx+2], kx_P[Nx+2], kx_E[Nx+2];
     double ky_S[Ny+2], ky_P[Ny+2], ky_N[Ny+2];
     double a[Nm+2], b[Nm+2], c[Nm+2], d[Nm+2], e[Nm+2], x[Nm+2], y[Nm+2];
 
-    /* Initialize */
-    for (int i = 0; i < Nx+2; i++) {
-        for (int j = 0; j < Ny+2; j++) {
-            p[i][j] = p_next[i][j] = p_prime[i][j] = 0;
-            u1[i][j] = u1_next[i][j] = u1_star[i][j] = u1_tilde[i][j] = 0;
-            u2[i][j] = u2_next[i][j] = u2_star[i][j] = u2_tilde[i][j] = 0;
-        }
-    }
-    for (int i = 0; i < Nx+1; i++) {
-        for (int j = 0; j < Ny+2; j++) {
-            U1[i][j] = U1_next[i][j] = U1_star[i][j] = 0;
-        }
-    }
-    for (int i = 0; i < Nx+2; i++) {
-        for (int j = 0; j < Ny+1; j++) {
-            U2[i][j] = U2_next[i][j] = U2_star[i][j] = 0;
-        }
-    }
+    /* For HYPRE */
+    HYPRE_StructGrid grid;
+    HYPRE_StructStencil stencil;
+    HYPRE_StructMatrix matrix;
+    HYPRE_StructVector rhsvec;
+    HYPRE_StructVector resvec;
+    HYPRE_StructSolver structsolver;
 
-    /* Calculate grid variables */
+    /*===== Calculate grid variables =========================================*/
     for (int i = 1; i <= Nx; i++) {
         dx[i] = xf[i] - xf[i-1];
         xc[i] = (xf[i] + xf[i-1]) / 2;
@@ -105,6 +113,8 @@ int main(void) {
         dy[j] = yf[j] - yf[j-1];
         yc[j] = (yf[j] + yf[j-1]) / 2;
     }
+
+    /* Ghost cells */
     dx[0] = dx[1];
     dx[Nx+1] = dx[Nx];
     dy[0] = dy[1];
@@ -126,7 +136,183 @@ int main(void) {
         ky_P[j] = ky_S[j] + ky_N[j] + 1;
     }
 
-    /* Initialize flow */
+    /*===== Initialize HYPRE variables =======================================*/
+    /* Setup grid */
+    {
+        HYPRE_StructGridCreate(MPI_COMM_WORLD, 2, &grid);
+
+        int ilower[2] = {1, 1}, iupper[2] = {Nx, Ny};
+        HYPRE_StructGridSetExtents(grid, ilower, iupper);
+
+        HYPRE_StructGridAssemble(grid);
+    }
+    /* Setup stencil */
+    {
+        HYPRE_StructStencilCreate(2, 5, &stencil);
+
+        /* Stencil offset: center, up, right, down, left */
+        int offsets[5][2] = {{0, 0}, {0, 1}, {1, 0}, {0, -1}, {-1, 0}};
+
+        for (int i = 0; i < 5; i++)
+            HYPRE_StructStencilSetElement(stencil, i, offsets[i]);
+    }
+    /* Setup martix */
+    {
+        HYPRE_StructMatrixCreate(MPI_COMM_WORLD, grid, stencil, &matrix);
+        HYPRE_StructMatrixInitialize(matrix);
+
+        /* Setup coefficients */
+        {
+            int ilower[2] = {1, 1}, iupper[2] = {Nx, Ny};
+            int stencil_indices[5] = {0, 1, 2, 3, 4};
+            /* Nx*Ny grid points, each with 5 stencil points */
+            double values[5*Nx*Ny];
+
+            int m = 0;
+            for (int j = 1; j <= Ny; j++) {
+                for (int i = 1; i <= Nx; i++) {
+                    values[5*m] = kx_W[i] + kx_E[i] + ky_S[j] + ky_N[j];
+                    values[5*m+1] = -ky_N[j];
+                    values[5*m+2] = -kx_E[i];
+                    values[5*m+3] = -ky_S[j];
+                    values[5*m+4] = -kx_W[i];
+                    m++;
+                }
+            }
+
+            HYPRE_StructMatrixSetBoxValues(matrix, ilower, iupper, 5, stencil_indices, values);
+        }
+
+        /* Setup coefficients of boundary cells */
+        {
+            double values[2*Nm+4];
+
+            /* Upper boundary */
+            {
+                int ilower[2] = {1, Ny}, iupper[2] = {Nx, Ny};
+                int stencil_indices[2] = {0, 1};
+
+                for (int i = 1; i <= Nx; i++) {
+                    values[2*i] = kx_W[i] + kx_E[i] + ky_S[Ny];
+                    values[2*i+1] = 0;
+                }
+
+                HYPRE_StructMatrixSetBoxValues(matrix, ilower, iupper, 2, stencil_indices, values);
+            }
+            /* Right boundary */
+            {
+                int ilower[2] = {Nx, 1}, iupper[2] = {Nx, Ny};
+                int stencil_indices[2] = {0, 2};
+
+                for (int j = 1; j <= Ny; j++) {
+                    values[2*j] = kx_W[Nx] + ky_S[j] + ky_N[j];
+                    values[2*j+1] = 0;
+                }
+
+                HYPRE_StructMatrixSetBoxValues(matrix, ilower, iupper, 2, stencil_indices, values);
+            }
+            /* Lower boundary */
+            {
+                int ilower[2] = {1, 1}, iupper[2] = {Nx, 1};
+                int stencil_indices[2] = {0, 3};
+
+                for (int i = 1; i <= Nx; i++) {
+                    values[2*i] = kx_W[i] + kx_E[i] + ky_N[1];
+                    values[2*i+1] = 0;
+                }
+
+                HYPRE_StructMatrixSetBoxValues(matrix, ilower, iupper, 2, stencil_indices, values);
+            }
+            /* Left boundary */
+            {
+                int ilower[2] = {1, 1}, iupper[2] = {1, Ny};
+                int stencil_indices[2] = {0, 4};
+
+                for (int j = 1; j <= Ny; j++) {
+                    values[2*j] = kx_E[1] + ky_S[j] + ky_N[j];
+                    values[2*j+1] = 0;
+                }
+
+                HYPRE_StructMatrixSetBoxValues(matrix, ilower, iupper, 2, stencil_indices, values);
+            }
+            /* Upper left corner */
+            {
+                int i[2] = {1, Ny};
+                int stencil_indices[1] = {0};
+
+                values[0] = kx_E[1] + ky_S[Ny];
+
+                HYPRE_StructMatrixSetBoxValues(matrix, i, i, 1, stencil_indices, values);
+            }
+            /* Upper right corner */
+            {
+                int i[2] = {Nx, Ny};
+                int stencil_indices[1] = {0};
+
+                values[0] = kx_W[Nx] + ky_S[Ny];
+
+                HYPRE_StructMatrixSetBoxValues(matrix, i, i, 1, stencil_indices, values);
+            }
+            /* Lower left corner */
+            {
+                int i[2] = {1, 1};
+                int stencil_indices[5] = {0, 1, 2, 3, 4};
+
+                values[0] = 1;
+                for (int k = 1; k <= 4; k++)
+                    values[k] = 0;
+
+                HYPRE_StructMatrixSetBoxValues(matrix, i, i, 5, stencil_indices, values);
+            }
+            /* Lower right corner */
+            {
+                int i[2] = {Nx, 1};
+                int stencil_indices[1] = {0};
+
+                values[0] = kx_W[Nx] + ky_N[1];
+
+                HYPRE_StructMatrixSetBoxValues(matrix, i, i, 1, stencil_indices, values);
+            }
+        }
+
+        HYPRE_StructMatrixAssemble(matrix);
+    }
+    /* Initialize vector */
+    {
+        HYPRE_StructVectorCreate(MPI_COMM_WORLD, grid, &rhsvec);
+        HYPRE_StructVectorCreate(MPI_COMM_WORLD, grid, &resvec);
+        HYPRE_StructVectorInitialize(rhsvec);
+        HYPRE_StructVectorInitialize(resvec);
+    }
+    /* Setup solver */
+    {
+        /* Create an empty PCG Struct solver */
+        HYPRE_StructPCGCreate(MPI_COMM_WORLD, &structsolver);
+
+        /* Convergence tolerance */
+        HYPRE_StructPCGSetTol(structsolver, 1.e-6);
+        /* Info. level */
+        HYPRE_StructPCGSetPrintLevel(structsolver, 0);
+    }
+
+    /*===== Initialize flow ==================================================*/
+    for (int i = 0; i < Nx+2; i++) {
+        for (int j = 0; j < Ny+2; j++) {
+            p[i][j] = p_next[i][j] = p_prime[i][j] = 0;
+            u1[i][j] = u1_next[i][j] = u1_star[i][j] = u1_tilde[i][j] = 0;
+            u2[i][j] = u2_next[i][j] = u2_star[i][j] = u2_tilde[i][j] = 0;
+        }
+    }
+    for (int i = 0; i < Nx+1; i++) {
+        for (int j = 0; j < Ny+2; j++) {
+            U1[i][j] = U1_next[i][j] = U1_star[i][j] = 0;
+        }
+    }
+    for (int i = 0; i < Nx+2; i++) {
+        for (int j = 0; j < Ny+1; j++) {
+            U2[i][j] = U2_next[i][j] = U2_star[i][j] = 0;
+        }
+    }
     for (int i = 0; i <= Nx; i++) {
         U1[i][Ny+1] = 2;
     }
@@ -136,7 +322,7 @@ int main(void) {
     memcpy(N1_prev, N1, sizeof(double)*(Nx+2)*(Ny+2));
     memcpy(N2_prev, N2, sizeof(double)*(Nx+2)*(Ny+2));
 
-    /* Main loop */
+    /*===== Main loop ========================================================*/
     for (int tstep = 1; tstep <= numtstep; tstep++) {
         /* Calculate N */
         for (int i = 1; i <= Nx; i++) {
@@ -254,44 +440,43 @@ int main(void) {
         }
 
         /* Calculate p_prime */
-        double res;
-        for (int k = 1; k <= 1000000; k++) {
-            res = 0;
-            for (int i = 1; i <= Nx; i++) {
-                p_prime[i][0] = p_prime[i][1];
-                p_prime[i][Ny+1] = p_prime[i][Ny];
-            }
+        {
+            int ilower[2] = {1, 1}, iupper[2] = {Nx, Ny};
+            double values[Nx*Ny];
+
+            int m = 0;
             for (int j = 1; j <= Ny; j++) {
-                p_prime[0][j] = p_prime[1][j];
-                p_prime[(Nx+1)][j] = p_prime[Nx][j];
-            }
-
-            for (int i = 1; i <= Nx; i++) {
-                for (int j = 1; j <= Ny; j++) {
+                for (int i = 1; i <= Nx; i++) {
                     if (i == 1 && j == 1) {
-                        continue;
+                        values[m] = 0;
                     }
-
-                    double tmp = 1. / (kx_W[i] + kx_E[i] + ky_S[j] + ky_N[j]) * (
-                        kx_W[i] * p_prime[(i-1)][j] + kx_E[i] * p_prime[(i+1)][j]
-                        + ky_S[j] * p_prime[i][j-1] + ky_N[j] * p_prime[i][j+1] - Q[i][j]
-                    );
-
-                    if (isnan(tmp) || isinf(tmp)) {
-                        fprintf(stderr, BOLD_TEXT RED_TEXT "ERROR: floating point error!\n");
-                        exit(0);
+                    else {
+                        values[m] = -Q[i][j];
                     }
-
-                    res += fabs(tmp - p_prime[i][j]);
-                    p_prime[i][j] = tmp;
+                    m++;
                 }
             }
-            if (res / (Nx * Ny) <= 1e-9) {
-                break;
+
+            HYPRE_StructVectorSetBoxValues(rhsvec, ilower, iupper, values);
+
+            for (int i = 0; i < Nx*Ny; i++)
+                values[i] = 0;
+            HYPRE_StructVectorSetBoxValues(resvec, ilower, iupper, values);
+
+            HYPRE_StructVectorAssemble(rhsvec);
+            HYPRE_StructVectorAssemble(resvec);
+
+            HYPRE_StructPCGSetup(structsolver, matrix, rhsvec, resvec);
+            HYPRE_StructPCGSolve(structsolver, matrix, rhsvec, resvec);
+
+            HYPRE_StructVectorGetBoxValues(resvec, ilower, iupper, values);
+            m = 0;
+            for (int j = 1; j <= Ny; j++) {
+                for (int i = 1; i <= Nx; i++) {
+                    p_prime[i][j] = values[m];
+                    m++;
+                }
             }
-        }
-        if (res / (Nx * Ny) > 1e-9) {
-            printf(RED_TEXT "not converged!\n");
         }
 
         /* Calculate p_next */
@@ -353,11 +538,12 @@ int main(void) {
         memcpy(N2_prev, N2, sizeof(double)*(Nx+2)*(Ny+2));
         memset(p_prime, 0, sizeof(double)*(Nx+2)*(Ny+2));
 
-        if (tstep % 10 == 0) {
+        if (tstep % 50 == 0) {
             printf("tstep: %d\n", tstep);
         }
     }
 
+    /*===== Export result ====================================================*/
     /* Calculate streamfunction */
     for (int i = 1; i <= Nx-1; i++) {
         for (int j = 1; j <= Ny-1; j++) {
@@ -374,4 +560,20 @@ int main(void) {
         fprintf(fp_out, "\n");
     }
     fclose(fp_out);
+
+    /* Free memory */
+    HYPRE_StructGridDestroy(grid);
+    HYPRE_StructStencilDestroy(stencil);
+    HYPRE_StructMatrixDestroy(matrix);
+    HYPRE_StructVectorDestroy(rhsvec);
+    HYPRE_StructVectorDestroy(resvec);
+    HYPRE_StructPCGDestroy(structsolver);
+
+    /* Finalize Hypre */
+    HYPRE_Finalize();
+
+    /* Finalize MPI */
+    MPI_Finalize();
+
+    return 0;
 }
