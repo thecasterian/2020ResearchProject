@@ -106,6 +106,7 @@ int main(int argc, char **argv) {
     HYPRE_StructVector resvec;
     HYPRE_StructSolver solver;
     HYPRE_StructSolver precond;
+    double zeros[Nx*Ny];
 
     /*===== Calculate grid variables =========================================*/
     for (int i = 1; i <= Nx; i++) {
@@ -298,7 +299,7 @@ int main(int argc, char **argv) {
     /* Setup solver */
     {
         HYPRE_StructPCGCreate(MPI_COMM_WORLD, &solver);
-        HYPRE_StructPCGSetMaxIter(solver, 50);
+        HYPRE_StructPCGSetMaxIter(solver, 1000);
         HYPRE_StructPCGSetTol(solver, 1.0e-06);
         HYPRE_StructPCGSetTwoNorm(solver, 1);
         HYPRE_StructPCGSetRelChange(solver, 0);
@@ -308,14 +309,19 @@ int main(int argc, char **argv) {
         /* Use symmetric SMG as preconditioner */
         HYPRE_StructSMGCreate(MPI_COMM_WORLD, &precond);
         HYPRE_StructSMGSetMemoryUse(precond, 0);
-        HYPRE_StructSMGSetMaxIter(precond, 1);
+        HYPRE_StructSMGSetMaxIter(precond, 10);
         HYPRE_StructSMGSetTol(precond, 0.0);
         HYPRE_StructSMGSetZeroGuess(precond);
-        HYPRE_StructSMGSetNumPreRelax(precond, 1);
-        HYPRE_StructSMGSetNumPostRelax(precond, 1);
+        HYPRE_StructSMGSetNumPreRelax(precond, 3);
+        HYPRE_StructSMGSetNumPostRelax(precond, 3);
 
         HYPRE_StructPCGSetPrecond(solver, HYPRE_StructSMGSolve, HYPRE_StructSMGSetup, precond);
+
+        HYPRE_StructPCGSetup(solver, matrix, rhsvec, resvec);
     }
+    /* Fill zeros array */
+    for (int i = 0; i < Nx*Ny; i++)
+        zeros[i] = 0;
 
     /*===== Initialize flow ==================================================*/
     for (int i = 0; i < Nx+2; i++) {
@@ -349,18 +355,18 @@ int main(int argc, char **argv) {
         /* Calculate N */
         for (int i = 1; i <= Nx; i++) {
             for (int j = 1; j <= Ny; j++) {
-                double u1_e = (u1[i][j] * dx[i+1] + u1[(i+1)][j] * dx[i]) / (dx[i] + dx[i+1]);
-                double u2_e = (u2[i][j] * dx[i+1] + u2[(i+1)][j] * dx[i]) / (dx[i] + dx[i+1]);
-                double u1_w = (u1[(i-1)][j] * dx[i] + u1[i][j] * dx[i-1]) / (dx[i-1] + dx[i]);
-                double u2_w = (u2[(i-1)][j] * dx[i] + u2[i][j] * dx[i-1]) / (dx[i-1] + dx[i]);
+                double u1_e = (u1[i][j] * dx[i+1] + u1[i+1][j] * dx[i]) / (dx[i] + dx[i+1]);
+                double u2_e = (u2[i][j] * dx[i+1] + u2[i+1][j] * dx[i]) / (dx[i] + dx[i+1]);
+                double u1_w = (u1[i-1][j] * dx[i] + u1[i][j] * dx[i-1]) / (dx[i-1] + dx[i]);
+                double u2_w = (u2[i-1][j] * dx[i] + u2[i][j] * dx[i-1]) / (dx[i-1] + dx[i]);
                 double u1_n = (u1[i][j] * dy[j+1] + u1[i][j+1] * dy[j]) / (dy[j] + dy[j+1]);
                 double u2_n = (u2[i][j] * dy[j+1] + u2[i][j+1] * dy[j]) / (dy[j] + dy[j+1]);
                 double u1_s = (u1[i][j-1] * dy[j] + u1[i][j] * dy[j-1]) / (dy[j-1] + dy[j]);
                 double u2_s = (u2[i][j-1] * dy[j] + u2[i][j] * dy[j-1]) / (dy[j-1] + dy[j]);
 
-                N1[i][j] = (U1[i][j]*u1_e - U1[(i-1)][j]*u1_w) / dx[i]
+                N1[i][j] = (U1[i][j]*u1_e - U1[i-1][j]*u1_w) / dx[i]
                     + (U2[i][j]*u1_n - U2[i][j-1]*u1_s) / dy[j];
-                N2[i][j] = (U1[i][j]*u2_e - U1[(i-1)][j]*u2_w) / dx[i]
+                N2[i][j] = (U1[i][j]*u2_e - U1[i-1][j]*u2_w) / dx[i]
                     + (U2[i][j]*u2_n - U2[i][j-1]*u2_s) / dy[j];
             }
         }
@@ -369,13 +375,13 @@ int main(int argc, char **argv) {
         for (int i = 1; i <= Nx; i++) {
             for (int j = 1; j <= Ny; j++) {
                 RHS1[i][j] = -dt/2 * (3*N1[i][j] - N1_prev[i][j])
-                    - dt * (p[(i+1)][j] - p[(i-1)][j]) / (xc[i+1] - xc[i-1])
-                    + 2 * (kx_W[i]*u1[(i-1)][j] + kx_E[i]*u1[(i+1)][j]
+                    - dt * (p[i+1][j] - p[i-1][j]) / (xc[i+1] - xc[i-1])
+                    + 2 * (kx_W[i]*u1[i-1][j] + kx_E[i]*u1[i+1][j]
                            + ky_S[j]*u1[i][j-1] + ky_N[j]*u1[i][j+1]
                            - (kx_W[i]+kx_E[i]+ky_S[j]+ky_N[j])*u1[i][j]);
                 RHS2[i][j] = -dt/2 * (3*N2[i][j] - N2_prev[i][j])
                     - dt * (p[i][j+1] - p[i][j-1]) / (yc[j+1] - yc[j-1])
-                    + 2 * (kx_W[i]*u2[(i-1)][j] + kx_E[i]*u2[(i+1)][j]
+                    + 2 * (kx_W[i]*u2[i-1][j] + kx_E[i]*u2[i+1][j]
                            + ky_S[j]*u2[i][j-1] + ky_N[j]*u2[i][j+1]
                            - (kx_W[i]+kx_E[i]+ky_S[j]+ky_N[j])*u2[i][j]);
             }
@@ -434,7 +440,7 @@ int main(int argc, char **argv) {
         /* Calculate u_tilde */
         for (int i = 1; i <= Nx; i++) {
             for (int j = 1; j <= Ny; j++) {
-                u1_tilde[i][j] = u1_star[i][j] + dt * (p[(i+1)][j] - p[(i-1)][j]) / (xc[i+1] - xc[i-1]);
+                u1_tilde[i][j] = u1_star[i][j] + dt * (p[i+1][j] - p[i-1][j]) / (xc[i+1] - xc[i-1]);
                 u2_tilde[i][j] = u2_star[i][j] + dt * (p[i][j+1] - p[i][j-1]) / (yc[j+1] - yc[j-1]);
             }
         }
@@ -442,8 +448,8 @@ int main(int argc, char **argv) {
         /* Calculate U_star */
         for (int i = 1; i <= Nx-1; i++) {
             for (int j = 1; j <= Ny; j++) {
-                U1_star[i][j] = (u1_tilde[i][j]*dx[i+1] + u1_tilde[(i+1)][j]*dx[i]) / (dx[i] + dx[i+1])
-                    - dt * (p[(i+1)][j] - p[i][j]) / (xc[i+1] - xc[i]);
+                U1_star[i][j] = (u1_tilde[i][j]*dx[i+1] + u1_tilde[i+1][j]*dx[i]) / (dx[i] + dx[i+1])
+                    - dt * (p[i+1][j] - p[i][j]) / (xc[i+1] - xc[i]);
             }
         }
         for (int i = 1; i <= Nx; i++) {
@@ -453,41 +459,26 @@ int main(int argc, char **argv) {
             }
         }
 
-        /* Calculate Q */
-        for (int i = 1; i <= Nx; i++) {
-            for (int j = 1; j <= Ny; j++) {
-                Q[i][j] = 1 / (2.*Re) * ((U1_star[i][j] - U1_star[(i-1)][j]) / dx[i]
-                                               + (U2_star[i][j] - U2_star[i][j-1]) / dy[j]);
-            }
-        }
-
         /* Calculate p_prime */
         {
-            int ilower[2] = {1, 1}, iupper[2] = {Nx, Ny};
+            int ilower[2] = {1, 1}, iupper[2] = {Nx, Ny}, m;
             double values[Nx*Ny];
 
-            int m = 0;
+            m = 0;
             for (int j = 1; j <= Ny; j++) {
                 for (int i = 1; i <= Nx; i++) {
-                    if (i == 1 && j == 1) {
-                        values[m] = 0;
-                    }
-                    else {
-                        values[m] = -Q[i][j];
-                    }
+                    double Q = 1 / (2.*Re) * ((U1_star[i][j] - U1_star[i-1][j]) / dx[i]
+                                              + (U2_star[i][j] - U2_star[i][j-1]) / dy[j]);
+                    values[m] = (i == 1 && j == 1) ? 0 : -Q;
                     m++;
                 }
             }
             HYPRE_StructVectorSetBoxValues(rhsvec, ilower, iupper, values);
-
-            for (int i = 0; i < Nx*Ny; i++)
-                values[i] = 0;
-            HYPRE_StructVectorSetBoxValues(resvec, ilower, iupper, values);
+            HYPRE_StructVectorSetBoxValues(resvec, ilower, iupper, zeros);
 
             HYPRE_StructVectorAssemble(rhsvec);
             HYPRE_StructVectorAssemble(resvec);
 
-            HYPRE_StructPCGSetup(solver, matrix, rhsvec, resvec);
             HYPRE_StructPCGSolve(solver, matrix, rhsvec, resvec);
 
             HYPRE_StructVectorGetBoxValues(resvec, ilower, iupper, values);
@@ -500,14 +491,6 @@ int main(int argc, char **argv) {
             }
         }
 
-        // for (int i = 1; i <= Nx; i++) {
-        //     for (int j = 1; j <= Ny; j++) {
-        //         printf("%.8lf ", p_prime[i][j]);
-        //     }
-        //     printf("\n");
-        // }
-        // printf("\n");
-
         /* Calculate p_next */
         for (int i = 1; i <= Nx; i++) {
             for (int j = 1; j <= Ny; j++) {
@@ -518,7 +501,7 @@ int main(int argc, char **argv) {
         /* Calculate u_next */
         for (int i = 1; i <= Nx; i++) {
             for (int j = 1; j <= Ny; j++) {
-                u1_next[i][j] = u1_star[i][j] - dt * (p_prime[(i+1)][j] - p_prime[(i-1)][j]) / (xc[i+1] - xc[i-1]);
+                u1_next[i][j] = u1_star[i][j] - dt * (p_prime[i+1][j] - p_prime[i-1][j]) / (xc[i+1] - xc[i-1]);
                 u2_next[i][j] = u2_star[i][j] - dt * (p_prime[i][j+1] - p_prime[i][j-1]) / (yc[j+1] - yc[j-1]);
             }
         }
@@ -526,7 +509,7 @@ int main(int argc, char **argv) {
         /* Calculate U_next */
         for (int i = 1; i <= Nx-1; i++) {
             for (int j = 1; j <= Ny; j++) {
-                U1_next[i][j] = U1_star[i][j] - dt * (p_prime[(i+1)][j] - p_prime[i][j]) / (xc[i+1] - xc[i]);
+                U1_next[i][j] = U1_star[i][j] - dt * (p_prime[i+1][j] - p_prime[i][j]) / (xc[i+1] - xc[i]);
             }
         }
         for (int i = 1; i <= Nx; i++) {
@@ -567,7 +550,7 @@ int main(int argc, char **argv) {
         memcpy(N2_prev, N2, sizeof(double)*(Nx+2)*(Ny+2));
         memset(p_prime, 0, sizeof(double)*(Nx+2)*(Ny+2));
 
-        if (tstep % 50 == 0) {
+        if (tstep % 100 == 0) {
             printf("tstep: %d\n", tstep);
         }
     }

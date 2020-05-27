@@ -11,7 +11,7 @@
 #define dt 0.01
 
 #define N 64
-#define numtstep 1000
+#define numtstep 10000
 
 // for mpi
 int myid, num_procs;
@@ -47,12 +47,12 @@ double a[N+2], b[N+2], c[N+2], d[N+2], x[N+2];
 const double h = 1. / N;
 const double k = 1. + Re * h*h / dt;
 
-double fill(double *begin, double *end, double value) {
+void fill(double *begin, double *end, double value) {
     for (double *p = begin; p != end; p++)
         *p = value;
 }
 
-double tdma(int n) {
+void tdma(int n) {
     for (int k = 2; k <= n; k++) {
         double m = a[k] / b[k-1];
         b[k] -= m * c[k-1];
