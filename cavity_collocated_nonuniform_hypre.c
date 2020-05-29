@@ -108,6 +108,8 @@ int main(int argc, char **argv) {
     HYPRE_StructSolver precond;
     double zeros[Nx*Ny];
 
+    double final_res_norm;
+
     /*===== Calculate grid variables =========================================*/
     for (int i = 1; i <= Nx; i++) {
         dx[i] = xf[i] - xf[i-1];
@@ -480,6 +482,15 @@ int main(int argc, char **argv) {
             HYPRE_StructVectorAssemble(resvec);
 
             HYPRE_StructPCGSolve(solver, matrix, rhsvec, resvec);
+
+            HYPRE_StructPCGGetFinalRelativeResidualNorm(solver, &final_res_norm);
+            if (final_res_norm >= 1e-3) {
+                printf("warning: not converged!");
+            }
+            else if (final_res_norm >= 1e3) {
+                printf("error: diverged!");
+                break;
+            }
 
             HYPRE_StructVectorGetBoxValues(resvec, ilower, iupper, values);
             m = 0;
