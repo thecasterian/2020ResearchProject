@@ -14,3 +14,6 @@ uniform_hypre: cavity_collocated_hypre.c
 
 nonuniform_hypre: cavity_collocated_nonuniform_hypre.c
 	mpicc -I/usr/apps/include cavity_collocated_nonuniform_hypre.c /usr/apps/lib/libHYPRE.a -o cavity_collocated_nonuniform_hypre -O2 -Wall -lm
+
+mpi: cavity_mpi.c
+	mpicc -I/usr/apps/include cavity_mpi.c /usr/apps/lib/libHYPRE.a -o cavity_mpi -O2 -Wall -lm

@@ -2,30 +2,54 @@
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
-#include <assert.h>
 
 #include "HYPRE_struct_ls.h"
 
-void tdma(int n, double *a, double *b, double *c, double *d, double *e, double *x, double *y) {
-    for (int k = 2; k <= n; k++) {
+#include <time.h>
+
+#define DEBUG 0
+
+void forward(double *a, double *b, double *c, double *d, double *e, int start, int end) {
+    for (int k = start+1; k <= end; k++) {
         double m = a[k] / b[k-1];
         b[k] -= m * c[k-1];
         d[k] -= m * d[k-1];
         e[k] -= m * e[k-1];
     }
-    x[n] = d[n] / b[n];
-    y[n] = e[n] / b[n];
-    for (int k = n-1; k >= 1; k--) {
+}
+
+void back(double *b, double *c, double *d, double *e, double *x, double *y, int start, int end) {
+    for (int k = end-1; k >= start; k--) {
         x[k] = (d[k] - c[k] * x[k+1]) / b[k];
         y[k] = (e[k] - c[k] * y[k+1]) / b[k];
     }
 }
 
+int myid, num_procs;
+struct timespec start_time, end_time;
+struct timespec start_time_total, end_time_total;
+
+void tic() {
+#if DEBUG
+    if (myid == 0) {
+        clock_gettime(CLOCK_REALTIME, &start_time);
+    }
+#endif
+}
+
+void toc(const char *const msg) {
+#if DEBUG
+    if (myid == 0) {
+        clock_gettime(CLOCK_REALTIME, &end_time);
+        double elapsed_time = (end_time.tv_sec-start_time.tv_sec) + (end_time.tv_nsec-start_time.tv_nsec)/1.e9;
+        printf("%-20s elapsed time (s): %.6lf\n", msg, elapsed_time);
+    }
+#endif
+}
+
 int main(int argc, char **argv) {
     /*===== Initialize program and parse arguments ===========================*/
     /* Initialize MPI */
-    int myid, num_procs;
-
     MPI_Init(&argc, &argv);
     MPI_Comm_rank(MPI_COMM_WORLD, &myid);
     MPI_Comm_size(MPI_COMM_WORLD, &num_procs);
@@ -33,52 +57,54 @@ int main(int argc, char **argv) {
     /* Initialize HYPRE */
     HYPRE_Init();
 
-    /* For the present, the number of process must be 1 */
-    if (num_procs != 1) {
-        if (myid == 0)
-            printf("Must run with 1 processors!\n");
-        MPI_Finalize();
-        return 0;
-    }
-
     /*===== Read input file ==================================================*/
     /* Input parameters */
-    int Nx, Ny;
-    double Re, dt;
-    int numtstep;
+    int Nx_, Ny_;
+    double Re_, dt_;
+    int numtstep_;
 
     FILE *fp_in = fopen("cavity.in", "r");
 
     /* Read grid geometry */
-    fscanf(fp_in, "%*s %d", &Nx);
-    double xf[Nx+1];
-    for (int i = 0; i <= Nx; i++) {
-        fscanf(fp_in, "%lf", &xf[i]);
+    fscanf(fp_in, "%*s %d", &Nx_);
+    double xf_[Nx_+1];
+    for (int i = 0; i <= Nx_; i++) {
+        fscanf(fp_in, "%lf", &xf_[i]);
     }
 
-    fscanf(fp_in, "%*s %d", &Ny);
-    double yf[Ny+1];
-    for (int j = 0; j <= Ny; j++) {
-        fscanf(fp_in, "%lf", &yf[j]);
+    fscanf(fp_in, "%*s %d", &Ny_);
+    double yf_[Ny_+1];
+    for (int j = 0; j <= Ny_; j++) {
+        fscanf(fp_in, "%lf", &yf_[j]);
     }
 
     /* Read Re, dt, numtstep */
-    fscanf(fp_in, "%*s %lf", &Re);
-    fscanf(fp_in, "%*s %lf %*s %d", &dt, &numtstep);
+    fscanf(fp_in, "%*s %lf", &Re_);
+    fscanf(fp_in, "%*s %lf %*s %d", &dt_, &numtstep_);
 
     fclose(fp_in);
 
-    /*===== Define variables =================================================*/
-    /* Max. of Nx and Ny */
-    const int Nm = Nx > Ny ? Nx : Ny;
+    /* Make const */
+    const int Nx = Nx_, Ny = Ny_;
+    const double Re = Re_, dt = dt_;
+    const int numtstep = numtstep_;
+    const double *const xf = xf_, *const yf = yf_;
 
-    typedef double mat[Nx+2][Ny+2];
-    typedef double mat1[Nx+1][Ny+2];
-    typedef double mat2[Nx+2][Ny+1];
+    /*===== Define variables =================================================*/
+    /* Local grid of current process */
+    int ilower[2] = {myid * Nx / num_procs + 1, 1};
+    int iupper[2] = {(myid+1) * Nx / num_procs, Ny};
+    const int Nx_local = iupper[0] - ilower[0] + 1;
+
+    typedef double mat[Nx_local+2][Ny+2];
+    typedef double mat1[Nx_local+1][Ny+2];
+    typedef double mat2[Nx_local+2][Ny+1];
 
     /* Grid variables */
-    double xc[Nx+2], dx[Nx+2];
-    double yc[Ny+2], dy[Ny+2];
+    double *const xc = calloc(sizeof(double), Nx_local+2);
+    double *const dx = calloc(sizeof(double), Nx_local+2);
+    double *const yc = calloc(sizeof(double), Ny+2);
+    double *const dy = calloc(sizeof(double), Ny+2);
 
     /* Pressure and velocities */
     mat p, p_next, p_prime;
@@ -88,15 +114,15 @@ int main(int argc, char **argv) {
     mat1 U1, U1_next, U1_star;
     mat2 U2, U2_next, U2_star;
 
+    // double (*const p)[Ny+2] = calloc(sizeof(double [Ny+2]), Nx_local+2);
+
     /* Auxilary variables */
-    mat N1, N1_prev, N2, N2_prev, Q;
-    double psi[Nx+1][Ny+1];
+    mat N1, N1_prev, N2, N2_prev;
 
     /* For TDMA */
     mat C1, C2, RHS1, RHS2;
-    double kx_W[Nx+2], kx_P[Nx+2], kx_E[Nx+2];
+    double kx_W[Nx_local+2], kx_P[Nx_local+2], kx_E[Nx_local+2];
     double ky_S[Ny+2], ky_P[Ny+2], ky_N[Ny+2];
-    double a[Nm+2], b[Nm+2], c[Nm+2], d[Nm+2], e[Nm+2], x[Nm+2], y[Nm+2];
 
     /* For HYPRE */
     HYPRE_StructGrid grid;
@@ -106,14 +132,14 @@ int main(int argc, char **argv) {
     HYPRE_StructVector resvec;
     HYPRE_StructSolver solver;
     HYPRE_StructSolver precond;
-    double zeros[Nx*Ny];
-
+    double zeros[Nx_local*Ny];
     double final_res_norm;
+    int final_num_iter;
 
     /*===== Calculate grid variables =========================================*/
-    for (int i = 1; i <= Nx; i++) {
-        dx[i] = xf[i] - xf[i-1];
-        xc[i] = (xf[i] + xf[i-1]) / 2;
+    for (int i = 1; i <= Nx_local; i++) {
+        dx[i] = xf[i + ilower[0]-1] - xf[i-1 + ilower[0]-1];
+        xc[i] = (xf[i + ilower[0]-1] + xf[i-1 + ilower[0]-1]) / 2;
     }
     for (int j = 1; j <= Ny; j++) {
         dy[j] = yf[j] - yf[j-1];
@@ -121,17 +147,37 @@ int main(int argc, char **argv) {
     }
 
     /* Ghost cells */
-    dx[0] = dx[1];
-    dx[Nx+1] = dx[Nx];
+    if (myid == 0) {
+        dx[0] = dx[1];
+    }
+    else {
+        dx[0] = xf[ilower[0]-1] - xf[ilower[0]-2];
+    }
+    if (myid == num_procs-1) {
+        dx[Nx_local+1] = dx[Nx_local];
+    }
+    else {
+        dx[Nx_local+1] = xf[Nx_local+ilower[0]] - xf[Nx_local+ilower[0]-1];
+    }
     dy[0] = dy[1];
     dy[Ny+1] = dy[Ny];
-    xc[0] = 2*xf[0] - xc[1];
-    xc[Nx+1] = 2*xf[Nx] - xc[Nx];
+    if (myid == 0) {
+        xc[0] = 2*xf[0] - xc[1];
+    }
+    else {
+        xc[0] = (xf[ilower[0]-1] + xf[ilower[0]-2]) / 2;
+    }
+    if (myid == num_procs-1) {
+        xc[Nx_local+1] = 2*xf[Nx] - xc[Nx_local];
+    }
+    else {
+        xc[Nx_local+1] = (xf[Nx_local+ilower[0]] + xf[Nx_local+ilower[0]-1]) / 2;
+    }
     yc[0] = 2*yf[0] - yc[1];
     yc[Ny+1] = 2*yf[Ny] - yc[Ny];
 
     /* Calculate tdma coefficients */
-    for (int i = 1; i <= Nx; i++) {
+    for (int i = 1; i <= Nx_local; i++) {
         kx_W[i] = dt / (2*Re * (xc[i] - xc[i-1])*dx[i]);
         kx_E[i] = dt / (2*Re * (xc[i+1] - xc[i])*dx[i]);
         kx_P[i] = kx_W[i] + kx_E[i] + 1;
@@ -146,10 +192,7 @@ int main(int argc, char **argv) {
     /* Setup grid */
     {
         HYPRE_StructGridCreate(MPI_COMM_WORLD, 2, &grid);
-
-        int ilower[2] = {1, 1}, iupper[2] = {Nx, Ny};
         HYPRE_StructGridSetExtents(grid, ilower, iupper);
-
         HYPRE_StructGridAssemble(grid);
     }
     /* Setup stencil */
@@ -169,14 +212,13 @@ int main(int argc, char **argv) {
 
         /* Setup coefficients */
         {
-            int ilower[2] = {1, 1}, iupper[2] = {Nx, Ny};
             int stencil_indices[5] = {0, 1, 2, 3, 4};
-            /* Nx*Ny grid points, each with 5 stencil points */
-            double values[5*Nx*Ny];
+            /* Nx_local*Ny grid points, each with 5 stencil points */
+            double values[5*Nx_local*Ny];
 
             int m = 0;
             for (int j = 1; j <= Ny; j++) {
-                for (int i = 1; i <= Nx; i++) {
+                for (int i = 1; i <= Nx_local; i++) {
                     values[5*m] = kx_W[i] + kx_E[i] + ky_S[j] + ky_N[j];
                     values[5*m+1] = -ky_N[j];
                     values[5*m+2] = -kx_E[i];
@@ -191,53 +233,40 @@ int main(int argc, char **argv) {
 
         /* Setup coefficients of boundary cells */
         {
-            double values[2*Nm+4];
+            const int Nm = Nx_local > Ny ? Nx_local : Ny;
+            double values[2*Nm];
 
             /* Upper boundary */
             {
-                int ilower[2] = {1, Ny}, iupper[2] = {Nx, Ny};
+                int ilowerb[2] = {ilower[0], Ny}, iupperb[2] = {iupper[0], Ny};
                 int stencil_indices[2] = {0, 1};
 
                 int m = 0;
-                for (int i = 1; i <= Nx; i++) {
+                for (int i = 1; i <= Nx_local; i++) {
                     values[2*m] = kx_W[i] + kx_E[i] + ky_S[Ny];
                     values[2*m+1] = 0;
                     m++;
                 }
 
-                HYPRE_StructMatrixSetBoxValues(matrix, ilower, iupper, 2, stencil_indices, values);
-            }
-            /* Right boundary */
-            {
-                int ilower[2] = {Nx, 1}, iupper[2] = {Nx, Ny};
-                int stencil_indices[2] = {0, 2};
-
-                int m = 0;
-                for (int j = 1; j <= Ny; j++) {
-                    values[2*m] = kx_W[Nx] + ky_S[j] + ky_N[j];
-                    values[2*m+1] = 0;
-                    m++;
-                }
-
-                HYPRE_StructMatrixSetBoxValues(matrix, ilower, iupper, 2, stencil_indices, values);
+                HYPRE_StructMatrixSetBoxValues(matrix, ilowerb, iupperb, 2, stencil_indices, values);
             }
             /* Lower boundary */
             {
-                int ilower[2] = {1, 1}, iupper[2] = {Nx, 1};
+                int ilowerb[2] = {ilower[0], 1}, iupperb[2] = {iupper[0], 1};
                 int stencil_indices[2] = {0, 3};
 
                 int m = 0;
-                for (int i = 1; i <= Nx; i++) {
+                for (int i = 1; i <= Nx_local; i++) {
                     values[2*m] = kx_W[i] + kx_E[i] + ky_N[1];
                     values[2*m+1] = 0;
                     m++;
                 }
 
-                HYPRE_StructMatrixSetBoxValues(matrix, ilower, iupper, 2, stencil_indices, values);
+                HYPRE_StructMatrixSetBoxValues(matrix, ilowerb, iupperb, 2, stencil_indices, values);
             }
-            /* Left boundary */
-            {
-                int ilower[2] = {1, 1}, iupper[2] = {1, Ny};
+            /* Left boundary: only for the first process */
+            if (myid == 0) {
+                int ilowerb[2] = {1, 1}, iupperb[2] = {1, Ny};
                 int stencil_indices[2] = {0, 4};
 
                 int m = 0;
@@ -247,45 +276,43 @@ int main(int argc, char **argv) {
                     m++;
                 }
 
-                HYPRE_StructMatrixSetBoxValues(matrix, ilower, iupper, 2, stencil_indices, values);
-            }
-            /* Upper left corner */
-            {
-                int i[2] = {1, Ny};
-                int stencil_indices[1] = {0};
+                HYPRE_StructMatrixSetBoxValues(matrix, ilowerb, iupperb, 2, stencil_indices, values);
 
+                /* Upper left corner */
+                stencil_indices[0] = 0;
                 values[0] = kx_E[1] + ky_S[Ny];
+                HYPRE_StructMatrixSetBoxValues(matrix, iupperb, iupperb, 1, stencil_indices, values);
 
-                HYPRE_StructMatrixSetBoxValues(matrix, i, i, 1, stencil_indices, values);
+                /* Lower left corner */
+                {
+                    int stencil_indices[5] = {0, 1, 2, 3, 4};
+                    double values[5] = {1, 0, 0, 0, 0};
+                    HYPRE_StructMatrixSetBoxValues(matrix, ilowerb, ilowerb, 5, stencil_indices, values);
+                }
             }
-            /* Upper right corner */
-            {
-                int i[2] = {Nx, Ny};
-                int stencil_indices[1] = {0};
+            /* Right boundary: only for the last process */
+            if (myid == num_procs-1) {
+                int ilowerb[2] = {Nx, 1}, iupperb[2] = {Nx, Ny};
+                int stencil_indices[2] = {0, 2};
 
-                values[0] = kx_W[Nx] + ky_S[Ny];
+                int m = 0;
+                for (int j = 1; j <= Ny; j++) {
+                    values[2*m] = kx_W[Nx_local] + ky_S[j] + ky_N[j];
+                    values[2*m+1] = 0;
+                    m++;
+                }
 
-                HYPRE_StructMatrixSetBoxValues(matrix, i, i, 1, stencil_indices, values);
-            }
-            /* Lower left corner */
-            {
-                int i[2] = {1, 1};
-                int stencil_indices[5] = {0, 1, 2, 3, 4};
+                HYPRE_StructMatrixSetBoxValues(matrix, ilowerb, iupperb, 2, stencil_indices, values);
 
-                values[0] = 1;
-                for (int k = 1; k <= 4; k++)
-                    values[k] = 0;
+                /* Upper right corner */
+                stencil_indices[0] = 0;
+                values[0] = kx_W[Nx_local] + ky_S[Ny];
+                HYPRE_StructMatrixSetBoxValues(matrix, iupperb, iupperb, 1, stencil_indices, values);
 
-                HYPRE_StructMatrixSetBoxValues(matrix, i, i, 5, stencil_indices, values);
-            }
-            /* Lower right corner */
-            {
-                int i[2] = {Nx, 1};
-                int stencil_indices[1] = {0};
-
-                values[0] = kx_W[Nx] + ky_N[1];
-
-                HYPRE_StructMatrixSetBoxValues(matrix, i, i, 1, stencil_indices, values);
+                /* Lower right corner */
+                stencil_indices[0] = 0;
+                values[0] = kx_W[Nx_local] + ky_N[1];
+                HYPRE_StructMatrixSetBoxValues(matrix, ilowerb, ilowerb, 1, stencil_indices, values);
             }
         }
 
@@ -322,40 +349,75 @@ int main(int argc, char **argv) {
         HYPRE_StructPCGSetup(solver, matrix, rhsvec, resvec);
     }
     /* Fill zeros array */
-    for (int i = 0; i < Nx*Ny; i++)
+    for (int i = 0; i < Nx_local*Ny; i++)
         zeros[i] = 0;
 
     /*===== Initialize flow ==================================================*/
-    for (int i = 0; i < Nx+2; i++) {
+    for (int i = 0; i < Nx_local+2; i++) {
         for (int j = 0; j < Ny+2; j++) {
             p[i][j] = p_next[i][j] = p_prime[i][j] = 0;
             u1[i][j] = u1_next[i][j] = u1_star[i][j] = u1_tilde[i][j] = 0;
             u2[i][j] = u2_next[i][j] = u2_star[i][j] = u2_tilde[i][j] = 0;
         }
     }
-    for (int i = 0; i < Nx+1; i++) {
+    for (int i = 0; i < Nx_local+1; i++) {
         for (int j = 0; j < Ny+2; j++) {
             U1[i][j] = U1_next[i][j] = U1_star[i][j] = 0;
         }
     }
-    for (int i = 0; i < Nx+2; i++) {
+    for (int i = 0; i < Nx_local+2; i++) {
         for (int j = 0; j < Ny+1; j++) {
             U2[i][j] = U2_next[i][j] = U2_star[i][j] = 0;
         }
     }
-    for (int i = 0; i <= Nx; i++) {
+    for (int i = 0; i <= Nx_local; i++) {
         U1[i][Ny+1] = 2;
     }
-    for (int i = 1; i <= Nx; i++) {
+    for (int i = 1; i <= Nx_local; i++) {
         u1[i][Ny+1] = 2;
     }
-    memcpy(N1_prev, N1, sizeof(double)*(Nx+2)*(Ny+2));
-    memcpy(N2_prev, N2, sizeof(double)*(Nx+2)*(Ny+2));
+
+    for (int i = 0; i < Nx_local+2; i++) {
+        for (int j = 0; j < Ny+2; j++) {
+            N1[i][j] = N2[i][j] = 0;
+        }
+    }
+    memcpy(N1_prev, N1, sizeof(double)*(Nx_local+2)*(Ny+2));
+    memcpy(N2_prev, N2, sizeof(double)*(Nx_local+2)*(Ny+2));
+
+    /*===== Tic ==============================================================*/
+    if (myid == 0) {
+        clock_gettime(CLOCK_REALTIME, &start_time_total);
+    }
 
     /*===== Main loop ========================================================*/
     for (int tstep = 1; tstep <= numtstep; tstep++) {
+        tic();
+
+        /* Exchange p, u1 and u2 between the adjacent processes */
+        if (myid != num_procs-1) {
+            MPI_Send(p[Nx_local], Ny+2, MPI_DOUBLE, myid+1, 0, MPI_COMM_WORLD);
+            MPI_Send(u1[Nx_local], Ny+2, MPI_DOUBLE, myid+1, 1, MPI_COMM_WORLD);
+            MPI_Send(u2[Nx_local], Ny+2, MPI_DOUBLE, myid+1, 2, MPI_COMM_WORLD);
+        }
+        if (myid != 0) {
+            MPI_Recv(p[0], Ny+2, MPI_DOUBLE, myid-1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            MPI_Recv(u1[0], Ny+2, MPI_DOUBLE, myid-1, 1, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            MPI_Recv(u2[0], Ny+2, MPI_DOUBLE, myid-1, 2, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            MPI_Send(p[1], Ny+2, MPI_DOUBLE, myid-1, 0, MPI_COMM_WORLD);
+            MPI_Send(u1[1], Ny+2, MPI_DOUBLE, myid-1, 1, MPI_COMM_WORLD);
+            MPI_Send(u2[1], Ny+2, MPI_DOUBLE, myid-1, 2, MPI_COMM_WORLD);
+        }
+        if (myid != num_procs-1) {
+            MPI_Recv(p[Nx_local+1], Ny+2, MPI_DOUBLE, myid+1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            MPI_Recv(u1[Nx_local+1], Ny+2, MPI_DOUBLE, myid+1, 1, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            MPI_Recv(u2[Nx_local+1], Ny+2, MPI_DOUBLE, myid+1, 2, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        }
+
+        toc("p, u1, u2 exchg"); tic();
+
         /* Calculate N */
-        for (int i = 1; i <= Nx; i++) {
+        for (int i = 1; i <= Nx_local; i++) {
             for (int j = 1; j <= Ny; j++) {
                 double u1_e = (u1[i][j] * dx[i+1] + u1[i+1][j] * dx[i]) / (dx[i] + dx[i+1]);
                 double u2_e = (u2[i][j] * dx[i+1] + u2[i+1][j] * dx[i]) / (dx[i] + dx[i+1]);
@@ -373,8 +435,10 @@ int main(int argc, char **argv) {
             }
         }
 
+        toc("calc N"); tic();
+
         /* Calculate RHS */
-        for (int i = 1; i <= Nx; i++) {
+        for (int i = 1; i <= Nx_local; i++) {
             for (int j = 1; j <= Ny; j++) {
                 RHS1[i][j] = -dt/2 * (3*N1[i][j] - N1_prev[i][j])
                     - dt * (p[i+1][j] - p[i-1][j]) / (xc[i+1] - xc[i-1])
@@ -389,90 +453,168 @@ int main(int argc, char **argv) {
             }
         }
 
-        /* Calcuate C */
-        for (int j = 1; j <= Ny; j++) {
-            for (int i = 2; i <= Nx; i++) {
-                a[i] = -kx_W[i];
-            }
-            b[1] = kx_W[1] + kx_P[1];
-            for (int i = 2; i <= Nx-1; i++) {
-                b[i] = kx_P[i];
-            }
-            b[Nx] = kx_P[Nx] + kx_E[Nx];
-            for (int i = 1; i <= Nx-1; i++) {
-                c[i] = -kx_E[i];
-            }
-            for (int i = 1; i <= Nx; i++) {
-                d[i] = RHS1[i][j];
-                e[i] = RHS2[i][j];
-            }
-            tdma(Nx, a, b, c, d, e, x, y);
+        toc("calc RHS"); tic();
 
-            for (int i = 1; i <= Nx; i++) {
-                C1[i][j] = x[i];
-                C2[i][j] = y[i];
+        /* Calcuate C */
+        {
+            double a[Ny+2][Nx_local+2], b[Ny+2][Nx_local+2], c[Ny+2][Nx_local+2],
+                   d[Ny+2][Nx_local+2], e[Ny+2][Nx_local+2],
+                   x[Ny+2][Nx_local+2], y[Ny+2][Nx_local+2];
+
+            for (int j = 1; j <= Ny; j++) {
+                /* Initialize TDMA matrix */
+                for (int i = 1; i <= Nx_local; i++) {
+                    a[j][i] = -kx_W[i];
+                    b[j][i] = kx_P[i];
+                    c[j][i] = -kx_E[i];
+                    d[j][i] = RHS1[i][j];
+                    e[j][i] = RHS2[i][j];
+                }
+                if (myid == 0) {
+                    b[j][1] = kx_W[1] + kx_P[1];
+                }
+                if (myid == num_procs-1) {
+                    b[j][Nx_local] = kx_P[Nx_local] + kx_E[Nx_local];
+                }
+
+                /* Forward elimination */
+                if (myid == 0) {
+                    forward(a[j], b[j], c[j], d[j], e[j], 1, Nx_local);
+                }
+                else {
+                    double firsts[4];
+                    MPI_Recv(firsts, 4, MPI_DOUBLE, myid-1, j, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+                    b[j][0] = firsts[0];
+                    c[j][0] = firsts[1];
+                    d[j][0] = firsts[2];
+                    e[j][0] = firsts[3];
+                    forward(a[j], b[j], c[j], d[j], e[j], 0, Nx_local);
+                }
+                if (myid != num_procs-1) {
+                    double lasts[4] = {b[j][Nx_local], c[j][Nx_local], d[j][Nx_local], e[j][Nx_local]};
+                    MPI_Send(lasts, 4, MPI_DOUBLE, myid+1, j, MPI_COMM_WORLD);
+                }
+            }
+            for (int j = 1; j <= Ny; j++) {
+                /* Back substitution */
+                if (myid == num_procs-1) {
+                    x[j][Nx_local] = d[j][Nx_local] / b[j][Nx_local];
+                    y[j][Nx_local] = e[j][Nx_local] / b[j][Nx_local];
+                    back(b[j], c[j], d[j], e[j], x[j], y[j], 1, Nx_local);
+                }
+                else {
+                    double lasts[2];
+                    MPI_Recv(lasts, 2, MPI_DOUBLE, myid+1, j, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+                    x[j][Nx_local+1] = lasts[0];
+                    y[j][Nx_local+1] = lasts[1];
+                    back(b[j], c[j], d[j], e[j], x[j], y[j], 1, Nx_local+1);
+                }
+                if (myid != 0) {
+                    double firsts[2] = {x[j][1], y[j][1]};
+                    MPI_Send(firsts, 2, MPI_DOUBLE, myid-1, j, MPI_COMM_WORLD);
+                }
+                for (int i = 1; i <= Nx_local; i++) {
+                    C1[i][j] = x[j][i];
+                    C2[i][j] = y[j][i];
+                }
             }
         }
+
+        toc("calc C"); tic();
 
         /* Calculate u_star */
-        for (int i = 1; i <= Nx; i++) {
-            for (int j = 2; j <= Ny; j++) {
-                a[j] = -ky_S[j];
-            }
-            b[1] = ky_S[1] + ky_P[1];
-            for (int j = 2; j <= Ny-1; j++) {
-                b[j] = ky_P[j];
-            }
-            b[Ny] = ky_P[Ny] + ky_N[Ny];
-            for (int j = 1; j <= Ny-1; j++) {
-                c[j] = -ky_N[j];
-            }
-            for (int j = 1; j <= Ny; j++) {
-                d[j] = C1[i][j];
-                e[j] = C2[i][j];
-            }
-            tdma(Ny, a, b, c, d, e, x, y);
+        {
+            double a[Ny+2], b[Ny+2], c[Ny+2], d[Ny+2], e[Ny+2], x[Ny+2], y[Ny+2];
+            for (int i = 1; i <= Nx_local; i++) {
+                for (int j = 1; j <= Ny; j++) {
+                    a[j] = -ky_S[j];
+                    b[j] = ky_P[j];
+                    c[j] = -ky_N[j];
+                    d[j] = C1[i][j];
+                    e[j] = C2[i][j];
+                }
+                b[1] = ky_S[1] + ky_P[1];
+                b[Ny] = ky_P[Ny] + ky_N[Ny];
 
-            for (int j = 1; j <= Ny; j++) {
-                u1_star[i][j] = x[j] + u1[i][j];
-                u2_star[i][j] = y[j] + u2[i][j];
+                forward(a, b, c, d, e, 1, Ny);
+                x[Ny] = d[Ny] / b[Ny];
+                y[Ny] = e[Ny] / b[Ny];
+                back(b, c, d, e, x, y, 1, Ny);
+
+                for (int j = 1; j <= Ny; j++) {
+                    u1_star[i][j] = x[j] + u1[i][j];
+                    u2_star[i][j] = y[j] + u2[i][j];
+                }
             }
         }
 
+        toc("calc u_star"); tic();
+
         /* Calculate u_tilde */
-        for (int i = 1; i <= Nx; i++) {
+        for (int i = 1; i <= Nx_local; i++) {
             for (int j = 1; j <= Ny; j++) {
                 u1_tilde[i][j] = u1_star[i][j] + dt * (p[i+1][j] - p[i-1][j]) / (xc[i+1] - xc[i-1]);
                 u2_tilde[i][j] = u2_star[i][j] + dt * (p[i][j+1] - p[i][j-1]) / (yc[j+1] - yc[j-1]);
             }
         }
 
+        toc("calc u_tilde"); tic();
+
+        /* Exchange u1_tilde between the adjacent processes */
+        if (myid != num_procs-1) {
+            MPI_Send(u1_tilde[Nx_local], Ny+2, MPI_DOUBLE, myid+1, 0, MPI_COMM_WORLD);
+        }
+        if (myid != 0) {
+            MPI_Recv(u1_tilde[0], Ny+2, MPI_DOUBLE, myid-1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            MPI_Send(u1_tilde[1], Ny+2, MPI_DOUBLE, myid-1, 0, MPI_COMM_WORLD);
+        }
+        if (myid != num_procs-1) {
+            MPI_Recv(u1_tilde[Nx_local+1], Ny+2, MPI_DOUBLE, myid+1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        }
+
+        toc("u1_tilde exchg"); tic();
+
         /* Calculate U_star */
-        for (int i = 1; i <= Nx-1; i++) {
+        int istart = myid == 0? 1 : 0;
+        int iend = myid == num_procs-1? Nx_local-1 : Nx_local;
+        for (int i = istart; i <= iend; i++) {
             for (int j = 1; j <= Ny; j++) {
                 U1_star[i][j] = (u1_tilde[i][j]*dx[i+1] + u1_tilde[i+1][j]*dx[i]) / (dx[i] + dx[i+1])
                     - dt * (p[i+1][j] - p[i][j]) / (xc[i+1] - xc[i]);
             }
         }
-        for (int i = 1; i <= Nx; i++) {
+        for (int i = 1; i <= Nx_local; i++) {
             for (int j = 1; j <= Ny-1; j++) {
                 U2_star[i][j] = (u2_tilde[i][j]*dy[j+1] + u2_tilde[i][j+1]*dy[j]) / (dy[j] + dy[j+1])
                     - dt * (p[i][j+1] - p[i][j]) / (yc[j+1] - yc[j]);
             }
         }
 
+        toc("calc U_star");
+
         /* Calculate p_prime */
         {
-            int ilower[2] = {1, 1}, iupper[2] = {Nx, Ny}, m;
-            double values[Nx*Ny];
+            int m;
+            double values[Nx_local*Ny];
 
             m = 0;
-            for (int j = 1; j <= Ny; j++) {
-                for (int i = 1; i <= Nx; i++) {
-                    double Q = 1 / (2.*Re) * ((U1_star[i][j] - U1_star[i-1][j]) / dx[i]
-                                              + (U2_star[i][j] - U2_star[i][j-1]) / dy[j]);
-                    values[m] = (i == 1 && j == 1) ? 0 : -Q;
-                    m++;
+            if (myid == 0) {
+                for (int j = 1; j <= Ny; j++) {
+                    for (int i = 1; i <= Nx_local; i++) {
+                        double Q = 1 / (2.*Re) * ((U1_star[i][j] - U1_star[i-1][j]) / dx[i]
+                                                  + (U2_star[i][j] - U2_star[i][j-1]) / dy[j]);
+                        values[m] = (i == 1 && j == 1) ? 0 : -Q;
+                        m++;
+                    }
+                }
+            }
+            else {
+                for (int j = 1; j <= Ny; j++) {
+                    for (int i = 1; i <= Nx_local; i++) {
+                        values[m] = -1 / (2.*Re) * ((U1_star[i][j] - U1_star[i-1][j]) / dx[i]
+                                                    + (U2_star[i][j] - U2_star[i][j-1]) / dy[j]);
+                        m++;
+                    }
                 }
             }
             HYPRE_StructVectorSetBoxValues(rhsvec, ilower, iupper, values);
@@ -481,108 +623,199 @@ int main(int argc, char **argv) {
             HYPRE_StructVectorAssemble(rhsvec);
             HYPRE_StructVectorAssemble(resvec);
 
+            tic();
             HYPRE_StructPCGSolve(solver, matrix, rhsvec, resvec);
+            toc("solve");
 
             HYPRE_StructPCGGetFinalRelativeResidualNorm(solver, &final_res_norm);
-            if (final_res_norm >= 1e-3) {
-                printf("warning: not converged!");
+            if (final_res_norm >= 1e-3 && myid == 0) {
+                printf("warning: not converged!\n");
             }
-            else if (final_res_norm >= 1e3) {
-                printf("error: diverged!");
+            else if (final_res_norm >= 1e3 && myid == 0) {
+                printf("error: diverged!\n");
                 break;
+            }
+            HYPRE_StructPCGGetNumIterations(solver, &final_num_iter);
+            if (final_num_iter > 10 && myid == 0) {
+                printf("num_iter > 10!\n");
             }
 
             HYPRE_StructVectorGetBoxValues(resvec, ilower, iupper, values);
             m = 0;
             for (int j = 1; j <= Ny; j++) {
-                for (int i = 1; i <= Nx; i++) {
+                for (int i = 1; i <= Nx_local; i++) {
                     p_prime[i][j] = values[m];
                     m++;
                 }
             }
         }
 
+        tic();
+
         /* Calculate p_next */
-        for (int i = 1; i <= Nx; i++) {
+        for (int i = 1; i <= Nx_local; i++) {
             for (int j = 1; j <= Ny; j++) {
                 p_next[i][j] = p[i][j] + p_prime[i][j];
             }
         }
 
+        toc("calc p_next"); tic();
+
+        /* Exchange p_prime between the adjacent processes */
+        if (myid != num_procs-1) {
+            MPI_Send(p_prime[Nx_local], Ny+2, MPI_DOUBLE, myid+1, 0, MPI_COMM_WORLD);
+        }
+        if (myid != 0) {
+            MPI_Recv(p_prime[0], Ny+2, MPI_DOUBLE, myid-1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            MPI_Send(p_prime[1], Ny+2, MPI_DOUBLE, myid-1, 0, MPI_COMM_WORLD);
+        }
+        if (myid != num_procs-1) {
+            MPI_Recv(p_prime[Nx_local+1], Ny+2, MPI_DOUBLE, myid+1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        }
+
+        toc("p_prime exchg"); tic();
+
         /* Calculate u_next */
-        for (int i = 1; i <= Nx; i++) {
+        for (int i = 1; i <= Nx_local; i++) {
             for (int j = 1; j <= Ny; j++) {
                 u1_next[i][j] = u1_star[i][j] - dt * (p_prime[i+1][j] - p_prime[i-1][j]) / (xc[i+1] - xc[i-1]);
                 u2_next[i][j] = u2_star[i][j] - dt * (p_prime[i][j+1] - p_prime[i][j-1]) / (yc[j+1] - yc[j-1]);
             }
         }
 
+        toc("calc u_next"); tic();
+
         /* Calculate U_next */
-        for (int i = 1; i <= Nx-1; i++) {
+        for (int i = istart; i <= iend; i++) {
             for (int j = 1; j <= Ny; j++) {
                 U1_next[i][j] = U1_star[i][j] - dt * (p_prime[i+1][j] - p_prime[i][j]) / (xc[i+1] - xc[i]);
             }
         }
-        for (int i = 1; i <= Nx; i++) {
+        for (int i = 1; i <= Nx_local; i++) {
             for (int j = 1; j <= Ny-1; j++) {
                 U2_next[i][j] = U2_star[i][j] - dt * (p_prime[i][j+1] - p_prime[i][j]) / (yc[j+1] - yc[j]);
             }
         }
 
+        toc("calc U_next"); tic();
+
         /* Set velocity boundary conditions */
-        for (int i = 1; i <= Nx; i++) {
-            u1_next[i][0] = -u1_next[i][1];
+        /* Upper boundary */
+        for (int i = 1; i <= Nx_local; i++) {
             u1_next[i][Ny+1] = 2 - u1_next[i][Ny];
-            u2_next[i][0] = -u2_next[i][1];
-            u2_next[i][Ny+1] = 2 - u2_next[i][Ny];
+            u2_next[i][Ny+1] = -u2_next[i][Ny];
         }
-        for (int j = 1; j <= Ny; j++) {
-            u1_next[0][j] = -u1_next[1][j];
-            u1_next[(Nx+1)][j] = -u1_next[Nx][j];
-            u2_next[0][j] = -u2_next[1][j];
-            u2_next[(Nx+1)][j] = -u2_next[Nx][j];
-        }
-        for (int i = 0; i <= Nx; i++) {
-            U1_next[i][0] = -U1_next[i][1];
+        for (int i = 0; i <= Nx_local; i++) {
             U1_next[i][Ny+1] = 2 - U1_next[i][Ny];
         }
-        for (int j = 0; j <= Ny; j++) {
-            U2_next[0][j] = -U2_next[1][j];
-            U2_next[Nx+1][j] = -U2_next[Nx][j];
+        /* Lower boundary */
+        for (int i = 1; i <= Nx_local; i++) {
+            u1_next[i][0] = -u1_next[i][1];
+            u2_next[i][0] = -u2_next[i][1];
+        }
+        for (int i = 0; i <= Nx_local; i++) {
+            U1_next[i][0] = -U1_next[i][1];
+        }
+        /* Left boundary; only for the first process */
+        if (myid == 0) {
+            for (int j = 1; j <= Ny; j++) {
+                u1_next[0][j] = -u1_next[1][j];
+                u2_next[0][j] = -u2_next[1][j];
+            }
+            for (int j = 0; j <= Ny; j++) {
+                U2_next[0][j] = -U2_next[1][j];
+            }
+        }
+        /* Right boudnary; only for the last process */
+        if (myid == num_procs-1) {
+            for (int j = 1; j <= Ny; j++) {
+                u1_next[Nx_local+1][j] = -u1_next[Nx_local][j];
+                u2_next[Nx_local+1][j] = -u2_next[Nx_local][j];
+            }
+            for (int j = 0; j <= Ny; j++) {
+                U2_next[Nx_local+1][j] = -U2_next[Nx_local][j];
+            }
         }
 
-        /* Update for next time step */
-        memcpy(p, p_next, sizeof(double)*(Nx+2)*(Ny+2));
-        memcpy(u1, u1_next, sizeof(double)*(Nx+2)*(Ny+2));
-        memcpy(u2, u2_next, sizeof(double)*(Nx+2)*(Ny+2));
-        memcpy(U1, U1_next, sizeof(double)*(Nx+1)*(Ny+2));
-        memcpy(U2, U2_next, sizeof(double)*(Nx+2)*(Ny+1));
-        memcpy(N1_prev, N1, sizeof(double)*(Nx+2)*(Ny+2));
-        memcpy(N2_prev, N2, sizeof(double)*(Nx+2)*(Ny+2));
-        memset(p_prime, 0, sizeof(double)*(Nx+2)*(Ny+2));
+        toc("set bd cond"); tic();
 
-        if (tstep % 100 == 0) {
+        /* Update for next time step */
+        memcpy(p, p_next, sizeof(double)*(Nx_local+2)*(Ny+2));
+        memcpy(u1, u1_next, sizeof(double)*(Nx_local+2)*(Ny+2));
+        memcpy(u2, u2_next, sizeof(double)*(Nx_local+2)*(Ny+2));
+        memcpy(U1, U1_next, sizeof(double)*(Nx_local+1)*(Ny+2));
+        memcpy(U2, U2_next, sizeof(double)*(Nx_local+2)*(Ny+1));
+        memcpy(N1_prev, N1, sizeof(double)*(Nx_local+2)*(Ny+2));
+        memcpy(N2_prev, N2, sizeof(double)*(Nx_local+2)*(Ny+2));
+
+        toc("update next tstep");
+
+        if (tstep % 100 == 0 && myid == 0) {
             printf("tstep: %d\n", tstep);
         }
     }
 
-    /*===== Export result ====================================================*/
-    /* Calculate streamfunction */
-    for (int i = 1; i <= Nx-1; i++) {
-        for (int j = 1; j <= Ny-1; j++) {
-            psi[i][j] = psi[i][j-1] + dy[j] * U1[i][j];
-        }
+    /*===== Toc ==============================================================*/
+    if (myid == 0) {
+        clock_gettime(CLOCK_REALTIME, &end_time_total);
+        double elapsed_time = (end_time_total.tv_sec-start_time_total.tv_sec) + (end_time_total.tv_nsec-start_time_total.tv_nsec)/1.e9;
+        printf("total elapsed time (s): %.6lf\n", elapsed_time);
     }
 
-    /* Write to output file */
-    FILE *fp_out = fopen("result/cavity_result.txt", "w");
-    for (int i = 0; i <= Nx; i++) {
-        for (int j = 0; j <= Ny; j++) {
-            fprintf(fp_out, "%.14lf ", psi[i][j]);
+    /*===== Export result ====================================================*/
+    if (myid == 0) {
+        double U1_total[Nx+1][Ny+2];
+
+        /* Collect velocity field of all processes */
+        memcpy(&U1_total[0][0], &U1[0][0], sizeof(double)*(Nx_local+1)*(Ny+2));
+        for (int p = 1; p < num_procs; p++) {
+            int a = p*Nx/num_procs + 1, b = (p+1)*Nx/num_procs;
+            MPI_Recv(&U1_total[a-1][0], (b-a+2)*(Ny+2), MPI_DOUBLE, p, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
         }
-        fprintf(fp_out, "\n");
+
+        /* Calculate streamfunction */
+        double psi[Nx+1][Ny+1];
+        for (int i = 0; i <= Nx; i++) {
+            for (int j = 0; j <= Ny; j++) {
+                psi[i][j] = 0;
+            }
+        }
+
+        for (int i = 1; i <= Nx-1; i++) {
+            for (int j = 1; j <= Ny-1; j++) {
+                psi[i][j] = psi[i][j-1] + dy[j] * U1_total[i][j];
+            }
+        }
+
+        /* Write to output file */
+        FILE *fp_out = fopen("result/cavity_result.txt", "w");
+        for (int i = 0; i <= Nx; i++) {
+            for (int j = 0; j <= Ny; j++) {
+                fprintf(fp_out, "%17.14lf ", psi[i][j]);
+            }
+            fprintf(fp_out, "\n");
+        }
+        fclose(fp_out);
     }
-    fclose(fp_out);
+    else {
+        MPI_Send(&U1[0][0], (Nx_local+1)*(Ny+2), MPI_DOUBLE, 0, 0, MPI_COMM_WORLD);
+    }
+
+    // char filename[100] = "\0";
+
+    // snprintf(filename, 100, "result/proc%d.txt", myid);
+    // FILE *fp_N = fopen(filename, "w");
+    // if (fp_N != NULL) {
+    //     int istart = myid == 0? 1 : 0;
+    //     int iend = myid == num_procs-1? Nx_local-1 : Nx_local;
+    //     for (int i = 1; i <= Nx_local; i++) {
+    //         for (int j = 1; j <= Ny; j++) {
+    //             fprintf(fp_N, "%9.6lf ", p_prime[i][j]);
+    //         }
+    //         fprintf(fp_N, "\n");
+    //     }
+    //     fclose(fp_N);
+    // }
 
     /*===== Finalize program =================================================*/
     /* Free memory */

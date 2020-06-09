@@ -10,7 +10,7 @@ int main(int argc, char **argv) {
 
     int n = atoi(argv[1]);
     for (int i = 0; i < n; i++) {
-        printf("%lf ", (double)i / (n-1));
+        printf("%.8lf ", (double)i / (n-1));
     }
     printf("\n");
 

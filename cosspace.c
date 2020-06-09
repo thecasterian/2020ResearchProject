@@ -11,7 +11,7 @@ int main(int argc, char **argv) {
     int n = atoi(argv[1]);
     for (int i = 0; i < n; i++) {
         double x = acos(-1) * i / (n-1);
-        printf("%lf ", 0.5*(1-cos(x)));
+        printf("%.8lf ", 0.5*(1-cos(x)));
     }
     printf("\n");
 
