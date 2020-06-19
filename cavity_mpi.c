@@ -2,12 +2,51 @@
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
+#include <time.h>
 
 #include "HYPRE_struct_ls.h"
 
-#include <time.h>
+#define DEBUG_TICTOC 0
 
-#define DEBUG 0
+#define ASSERT_ABORT(expr) \
+do { \
+    if (!(expr)) { \
+        MPI_Abort(MPI_COMM_WORLD, 0); \
+    } \
+} while (0)
+
+#define VA_GENERIC( \
+_1, _2, _3, _4, _5, _6, _7, _8, _9, _10, _11, _12, _13, _14, _15, _16,  x, ... \
+) x
+#define AT_1(a) (a)
+#define AT_2(a, ...) ((a) && AT_1(__VA_ARGS__))
+#define AT_3(a, ...) ((a) && AT_2(__VA_ARGS__))
+#define AT_4(a, ...) ((a) && AT_3(__VA_ARGS__))
+#define AT_5(a, ...) ((a) && AT_4(__VA_ARGS__))
+#define AT_6(a, ...) ((a) && AT_5(__VA_ARGS__))
+#define AT_7(a, ...) ((a) && AT_6(__VA_ARGS__))
+#define AT_8(a, ...) ((a) && AT_7(__VA_ARGS__))
+#define AT_9(a, ...) ((a) && AT_8(__VA_ARGS__))
+#define AT_10(a, ...) ((a) && AT_9(__VA_ARGS__))
+#define AT_11(a, ...) ((a) && AT_10(__VA_ARGS__))
+#define AT_12(a, ...) ((a) && AT_11(__VA_ARGS__))
+#define AT_13(a, ...) ((a) && AT_12(__VA_ARGS__))
+#define AT_14(a, ...) ((a) && AT_13(__VA_ARGS__))
+#define AT_15(a, ...) ((a) && AT_14(__VA_ARGS__))
+#define AT_16(a, ...) ((a) && AT_15(__VA_ARGS__))
+
+#define ALL_TRUE(...) VA_GENERIC( \
+__VA_ARGS__, \
+AT_16, AT_15, AT_14, AT_13, AT_12, AT_11, AT_10, AT_9, \
+AT_8, AT_7, AT_6, AT_5, AT_4, AT_3, AT_2, AT_1 \
+)(__VA_ARGS__)
+#define CHECK_ALLOC_SUCCESS(...) \
+do { \
+    if (!ALL_TRUE(__VA_ARGS__)) { \
+        fprintf(stderr, "error: failed to allocate memory\n"); \
+        MPI_Abort(MPI_COMM_WORLD, 0); \
+    } \
+} while (0)
 
 void forward(double *a, double *b, double *c, double *d, double *e, int start, int end) {
     for (int k = start+1; k <= end; k++) {
@@ -30,7 +69,7 @@ struct timespec start_time, end_time;
 struct timespec start_time_total, end_time_total;
 
 void tic() {
-#if DEBUG
+#if DEBUG_TICTOC
     if (myid == 0) {
         clock_gettime(CLOCK_REALTIME, &start_time);
     }
@@ -38,7 +77,7 @@ void tic() {
 }
 
 void toc(const char *const msg) {
-#if DEBUG
+#if DEBUG_TICTOC
     if (myid == 0) {
         clock_gettime(CLOCK_REALTIME, &end_time);
         double elapsed_time = (end_time.tv_sec-start_time.tv_sec) + (end_time.tv_nsec-start_time.tv_nsec)/1.e9;
@@ -64,23 +103,26 @@ int main(int argc, char **argv) {
     int numtstep_;
 
     FILE *fp_in = fopen("cavity.in", "r");
+    ASSERT_ABORT(fp_in != 0);
 
     /* Read grid geometry */
-    fscanf(fp_in, "%*s %d", &Nx_);
+    ASSERT_ABORT(fscanf(fp_in, "%*s %d", &Nx_) == 1);
     double *const xf = calloc(Nx_+1, sizeof(double));
+    CHECK_ALLOC_SUCCESS(xf);
     for (int i = 0; i <= Nx_; i++) {
-        fscanf(fp_in, "%lf", &xf[i]);
+        ASSERT_ABORT(fscanf(fp_in, "%lf", &xf[i]) == 1);
     }
 
-    fscanf(fp_in, "%*s %d", &Ny_);
+    ASSERT_ABORT(fscanf(fp_in, "%*s %d", &Ny_) == 1);
     double *const yf = calloc(Ny_+1, sizeof(double));
+    CHECK_ALLOC_SUCCESS(yf);
     for (int j = 0; j <= Ny_; j++) {
-        fscanf(fp_in, "%lf", &yf[j]);
+        ASSERT_ABORT(fscanf(fp_in, "%lf", &yf[j]) == 1);
     }
 
     /* Read Re, dt, numtstep */
-    fscanf(fp_in, "%*s %lf", &Re_);
-    fscanf(fp_in, "%*s %lf %*s %d", &dt_, &numtstep_);
+    ASSERT_ABORT(fscanf(fp_in, "%*s %lf", &Re_) == 1);
+    ASSERT_ABORT(fscanf(fp_in, "%*s %lf %*s %d", &dt_, &numtstep_) == 2);
 
     fclose(fp_in);
 
@@ -100,49 +142,57 @@ int main(int argc, char **argv) {
     double *const dx = calloc(Nx_local+2, sizeof(double));
     double *const yc = calloc(Ny+2, sizeof(double));
     double *const dy = calloc(Ny+2, sizeof(double));
+    CHECK_ALLOC_SUCCESS(xc, dx, yc, dy);
 
     /* Pressure and velocities */
     double (*const p      )[Ny+2] = calloc(Nx_local+2, sizeof(double [Ny+2]));
     double (*const p_next )[Ny+2] = calloc(Nx_local+2, sizeof(double [Ny+2]));
     double (*const p_prime)[Ny+2] = calloc(Nx_local+2, sizeof(double [Ny+2]));
+    CHECK_ALLOC_SUCCESS(p, p_next, p_prime);
 
     double (*const u1      )[Ny+2] = calloc(Nx_local+2, sizeof(double [Ny+2]));
     double (*const u1_next )[Ny+2] = calloc(Nx_local+2, sizeof(double [Ny+2]));
     double (*const u1_star )[Ny+2] = calloc(Nx_local+2, sizeof(double [Ny+2]));
     double (*const u1_tilde)[Ny+2] = calloc(Nx_local+2, sizeof(double [Ny+2]));
+    CHECK_ALLOC_SUCCESS(u1, u1_next, u1_star, u1_tilde);
 
     double (*const u2      )[Ny+2] = calloc(Nx_local+2, sizeof(double [Ny+2]));
     double (*const u2_next )[Ny+2] = calloc(Nx_local+2, sizeof(double [Ny+2]));
     double (*const u2_star )[Ny+2] = calloc(Nx_local+2, sizeof(double [Ny+2]));
     double (*const u2_tilde)[Ny+2] = calloc(Nx_local+2, sizeof(double [Ny+2]));
+    CHECK_ALLOC_SUCCESS(u2, u2_next, u2_star, u2_tilde);
 
     double (*const U1     )[Ny+2] = calloc(Nx_local+1, sizeof(double [Ny+2]));
     double (*const U1_next)[Ny+2] = calloc(Nx_local+1, sizeof(double [Ny+2]));
     double (*const U1_star)[Ny+2] = calloc(Nx_local+1, sizeof(double [Ny+2]));
+    CHECK_ALLOC_SUCCESS(U1, U1_next, U1_star);
 
     double (*const U2     )[Ny+1] = calloc(Nx_local+2, sizeof(double [Ny+1]));
     double (*const U2_next)[Ny+1] = calloc(Nx_local+2, sizeof(double [Ny+1]));
     double (*const U2_star)[Ny+1] = calloc(Nx_local+2, sizeof(double [Ny+1]));
+    CHECK_ALLOC_SUCCESS(U2, U2_next, U2_star);
 
     /* Auxilary variables */
     double (*const N1     )[Ny+2] = calloc(Nx_local+2, sizeof(double [Ny+2]));
     double (*const N1_prev)[Ny+2] = calloc(Nx_local+2, sizeof(double [Ny+2]));
     double (*const N2     )[Ny+2] = calloc(Nx_local+2, sizeof(double [Ny+2]));
     double (*const N2_prev)[Ny+2] = calloc(Nx_local+2, sizeof(double [Ny+2]));
+    CHECK_ALLOC_SUCCESS(N1, N1_prev, N2, N2_prev);
 
     /* For TDMA */
     double (*const C1  )[Ny+2] = calloc(Nx_local+2, sizeof(double [Ny+2]));
     double (*const C2  )[Ny+2] = calloc(Nx_local+2, sizeof(double [Ny+2]));
     double (*const RHS1)[Ny+2] = calloc(Nx_local+2, sizeof(double [Ny+2]));
     double (*const RHS2)[Ny+2] = calloc(Nx_local+2, sizeof(double [Ny+2]));
+    CHECK_ALLOC_SUCCESS(C1, C2, RHS1, RHS2);
 
     double *const kx_W = calloc(Nx_local+2, sizeof(double));
     double *const kx_P = calloc(Nx_local+2, sizeof(double));
     double *const kx_E = calloc(Nx_local+2, sizeof(double));
-
     double *const ky_S = calloc(Ny+2, sizeof(double));
     double *const ky_P = calloc(Ny+2, sizeof(double));
     double *const ky_N = calloc(Ny+2, sizeof(double));
+    CHECK_ALLOC_SUCCESS(kx_W, kx_P, kx_E, ky_S, ky_P, ky_N);
 
     double (*const a_C)[Nx_local+2] = calloc(Ny+2, sizeof(double [Nx_local+2]));
     double (*const b_C)[Nx_local+2] = calloc(Ny+2, sizeof(double [Nx_local+2]));
@@ -151,6 +201,7 @@ int main(int argc, char **argv) {
     double (*const e_C)[Nx_local+2] = calloc(Ny+2, sizeof(double [Nx_local+2]));
     double (*const x_C)[Nx_local+2] = calloc(Ny+2, sizeof(double [Nx_local+2]));
     double (*const y_C)[Nx_local+2] = calloc(Ny+2, sizeof(double [Nx_local+2]));
+    CHECK_ALLOC_SUCCESS(a_C, b_C, c_C, d_C, e_C, x_C, y_C);
 
     double *const a_u = calloc(Ny+2, sizeof(double));
     double *const b_u = calloc(Ny+2, sizeof(double));
@@ -159,6 +210,7 @@ int main(int argc, char **argv) {
     double *const e_u = calloc(Ny+2, sizeof(double));
     double *const x_u = calloc(Ny+2, sizeof(double));
     double *const y_u = calloc(Ny+2, sizeof(double));
+    CHECK_ALLOC_SUCCESS(a_u, b_u, c_u, d_u, e_u, x_u, y_u);
 
     /* For HYPRE */
     HYPRE_StructGrid grid;
