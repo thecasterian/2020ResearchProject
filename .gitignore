@@ -16,6 +16,8 @@
 *.log
 *.synctex.gz
 
-# glvis
-!glvis
-vis
+# test
+*test*
+
+# input file
+*.in

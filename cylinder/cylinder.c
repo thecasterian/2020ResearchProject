@@ -132,8 +132,8 @@ int main(int argc, char **argv) {
     double ky_S[Ny+2], ky_N[Ny+2];
 
     /* For HYPRE */
-    HYPRE_IJMatrix     A_u;
-    HYPRE_ParCSRMatrix parcsr_A_u;
+    HYPRE_IJMatrix     A_u1, A_u2;
+    HYPRE_ParCSRMatrix parcsr_A_u1, parcsr_A_u2;
     HYPRE_IJVector     b_u1, b_u2;
     HYPRE_ParVector    par_b_u1, par_b_u2;
     HYPRE_IJVector     x_u1, x_u2;
@@ -299,9 +299,9 @@ int main(int argc, char **argv) {
     /* Define matrices */
     {
         /* Matrix for intermediate velocity */
-        HYPRE_IJMatrixCreate(MPI_COMM_WORLD, 1, num_tc, 1, num_tc, &A_u);
-        HYPRE_IJMatrixSetObjectType(A_u, HYPRE_PARCSR);
-        HYPRE_IJMatrixInitialize(A_u);
+        HYPRE_IJMatrixCreate(MPI_COMM_WORLD, 1, num_tc, 1, num_tc, &A_u1);
+        HYPRE_IJMatrixSetObjectType(A_u1, HYPRE_PARCSR);
+        HYPRE_IJMatrixInitialize(A_u1);
 
         for (int i = 1; i <= Nx; i++) {
             for (int j = 1; j <= Ny; j++) {
@@ -360,7 +360,7 @@ int main(int argc, char **argv) {
                     }
                 }
 
-                HYPRE_IJMatrixSetValues(A_u, 1, &ncols, &cell_id[i][j], cols, values);
+                HYPRE_IJMatrixSetValues(A_u1, 1, &ncols, &cell_id[i][j], cols, values);
             }
         }
         for (int i = 1; i <= Nx; i++) {
@@ -371,12 +371,12 @@ int main(int argc, char **argv) {
             /* j = 0 */
             cols[0] = cell_id[i][0];
             cols[1] = cell_id[i][1];
-            HYPRE_IJMatrixSetValues(A_u, 1, &ncols, &cell_id[i][0], cols, values);
+            HYPRE_IJMatrixSetValues(A_u1, 1, &ncols, &cell_id[i][0], cols, values);
 
             /* j = Ny+1 */
             cols[0] = cell_id[i][Ny+1];
             cols[1] = cell_id[i][Ny];
-            HYPRE_IJMatrixSetValues(A_u, 1, &ncols, &cell_id[i][Ny+1], cols, values);
+            HYPRE_IJMatrixSetValues(A_u1, 1, &ncols, &cell_id[i][Ny+1], cols, values);
         }
         for (int j = 1; j <= Ny; j++) {
             int ncols = 2;
@@ -386,16 +386,114 @@ int main(int argc, char **argv) {
             /* i = 0 */
             cols[0] = cell_id[0][j];
             cols[1] = cell_id[1][j];
-            HYPRE_IJMatrixSetValues(A_u, 1, &ncols, &cell_id[0][j], cols, values);
+            HYPRE_IJMatrixSetValues(A_u1, 1, &ncols, &cell_id[0][j], cols, values);
 
             /* i = Nx+1 */
             cols[0] = cell_id[Nx+1][j];
             cols[1] = cell_id[Nx][j];
-            HYPRE_IJMatrixSetValues(A_u, 1, &ncols, &cell_id[Nx+1][j], cols, values);
+            HYPRE_IJMatrixSetValues(A_u1, 1, &ncols, &cell_id[Nx+1][j], cols, values);
         }
 
-        HYPRE_IJMatrixAssemble(A_u);
-        HYPRE_IJMatrixGetObject(A_u, (void **)&parcsr_A_u);
+        HYPRE_IJMatrixAssemble(A_u1);
+        HYPRE_IJMatrixGetObject(A_u1, (void **)&parcsr_A_u1);
+
+        HYPRE_IJMatrixCreate(MPI_COMM_WORLD, 1, num_tc, 1, num_tc, &A_u2);
+        HYPRE_IJMatrixSetObjectType(A_u2, HYPRE_PARCSR);
+        HYPRE_IJMatrixInitialize(A_u2);
+
+        for (int i = 1; i <= Nx; i++) {
+            for (int j = 1; j <= Ny; j++) {
+                int ncols;
+                int cols[5];
+                double values[5];
+
+                if (flag[i][j] == 1) {
+                    ncols = 5;
+                    cols[0] = cell_id[i][j];
+                    for (int k = 0; k < 4; k++) {
+                        cols[k+1] = adj_cell_id[i][j][k];
+                    }
+                    values[0] = 1 + ky_N[j] + kx_E[i] + ky_S[j] + kx_W[i];
+                    values[1] = -ky_N[j];
+                    values[2] = -kx_E[i];
+                    values[3] = -ky_S[j];
+                    values[4] = -kx_W[i];
+                }
+                else if (flag[i][j] == 2) {
+                    int idx = -1;
+                    for (int k = 0; k < 4; k++) {
+                        if (gc_interp_cell_id[cell_id[i][j]][k] == cell_id[i][j]) {
+                            idx = k;
+                            break;
+                        }
+                    }
+
+                    if (idx == -1) {
+                        ncols = 5;
+                        cols[0] = cell_id[i][j];
+                        for (int k = 0; k < 4; k++) {
+                            cols[k+1] = gc_interp_cell_id[cell_id[i][j]][k];
+                        }
+                        values[0] = 1;
+                        for (int k = 0; k < 4; k++) {
+                            values[k+1] = gc_interp_coeff[cell_id[i][j]][k];
+                        }
+                    }
+                    else {
+                        ncols = 4;
+                        cols[0] = cell_id[i][j];
+                        int cnt = 1;
+                        for (int k = 0; k < 4; k++) {
+                            if (k != idx) {
+                                cols[cnt++] = gc_interp_cell_id[cell_id[i][j]][k];
+                            }
+                        }
+                        values[0] = 1 + gc_interp_coeff[cell_id[i][j]][idx];
+                        cnt = 1;
+                        for (int k = 0; k < 4; k++) {
+                            if (k != idx) {
+                                values[cnt++] = gc_interp_coeff[cell_id[i][j]][k];
+                            }
+                        }
+                    }
+                }
+
+                HYPRE_IJMatrixSetValues(A_u2, 1, &ncols, &cell_id[i][j], cols, values);
+            }
+        }
+        for (int i = 1; i <= Nx; i++) {
+            int ncols = 2;
+            int cols[2];
+            double values[2] = {1, 1};
+
+            /* j = 0 */
+            cols[0] = cell_id[i][0];
+            cols[1] = cell_id[i][1];
+            HYPRE_IJMatrixSetValues(A_u2, 1, &ncols, &cell_id[i][0], cols, values);
+
+            /* j = Ny+1 */
+            cols[0] = cell_id[i][Ny+1];
+            cols[1] = cell_id[i][Ny];
+            HYPRE_IJMatrixSetValues(A_u2, 1, &ncols, &cell_id[i][Ny+1], cols, values);
+        }
+        for (int j = 1; j <= Ny; j++) {
+            int ncols = 2;
+            int cols[2];
+            double values[2] = {1, 1};
+
+            /* i = 0 */
+            cols[0] = cell_id[0][j];
+            cols[1] = cell_id[1][j];
+            HYPRE_IJMatrixSetValues(A_u2, 1, &ncols, &cell_id[0][j], cols, values);
+
+            /* i = Nx+1 */
+            cols[0] = cell_id[Nx+1][j];
+            cols[1] = cell_id[Nx][j];
+            HYPRE_IJMatrixSetValues(A_u2, 1, &ncols, &cell_id[Nx+1][j], cols, values);
+        }
+
+        HYPRE_IJMatrixAssemble(A_u2);
+        HYPRE_IJMatrixGetObject(A_u2, (void **)&parcsr_A_u2);
 
         /* Matrix for pressure */
         HYPRE_IJMatrixCreate(MPI_COMM_WORLD, 1, num_tc, 1, num_tc, &A_p);
@@ -528,21 +626,18 @@ int main(int argc, char **argv) {
     /* Initialize solver */
     {
         HYPRE_ParCSRBiCGSTABCreate(MPI_COMM_WORLD, &solver_u1);
-        HYPRE_BiCGSTABSetMaxIter(solver_u1, 1000);
+        HYPRE_BiCGSTABSetMaxIter(solver_u1, 100);
         HYPRE_BiCGSTABSetTol(solver_u1, 1e-6);
 
         HYPRE_ParCSRBiCGSTABCreate(MPI_COMM_WORLD, &solver_u2);
-        HYPRE_BiCGSTABSetMaxIter(solver_u2, 1000);
+        HYPRE_BiCGSTABSetMaxIter(solver_u2, 100);
         HYPRE_BiCGSTABSetTol(solver_u2, 1e-6);
 
         HYPRE_ParCSRBiCGSTABCreate(MPI_COMM_WORLD, &solver_p);
-        HYPRE_BiCGSTABSetMaxIter(solver_p, 1000);
+        HYPRE_BiCGSTABSetMaxIter(solver_p, 100);
         HYPRE_BiCGSTABSetTol(solver_p, 1e-6);
-        // HYPRE_BiCGSTABSetPrintLevel(solver_p, 2);
-        // HYPRE_BiCGSTABSetLogging(solver_p, 1);
 
         HYPRE_BoomerAMGCreate(&precond);
-        // HYPRE_BoomerAMGSetPrintLevel(precond, 1);
         HYPRE_BoomerAMGSetCoarsenType(precond, 6);
         HYPRE_BoomerAMGSetOldDefault(precond);
         HYPRE_BoomerAMGSetRelaxType(precond, 6);
@@ -587,9 +682,7 @@ int main(int argc, char **argv) {
     /*===== Initialize flow ==================================================*/
     for (int i = 0; i <= Nx+1; i++) {
         for (int j = 0; j <= Ny+1; j++) {
-            if (cell_id[i][j]) {
-                u1[i][j] = 1;
-            }
+            u1[i][j] = 1;
         }
     }
     for (int i = 0; i <= Nx; i++) {
@@ -644,16 +737,18 @@ int main(int argc, char **argv) {
         /* Calculate RHS */
         for (int i = 1; i <= Nx; i++) {
             for (int j = 1; j <= Ny; j++) {
-                RHS1[i][j] = -dt/2 * (3*N1[i][j] - N1_prev[i][j])
-                    - dt * (p[i+1][j] - p[i-1][j]) / (xc[i+1] - xc[i-1])
-                    + (1 - ky_N[j] - kx_E[i] - ky_S[j] - kx_W[i])*u1[i][j]
-                    + ky_N[j]*u1[i][j+1] + kx_E[i]*u1[i+1][j]
-                    + ky_S[j]*u1[i][j-1] + kx_W[i]*u1[i-1][j];
-                RHS2[i][j] = -dt/2 * (3*N2[i][j] - N2_prev[i][j])
-                    - dt * (p[i][j+1] - p[i][j-1]) / (yc[j+1] - yc[j-1])
-                    + (1 - ky_N[j] - kx_E[i] - ky_S[j] - kx_W[i])*u2[i][j]
-                    + ky_N[j]*u2[i][j+1] + kx_E[i]*u2[i+1][j]
-                    + ky_S[j]*u2[i][j-1] + kx_W[i]*u2[i-1][j];
+                if (flag[i][j] == 1) {
+                    RHS1[i][j] = -dt/2 * (3*N1[i][j] - N1_prev[i][j])
+                        - dt * (p[i+1][j] - p[i-1][j]) / (xc[i+1] - xc[i-1])
+                        + (1 - ky_N[j] - kx_E[i] - ky_S[j] - kx_W[i])*u1[i][j]
+                        + ky_N[j]*u1[i][j+1] + kx_E[i]*u1[i+1][j]
+                        + ky_S[j]*u1[i][j-1] + kx_W[i]*u1[i-1][j];
+                    RHS2[i][j] = -dt/2 * (3*N2[i][j] - N2_prev[i][j])
+                        - dt * (p[i][j+1] - p[i][j-1]) / (yc[j+1] - yc[j-1])
+                        + (1 - ky_N[j] - kx_E[i] - ky_S[j] - kx_W[i])*u2[i][j]
+                        + ky_N[j]*u2[i][j+1] + kx_E[i]*u2[i+1][j]
+                        + ky_S[j]*u2[i][j-1] + kx_W[i]*u2[i-1][j];
+                }
             }
         }
 
@@ -690,11 +785,11 @@ int main(int argc, char **argv) {
             HYPRE_IJVectorGetObject(x_u1, (void **)&par_x_u1);
             HYPRE_IJVectorGetObject(x_u2, (void **)&par_x_u2);
 
-            HYPRE_ParCSRBiCGSTABSetup(solver_u1, parcsr_A_u, par_b_u1, par_x_u1);
-            HYPRE_ParCSRBiCGSTABSetup(solver_u2, parcsr_A_u, par_b_u2, par_x_u2);
+            HYPRE_ParCSRBiCGSTABSetup(solver_u1, parcsr_A_u1, par_b_u1, par_x_u1);
+            HYPRE_ParCSRBiCGSTABSetup(solver_u2, parcsr_A_u2, par_b_u2, par_x_u2);
 
-            HYPRE_ParCSRBiCGSTABSolve(solver_u1, parcsr_A_u, par_b_u1, par_x_u1);
-            HYPRE_ParCSRBiCGSTABSolve(solver_u2, parcsr_A_u, par_b_u2, par_x_u2);
+            HYPRE_ParCSRBiCGSTABSolve(solver_u1, parcsr_A_u1, par_b_u1, par_x_u1);
+            HYPRE_ParCSRBiCGSTABSolve(solver_u2, parcsr_A_u2, par_b_u2, par_x_u2);
 
             HYPRE_IJVectorGetValues(x_u1, num_tc, vector_rows, vector_res);
             for (int i = 0; i <= Nx+1; i++) {
@@ -718,20 +813,22 @@ int main(int argc, char **argv) {
         /* Calculate u_tilde */
         for (int i = 1; i <= Nx; i++) {
             for (int j = 1; j <= Ny; j++) {
-                u1_tilde[i][j] = u1_star[i][j] + dt * (p[i+1][j] - p[i-1][j]) / (xc[i+1] - xc[i-1]);
-                u2_tilde[i][j] = u2_star[i][j] + dt * (p[i][j+1] - p[i][j-1]) / (yc[j+1] - yc[j-1]);
+                if (flag[i][j] == 1) {
+                    u1_tilde[i][j] = u1_star[i][j] + dt * (p[i+1][j] - p[i-1][j]) / (xc[i+1] - xc[i-1]);
+                    u2_tilde[i][j] = u2_star[i][j] + dt * (p[i][j+1] - p[i][j-1]) / (yc[j+1] - yc[j-1]);
+                }
             }
         }
 
         /* Calculate U_star */
-        for (int i = 1; i <= Nx-1; i++) {
-            for (int j = 1; j <= Ny; j++) {
+        for (int i = 0; i <= Nx; i++) {
+            for (int j = 0; j <= Ny+1; j++) {
                 U1_star[i][j] = (u1_tilde[i][j]*dx[i+1] + u1_tilde[i+1][j]*dx[i]) / (dx[i] + dx[i+1])
                     - dt * (p[i+1][j] - p[i][j]) / (xc[i+1] - xc[i]);
             }
         }
-        for (int i = 1; i <= Nx; i++) {
-            for (int j = 1; j <= Ny-1; j++) {
+        for (int i = 0; i <= Nx+1; i++) {
+            for (int j = 0; j <= Ny; j++) {
                 U2_star[i][j] = (u2_tilde[i][j]*dy[j+1] + u2_tilde[i][j+1]*dy[j]) / (dy[j] + dy[j+1])
                     - dt * (p[i][j+1] - p[i][j]) / (yc[j+1] - yc[j]);
             }
@@ -793,13 +890,13 @@ int main(int argc, char **argv) {
         }
 
         /* Calculate U_next */
-        for (int i = 1; i <= Nx-1; i++) {
-            for (int j = 1; j <= Ny; j++) {
+        for (int i = 0; i <= Nx; i++) {
+            for (int j = 0; j <= Ny+1; j++) {
                 U1_next[i][j] = U1_star[i][j] - dt * (p_prime[i+1][j] - p_prime[i][j]) / (xc[i+1] - xc[i]);
             }
         }
-        for (int i = 1; i <= Nx; i++) {
-            for (int j = 1; j <= Ny-1; j++) {
+        for (int i = 0; i <= Nx+1; i++) {
+            for (int j = 0; j <= Ny; j++) {
                 U2_next[i][j] = U2_star[i][j] - dt * (p_prime[i][j+1] - p_prime[i][j]) / (yc[j+1] - yc[j]);
             }
         }
@@ -826,16 +923,6 @@ int main(int argc, char **argv) {
             U2_next[Nx+1][j] = -U2_next[Nx][j];
         }
 
-        /* Set pressure boundary conditions */
-        for (int i = 1; i <= Nx; i++) {
-            p_next[i][0] = -p_next[i][1];
-            p_next[i][Ny+1] = -p_next[i][Ny];
-        }
-        for (int j = 1; j <= Ny; j++) {
-            p_next[0][j] = -p_next[1][j];
-            p_next[Nx+1][j] = -p_next[Nx][j];
-        }
-
         /* Update for next time step */
         memcpy(p, p_next, sizeof(double)*(Nx+2)*(Ny+2));
         memcpy(u1, u1_next, sizeof(double)*(Nx+2)*(Ny+2));
@@ -845,7 +932,7 @@ int main(int argc, char **argv) {
         memcpy(N1_prev, N1, sizeof(double)*(Nx+2)*(Ny+2));
         memcpy(N2_prev, N2, sizeof(double)*(Nx+2)*(Ny+2));
 
-        if (tstep % 100 == 0) {
+        if (tstep % 50 == 0) {
             printf("tstep: %d\n", tstep);
         }
     }
