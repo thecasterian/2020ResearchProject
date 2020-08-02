@@ -13,14 +13,14 @@ y = (y[1:] + y[:-1]) / 2
 
 Y, X = np.meshgrid(y, x)
 
-u1 = np.loadtxt("u1.txt")
-u2 = np.loadtxt("u2.txt")
-p = np.loadtxt("p.txt")
+u1 = np.loadtxt("u1.txt")[1:-1, 1:-1]
+u2 = np.loadtxt("u2.txt")[1:-1, 1:-1]
+p = np.loadtxt("p.txt")[1:-1, 1:-1]
 
-# norm = np.sqrt(u1**2 + u2**2)
-# norm[np.sqrt(X**2 + Y**2) < 0.5] = np.nan
-# u1 /= norm
-# u2 /= norm
+norm = np.sqrt(u1**2 + u2**2)
+norm[np.sqrt(X**2 + Y**2) < 0.5] = np.nan
+u1 /= norm
+u2 /= norm
 
 circle1 = plt.Circle((0, 0), 0.5, color='gray')
 circle2 = plt.Circle((0, 0), 0.5, color='gray')

@@ -388,10 +388,9 @@ int main(int argc, char **argv) {
             cols[1] = cell_id[1][j];
             HYPRE_IJMatrixSetValues(A_u1, 1, &ncols, &cell_id[0][j], cols, values);
 
-            /* i = Nx+1; u1[Nx+1][j] - u1[Nx][j] = 0 */
+            /* i = Nx+1; u1[Nx+1][j] + u1[Nx][j] = 2 */
             cols[0] = cell_id[Nx+1][j];
             cols[1] = cell_id[Nx][j];
-            // values[1] = -1;
             HYPRE_IJMatrixSetValues(A_u1, 1, &ncols, &cell_id[Nx+1][j], cols, values);
         }
 
@@ -487,10 +486,9 @@ int main(int argc, char **argv) {
             cols[1] = cell_id[1][j];
             HYPRE_IJMatrixSetValues(A_u2, 1, &ncols, &cell_id[0][j], cols, values);
 
-            /* i = Nx+1; u2[Nx+1][j] - u2[Nx][j] = 0 */
+            /* i = Nx+1; u2[Nx+1][j] + u2[Nx][j] = 0 */
             cols[0] = cell_id[Nx+1][j];
             cols[1] = cell_id[Nx][j];
-            // values[1] = -1;
             HYPRE_IJMatrixSetValues(A_u2, 1, &ncols, &cell_id[Nx+1][j], cols, values);
         }
 
@@ -504,11 +502,11 @@ int main(int argc, char **argv) {
 
         for (int i = 1; i <= Nx; i++) {
             for (int j = 1; j <= Ny; j++) {
-                if (i == 1 & j == 1) {
-                    int ncols = 1;
-                    int cols[1] = {cell_id[1][1]};
-                    double values[1] = {1};
-                    HYPRE_IJMatrixSetValues(A_p, 1, &ncols, &cell_id[1][1], cols, values);
+                if (i == 1 & j == Ny/2) {
+                    int ncols = 2;
+                    int cols[2] = {cell_id[i][j], cell_id[i][j+1]};
+                    double values[2] = {1, 1};
+                    HYPRE_IJMatrixSetValues(A_p, 1, &ncols, &cell_id[i][j], cols, values);
                     continue;
                 }
 
@@ -586,31 +584,18 @@ int main(int argc, char **argv) {
             HYPRE_IJMatrixSetValues(A_p, 1, &ncols, &cell_id[i][Ny+1], cols, values);
         }
         for (int j = 1; j <= Ny; j++) {
-            int ncols;
-            int cols[3];
-            double values[3];
+            int ncols = 2;
+            int cols[2];
+            double values[2] = {1, -1};
 
             /* i = 0; p[0][j] - p[1][j] = 0 */
-            ncols = 2;
             cols[0] = cell_id[0][j];
             cols[1] = cell_id[1][j];
-            values[0] = 1;
-            values[1] = -1;
             HYPRE_IJMatrixSetValues(A_p, 1, &ncols, &cell_id[0][j], cols, values);
 
-            /* i = Nx+1; p[Nx+1][j] - 2*p[Nx][j] + p[Nx-1][j] = 0 */
-            // ncols = 3;
-            // cols[0] = cell_id[Nx+1][j];
-            // cols[1] = cell_id[Nx][j];
-            // cols[2] = cell_id[Nx-1][j];
-            // values[0] = 1;
-            // values[1] = -2;
-            // values[2] = 1;
-            ncols = 2;
+            /* i = Nx+1; p[Nx+1][j] - p[Nx][j] = 0 */
             cols[0] = cell_id[Nx+1][j];
             cols[1] = cell_id[Nx][j];
-            values[0] = 1;
-            values[1] = -1;
             HYPRE_IJMatrixSetValues(A_p, 1, &ncols, &cell_id[Nx+1][j], cols, values);
         }
 
@@ -629,7 +614,7 @@ int main(int argc, char **argv) {
         HYPRE_IJVectorSetObjectType(b_u2, HYPRE_PARCSR);
         HYPRE_IJVectorInitialize(b_u2);
 
-        HYPRE_IJVectorCreate(MPI_COMM_WORLD, 1, num_tc, &b_p);
+        HYPRE_IJVectorCreate(MPI_COMM_WORLD, 1, num_tc+1, &b_p);
         HYPRE_IJVectorSetObjectType(b_p, HYPRE_PARCSR);
         HYPRE_IJVectorInitialize(b_p);
 
@@ -650,12 +635,12 @@ int main(int argc, char **argv) {
     /* Initialize solver */
     {
         HYPRE_ParCSRBiCGSTABCreate(MPI_COMM_WORLD, &solver_u1);
-        HYPRE_BiCGSTABSetMaxIter(solver_u1, 100);
-        HYPRE_BiCGSTABSetTol(solver_u1, 1e-12);
+        HYPRE_BiCGSTABSetMaxIter(solver_u1, 1000);
+        HYPRE_BiCGSTABSetTol(solver_u1, 1e-6);
 
         HYPRE_ParCSRBiCGSTABCreate(MPI_COMM_WORLD, &solver_u2);
-        HYPRE_BiCGSTABSetMaxIter(solver_u2, 100);
-        HYPRE_BiCGSTABSetTol(solver_u2, 1e-12);
+        HYPRE_BiCGSTABSetMaxIter(solver_u2, 1000);
+        HYPRE_BiCGSTABSetTol(solver_u2, 1e-6);
 
         HYPRE_ParCSRBiCGSTABCreate(MPI_COMM_WORLD, &solver_p);
         HYPRE_BiCGSTABSetMaxIter(solver_p, 1000);
@@ -754,27 +739,6 @@ int main(int argc, char **argv) {
             }
         }
 
-        FILE *fp_N = fopen("N1.txt", "w");
-        if (fp_N) {
-            for (int i = 0; i <= Nx+1; i++) {
-                for (int j = 0; j <= Ny+1; j++) {
-                    fprintf(fp_N, "%17.14lf ", N1[i][j]);
-                }
-                fprintf(fp_N, "\n");
-            }
-            fclose(fp_N);
-        }
-        fp_N = fopen("N2.txt", "w");
-        if (fp_N) {
-            for (int i = 0; i <= Nx+1; i++) {
-                for (int j = 0; j <= Ny+1; j++) {
-                    fprintf(fp_N, "%17.14lf ", N2[i][j]);
-                }
-                fprintf(fp_N, "\n");
-            }
-            fclose(fp_N);
-        }
-
         /* Calculate RHS */
         for (int i = 1; i <= Nx; i++) {
             for (int j = 1; j <= Ny; j++) {
@@ -791,27 +755,6 @@ int main(int argc, char **argv) {
                         + ky_S[j]*u2[i][j-1] + kx_W[i]*u2[i-1][j];
                 }
             }
-        }
-
-        FILE *fp_RHS = fopen("RHS1.txt", "w");
-        if (fp_RHS) {
-            for (int i = 0; i <= Nx+1; i++) {
-                for (int j = 0; j <= Ny+1; j++) {
-                    fprintf(fp_RHS, "%17.14lf ", RHS1[i][j]);
-                }
-                fprintf(fp_RHS, "\n");
-            }
-            fclose(fp_RHS);
-        }
-        fp_RHS = fopen("RHS2.txt", "w");
-        if (fp_RHS) {
-            for (int i = 0; i <= Nx+1; i++) {
-                for (int j = 0; j <= Ny+1; j++) {
-                    fprintf(fp_RHS, "%17.14lf ", RHS2[i][j]);
-                }
-                fprintf(fp_RHS, "\n");
-            }
-            fclose(fp_RHS);
         }
 
         /* Calculate u_star */
@@ -872,27 +815,6 @@ int main(int argc, char **argv) {
             }
         }
 
-        FILE *fp_ustar = fopen("u1_star.txt", "w");
-        if (fp_ustar) {
-            for (int i = 0; i <= Nx+1; i++) {
-                for (int j = 0; j <= Ny+1; j++) {
-                    fprintf(fp_ustar, "%17.14lf ", u1_star[i][j]);
-                }
-                fprintf(fp_ustar, "\n");
-            }
-            fclose(fp_ustar);
-        }
-        fp_ustar = fopen("u2_star.txt", "w");
-        if (fp_ustar) {
-            for (int i = 0; i <= Nx+1; i++) {
-                for (int j = 0; j <= Ny+1; j++) {
-                    fprintf(fp_ustar, "%17.14lf ", u2_star[i][j]);
-                }
-                fprintf(fp_ustar, "\n");
-            }
-            fclose(fp_ustar);
-        }
-
         /* Calculate u_tilde */
         for (int i = 1; i <= Nx; i++) {
             for (int j = 1; j <= Ny; j++) {
@@ -902,88 +824,36 @@ int main(int argc, char **argv) {
                 }
             }
         }
-        for (int i = 1; i <= Nx; i++) {
-            u1_tilde[i][0] = u1_star[i][0] + dt * (p[i+1][0] - p[i-1][0]) / (xc[i+1] - xc[i-1]);
-            u1_tilde[i][Ny+1] = u1_star[i][Ny+1] + dt * (p[i+1][Ny+1] - p[i-1][Ny+1]) / (xc[i+1] - xc[i-1]);
-            u2_tilde[i][0] = u2_star[i][0] + dt * (p[i][1] - p[i][0]) / (yc[1] - yc[0]);
-            u2_tilde[i][Ny+1] = u2_star[i][Ny+1] + dt * (p[i][Ny+1] - p[i][Ny]) / (yc[Ny+1] - yc[Ny]);
-        }
-        for (int j = 1; j <= Ny; j++) {
-            u1_tilde[0][j] = u1_star[0][j] + dt * (p[1][j] - p[0][j]) / (xc[1] - xc[0]);
-            u1_tilde[Nx+1][j] = u1_star[Nx+1][j] + dt * (p[Nx+1][j] - p[Nx][j]) / (xc[Nx+1] - xc[Nx]);
-            u2_tilde[0][j] = u2_star[0][j] + dt * (p[0][j+1] - p[0][j-1]) / (yc[j+1] - yc[j-1]);
-            u2_tilde[Nx+1][j] = u2_star[Nx+1][j] + dt * (p[Nx+1][j+1] - p[Nx+1][j-1]) / (yc[j+1] - yc[j-1]);
-        }
-
-        FILE *fp_utilde = fopen("u1_tilde.txt", "w");
-        if (fp_utilde) {
-            for (int i = 0; i <= Nx+1; i++) {
-                for (int j = 0; j <= Ny+1; j++) {
-                    fprintf(fp_utilde, "%17.14lf ", u1_tilde[i][j]);
-                }
-                fprintf(fp_utilde, "\n");
-            }
-            fclose(fp_utilde);
-        }
-        fp_utilde = fopen("u2_tilde.txt", "w");
-        if (fp_utilde) {
-            for (int i = 0; i <= Nx+1; i++) {
-                for (int j = 0; j <= Ny+1; j++) {
-                    fprintf(fp_utilde, "%17.14lf ", u2_tilde[i][j]);
-                }
-                fprintf(fp_utilde, "\n");
-            }
-            fclose(fp_utilde);
-        }
 
         /* Calculate U_star */
-        for (int i = 0; i <= Nx; i++) {
+        for (int i = 1; i <= Nx-1; i++) {
             for (int j = 1; j <= Ny; j++) {
                 U1_star[i][j] = (u1_tilde[i][j]*dx[i+1] + u1_tilde[i+1][j]*dx[i]) / (dx[i] + dx[i+1])
                     - dt * (p[i+1][j] - p[i][j]) / (xc[i+1] - xc[i]);
             }
         }
         for (int i = 1; i <= Nx; i++) {
-            for (int j = 0; j <= Ny; j++) {
+            for (int j = 1; j <= Ny-1; j++) {
                 U2_star[i][j] = (u2_tilde[i][j]*dy[j+1] + u2_tilde[i][j+1]*dy[j]) / (dy[j] + dy[j+1])
                     - dt * (p[i][j+1] - p[i][j]) / (yc[j+1] - yc[j]);
             }
         }
 
-        FILE *fp_Ustar = fopen("U1_star.txt", "w");
-        if (fp_Ustar) {
-            for (int i = 0; i <= Nx; i++) {
-                for (int j = 0; j <= Ny+1; j++) {
-                    fprintf(fp_Ustar, "%17.14lf ", U1_star[i][j]);
-                }
-                fprintf(fp_Ustar, "\n");
-            }
-            fclose(fp_Ustar);
+        for (int i = 1; i <= Nx-1; i++) {
+            U1_star[i][0] = 2 - U1_star[i][1];
+            U1_star[i][Ny+1] = 2 - U1_star[i][Ny];
         }
-        fp_Ustar = fopen("U2_star.txt", "w");
-        if (fp_Ustar) {
-            for (int i = 0; i <= Nx+1; i++) {
-                for (int j = 0; j <= Ny; j++) {
-                    fprintf(fp_Ustar, "%17.14lf ", U2_star[i][j]);
-                }
-                fprintf(fp_Ustar, "\n");
-            }
-            fclose(fp_Ustar);
+        for (int j = 1; j <= Ny; j++) {
+            U1_star[0][j] = 1;
+            U1_star[Nx][j] = 1;
         }
-
-        FILE *fp_Q = fopen("Q.txt", "w");
-        if (fp_Q) {
-            for (int i = 1; i <= Nx; i++) {
-                for (int j = 1; j <= Ny; j++) {
-                    double Q = 1 / (2*Re) * (
-                        (U1_star[i][j] - U1_star[i-1][j]) / dx[i]
-                        + (U2_star[i][j] - U2_star[i][j-1]) / dy[j]
-                    );
-                    fprintf(fp_Q, "%17.14lf ", flag[i][j] == 1 ? Q : 0);
-                }
-                fprintf(fp_Q, "\n");
-            }
-            fclose(fp_Q);
+        for (int i = 1; i <= Nx; i++) {
+            U2_star[i][0] = 0;
+            U2_star[i][Ny] = 0;
+        }
+        for (int j = 1; j <= Ny-1; j++) {
+            U2_star[0][j] = -U2_star[1][j];
+            U2_star[Nx+1][j] = -U2_star[Nx][j];
         }
 
         /* Calculate p_prime */
@@ -996,6 +866,9 @@ int main(int argc, char **argv) {
                             (U1_star[i][j] - U1_star[i-1][j]) / dx[i]
                             + (U2_star[i][j] - U2_star[i][j-1]) / dy[j]
                         );
+                        if (i == 1 && j == Ny/2) {
+                            vector_values_p[cell_id[i][j]-1] = 0;
+                        }
                     }
                 }
             }
@@ -1023,16 +896,6 @@ int main(int argc, char **argv) {
             }
         }
 
-        FILE *fp_pprime = fopen("pprime.txt", "w");
-        if (fp_pprime) {
-            for (int i = 0; i <= Nx+1; i++) {
-                for (int j = 0; j <= Ny+1; j++) {
-                    fprintf(fp_pprime, "%20.14lf ", p_prime[i][j]);
-                }
-                fprintf(fp_pprime, "\n");
-            }
-        }
-
         /* Calculate p_next */
         for (int i = 1; i <= Nx; i++) {
             for (int j = 1; j <= Ny; j++) {
@@ -1053,13 +916,13 @@ int main(int argc, char **argv) {
         }
 
         /* Calculate U_next */
-        for (int i = 0; i <= Nx; i++) {
+        for (int i = 1; i <= Nx-1; i++) {
             for (int j = 1; j <= Ny; j++) {
                 U1_next[i][j] = U1_star[i][j] - dt * (p_prime[i+1][j] - p_prime[i][j]) / (xc[i+1] - xc[i]);
             }
         }
         for (int i = 1; i <= Nx; i++) {
-            for (int j = 0; j <= Ny; j++) {
+            for (int j = 1; j <= Ny-1; j++) {
                 U2_next[i][j] = U2_star[i][j] - dt * (p_prime[i][j+1] - p_prime[i][j]) / (yc[j+1] - yc[j]);
             }
         }
@@ -1072,18 +935,38 @@ int main(int argc, char **argv) {
             u2_next[i][Ny+1] = -u2_next[i][Ny];
         }
         for (int j = 1; j <= Ny; j++) {
-            u1_next[0][j] = 2 - u1_next[Nx][j];
-            u1_next[Nx+1][j] = 2 - u1_next[1][j];
-            u2_next[0][j] = -u2_next[Nx][j];
-            u2_next[Nx+1][j] = -u2_next[1][j];
+            u1_next[0][j] = 2 - u1_next[1][j];
+            u1_next[Nx+1][j] = 2 - u1_next[Nx][j];
+            u2_next[0][j] = -u2_next[1][j];
+            u2_next[Nx+1][j] = -u2_next[Nx][j];
         }
-        for (int i = 0; i <= Nx; i++) {
+
+        for (int i = 1; i <= Nx-1; i++) {
             U1_next[i][0] = 2 - U1_next[i][1];
             U1_next[i][Ny+1] = 2 - U1_next[i][Ny];
         }
-        for (int j = 0; j <= Ny; j++) {
-            U2_next[0][j] = -U2_next[Nx][j];
-            U2_next[Nx+1][j] = -U2_next[1][j];
+        for (int j = 1; j <= Ny; j++) {
+            U1_next[0][j] = 1;
+            U1_next[Nx][j] = 1;
+        }
+
+        for (int i = 1; i <= Nx; i++) {
+            U2_next[i][0] = 0;
+            U2_next[i][Ny] = 0;
+        }
+        for (int j = 1; j <= Ny-1; j++) {
+            U2_next[0][j] = -U2_next[1][j];
+            U2_next[Nx+1][j] = -U2_next[Nx][j];
+        }
+
+        /* Set pressure boundary conditions */
+        for (int i = 1; i <= Nx; i++) {
+            p_next[i][0] = p_next[i][1];
+            p_next[i][Ny+1] = p_next[i][Ny];
+        }
+        for (int j = 1; j <= Ny; j++) {
+            p_next[0][j] = p_next[1][j];
+            p_next[Nx+1][j] = p_next[Nx][j];
         }
 
         /* Update for next time step */
@@ -1125,8 +1008,8 @@ int main(int argc, char **argv) {
 
     fp_out = fopen("u1.txt", "w");
     if (fp_out) {
-        for (int i = 1; i <= Nx; i++) {
-            for (int j = 1; j <= Ny; j++) {
+        for (int i = 0; i <= Nx+1; i++) {
+            for (int j = 0; j <= Ny+1; j++) {
                 fprintf(fp_out, "%17.14lf ", u1[i][j]);
             }
             fprintf(fp_out, "\n");
@@ -1135,8 +1018,8 @@ int main(int argc, char **argv) {
     }
     fp_out = fopen("u2.txt", "w");
     if (fp_out) {
-        for (int i = 1; i <= Nx; i++) {
-            for (int j = 1; j <= Ny; j++) {
+        for (int i = 0; i <= Nx+1; i++) {
+            for (int j = 0; j <= Ny+1; j++) {
                 fprintf(fp_out, "%17.14lf ", u2[i][j]);
             }
             fprintf(fp_out, "\n");
@@ -1145,8 +1028,8 @@ int main(int argc, char **argv) {
     }
     fp_out = fopen("p.txt", "w");
     if (fp_out) {
-        for (int i = 1; i <= Nx; i++) {
-            for (int j = 1; j <= Ny; j++) {
+        for (int i = 0; i <= Nx+1; i++) {
+            for (int j = 0; j <= Ny+1; j++) {
                 fprintf(fp_out, "%17.14lf ", p[i][j]);
             }
             fprintf(fp_out, "\n");
