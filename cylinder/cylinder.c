@@ -90,16 +90,16 @@ int main(int argc, char **argv) {
     int (*const flag)[Ny+2] = calloc(Nx+2, sizeof(int [Ny+2]));
     int num_tc, num_gc;
 
-    int cell_id[Nx+2][Ny+2];
-    int adj_cell_id[Nx+2][Ny+2][4];
+    int (*cell_id)[Ny+2] = calloc(Nx+2, sizeof(int [Ny+2]));
+    int (*adj_cell_id)[Ny+2][4] = calloc(Nx+2, sizeof(int [Ny+2][4]));
 
     int (*gc_interp_cell_id)[4];
     double (*gc_interp_coeff)[4];
 
     /* Pressure and velocities */
-    double (*const p      )[Ny+2] = calloc(Nx+2, sizeof(double [Ny+2]));
-    double (*const p_next )[Ny+2] = calloc(Nx+2, sizeof(double [Ny+2]));
-    double (*const p_prime)[Ny+2] = calloc(Nx+2, sizeof(double [Ny+2]));
+    double (*const p       )[Ny+2] = calloc(Nx+2, sizeof(double [Ny+2]));
+    double (*const p_next  )[Ny+2] = calloc(Nx+2, sizeof(double [Ny+2]));
+    double (*const p_prime )[Ny+2] = calloc(Nx+2, sizeof(double [Ny+2]));
 
     double (*const u1      )[Ny+2] = calloc(Nx+2, sizeof(double [Ny+2]));
     double (*const u1_next )[Ny+2] = calloc(Nx+2, sizeof(double [Ny+2]));
@@ -111,19 +111,19 @@ int main(int argc, char **argv) {
     double (*const u2_star )[Ny+2] = calloc(Nx+2, sizeof(double [Ny+2]));
     double (*const u2_tilde)[Ny+2] = calloc(Nx+2, sizeof(double [Ny+2]));
 
-    double (*const U1     )[Ny+2] = calloc(Nx+1, sizeof(double [Ny+2]));
-    double (*const U1_next)[Ny+2] = calloc(Nx+1, sizeof(double [Ny+2]));
-    double (*const U1_star)[Ny+2] = calloc(Nx+1, sizeof(double [Ny+2]));
+    double (*const U1      )[Ny+2] = calloc(Nx+1, sizeof(double [Ny+2]));
+    double (*const U1_next )[Ny+2] = calloc(Nx+1, sizeof(double [Ny+2]));
+    double (*const U1_star )[Ny+2] = calloc(Nx+1, sizeof(double [Ny+2]));
 
-    double (*const U2     )[Ny+1] = calloc(Nx+2, sizeof(double [Ny+1]));
-    double (*const U2_next)[Ny+1] = calloc(Nx+2, sizeof(double [Ny+1]));
-    double (*const U2_star)[Ny+1] = calloc(Nx+2, sizeof(double [Ny+1]));
+    double (*const U2      )[Ny+1] = calloc(Nx+2, sizeof(double [Ny+1]));
+    double (*const U2_next )[Ny+1] = calloc(Nx+2, sizeof(double [Ny+1]));
+    double (*const U2_star )[Ny+1] = calloc(Nx+2, sizeof(double [Ny+1]));
 
     /* Fluxes */
-    double (*const N1     )[Ny+2] = calloc(Nx+2, sizeof(double [Ny+2]));
-    double (*const N1_prev)[Ny+2] = calloc(Nx+2, sizeof(double [Ny+2]));
-    double (*const N2     )[Ny+2] = calloc(Nx+2, sizeof(double [Ny+2]));
-    double (*const N2_prev)[Ny+2] = calloc(Nx+2, sizeof(double [Ny+2]));
+    double (*const N1      )[Ny+2] = calloc(Nx+2, sizeof(double [Ny+2]));
+    double (*const N1_prev )[Ny+2] = calloc(Nx+2, sizeof(double [Ny+2]));
+    double (*const N2      )[Ny+2] = calloc(Nx+2, sizeof(double [Ny+2]));
+    double (*const N2_prev )[Ny+2] = calloc(Nx+2, sizeof(double [Ny+2]));
 
     /* Others */
     double (*const RHS1)[Ny+2] = calloc(Nx+2, sizeof(double [Ny+2]));
@@ -151,11 +151,6 @@ int main(int argc, char **argv) {
     int *vector_rows;
     double *vector_values_u1, *vector_values_u2, *vector_values_p;
     double *vector_zeros, *vector_res;
-
-    double final_res_norm;
-
-    /* Stream function */
-    double (*const psi)[Ny+1] = calloc(Nx+1, sizeof(double [Ny+1]));
 
     /*===== Calculate grid variables =========================================*/
     for (int i = 1; i <= Nx; i++) {
@@ -502,7 +497,7 @@ int main(int argc, char **argv) {
 
         for (int i = 1; i <= Nx; i++) {
             for (int j = 1; j <= Ny; j++) {
-                if (i == 1 & j == Ny/2) {
+                if (i == 1 && j == Ny/2) {
                     int ncols = 2;
                     int cols[2] = {cell_id[i][j], cell_id[i][j+1]};
                     double values[2] = {1, 1};
@@ -984,29 +979,7 @@ int main(int argc, char **argv) {
     }
 
     /*===== Export result ====================================================*/
-    /* Calculate streamfunction */
-    for (int i = 1; i <= Nx; i++) {
-        psi[i][0] = psi[i-1][0] - dx[i] * U2[i][0];
-    }
-    for (int i = 0; i <= Nx; i++) {
-        for (int j = 1; j <= Ny; j++) {
-            psi[i][j] = psi[i][j-1] + dy[j] * U1[i][j];
-        }
-    }
-
-    /* Write to output file */
-    FILE *fp_out = fopen("cylinder_result.txt", "w");
-    if (fp_out) {
-        for (int i = 0; i <= Nx; i++) {
-            for (int j = 0; j <= Ny; j++) {
-                fprintf(fp_out, "%.14lf ", psi[i][j]);
-            }
-            fprintf(fp_out, "\n");
-        }
-        fclose(fp_out);
-    }
-
-    fp_out = fopen("u1.txt", "w");
+    FILE *fp_out = fopen("u1.txt", "w");
     if (fp_out) {
         for (int i = 0; i <= Nx+1; i++) {
             for (int j = 0; j <= Ny+1; j++) {
@@ -1038,7 +1011,36 @@ int main(int argc, char **argv) {
     }
 
     /* Free memory */
-    // TODO
+    free(lvset); free(flag);
+
+    free(cell_id); free(adj_cell_id);
+    free(gc_interp_cell_id); free(gc_interp_coeff);
+
+    free(p); free(p_next); free(p_prime);
+    free(u1); free(u1_next); free(u1_star); free(u1_tilde);
+    free(u2); free(u2_next); free(u2_star); free(u2_tilde);
+    free(U1); free(U1_next); free(U1_star);
+    free(U2); free(U2_next); free(U2_star);
+
+    free(N1); free(N1_prev);
+    free(N2); free(N2_prev);
+
+    free(RHS1); free(RHS2);
+
+    HYPRE_IJMatrixDestroy(A_u1); HYPRE_IJMatrixDestroy(A_u2);
+    HYPRE_IJVectorDestroy(b_u1); HYPRE_IJVectorDestroy(b_u2);
+    HYPRE_IJVectorDestroy(x_u1); HYPRE_IJVectorDestroy(x_u2);
+
+    HYPRE_IJMatrixDestroy(A_p);
+    HYPRE_IJVectorDestroy(b_p);
+    HYPRE_IJVectorDestroy(x_p);
+
+    free(vector_rows);
+    free(vector_values_u1);
+    free(vector_values_u2);
+    free(vector_values_p);
+    free(vector_res);
+    free(vector_zeros);
 
     /* Finalize Hypre */
     HYPRE_Finalize();
