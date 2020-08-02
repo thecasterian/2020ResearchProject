@@ -508,13 +508,14 @@ int main(int argc, char **argv) {
                     int ncols = 1;
                     int cols[1] = {cell_id[1][1]};
                     double values[1] = {1};
-                    HYPRE_IJMatrixSetValues(A_p, 1, &ncols, &cell_id[i][j], cols, values);
+                    HYPRE_IJMatrixSetValues(A_p, 1, &ncols, &cell_id[1][1], cols, values);
                     continue;
                 }
 
                 int ncols;
                 int cols[5];
                 double values[5];
+                double coeffsum = ky_N[j] + kx_E[i] + ky_S[j] + kx_W[i];
 
                 if (flag[i][j] == 1) {
                     ncols = 5;
@@ -522,11 +523,11 @@ int main(int argc, char **argv) {
                     for (int k = 0; k < 4; k++) {
                         cols[k+1] = adj_cell_id[i][j][k];
                     }
-                    values[0] = -(ky_N[j] + kx_E[i] + ky_S[j] + kx_W[i]);
-                    values[1] = ky_N[j];
-                    values[2] = kx_E[i];
-                    values[3] = ky_S[j];
-                    values[4] = kx_W[i];
+                    values[0] = -1;
+                    values[1] = ky_N[j] / coeffsum;
+                    values[2] = kx_E[i] / coeffsum;
+                    values[3] = ky_S[j] / coeffsum;
+                    values[4] = kx_W[i] / coeffsum;
                 }
                 else if (flag[i][j] == 2) {
                     int idx = -1;
@@ -649,16 +650,16 @@ int main(int argc, char **argv) {
     /* Initialize solver */
     {
         HYPRE_ParCSRBiCGSTABCreate(MPI_COMM_WORLD, &solver_u1);
-        HYPRE_BiCGSTABSetMaxIter(solver_u1, 1000);
+        HYPRE_BiCGSTABSetMaxIter(solver_u1, 100);
         HYPRE_BiCGSTABSetTol(solver_u1, 1e-12);
 
         HYPRE_ParCSRBiCGSTABCreate(MPI_COMM_WORLD, &solver_u2);
-        HYPRE_BiCGSTABSetMaxIter(solver_u2, 1000);
+        HYPRE_BiCGSTABSetMaxIter(solver_u2, 100);
         HYPRE_BiCGSTABSetTol(solver_u2, 1e-12);
 
         HYPRE_ParCSRBiCGSTABCreate(MPI_COMM_WORLD, &solver_p);
         HYPRE_BiCGSTABSetMaxIter(solver_p, 1000);
-        HYPRE_BiCGSTABSetTol(solver_p, 1e-12);
+        HYPRE_BiCGSTABSetTol(solver_p, 1e-6);
 
         HYPRE_BoomerAMGCreate(&precond);
         HYPRE_BoomerAMGSetCoarsenType(precond, 6);
@@ -713,10 +714,6 @@ int main(int argc, char **argv) {
             U1[i][j] = 1;
         }
     }
-
-    // memcpy(u1_next, u1, sizeof(double)*(Nx+2)*(Ny+2));
-    // memcpy(U1_next, U1, sizeof(double)*(Nx+1)*(Ny+2));
-    // memcpy(U1_star, U1, sizeof(double)*(Nx+1)*(Ny+2));
 
     for (int i = 1; i <= Nx; i++) {
         for (int j = 1; j <= Ny; j++) {
@@ -994,7 +991,8 @@ int main(int argc, char **argv) {
             for (int i = 1; i <= Nx; i++) {
                 for (int j = 1; j <= Ny; j++) {
                     if (flag[i][j] == 1) {
-                        vector_values_p[cell_id[i][j]-1] = 1 / (2*Re) * (
+                        double coeffsum = ky_N[j] + kx_E[i] + ky_S[j] + kx_W[i];
+                        vector_values_p[cell_id[i][j]-1] = 1 / (2*Re*coeffsum) * (
                             (U1_star[i][j] - U1_star[i-1][j]) / dx[i]
                             + (U2_star[i][j] - U2_star[i][j-1]) / dy[j]
                         );
@@ -1014,12 +1012,6 @@ int main(int argc, char **argv) {
             HYPRE_ParCSRBiCGSTABSetup(solver_p, parcsr_A_p, par_b_p, par_x_p);
 
             HYPRE_ParCSRBiCGSTABSolve(solver_p, parcsr_A_p, par_b_p, par_x_p);
-
-            HYPRE_ParCSRBiCGSTABGetFinalRelativeResidualNorm(solver_p, &final_res_norm);
-            if (final_res_norm > 1e-6) {
-                fprintf(stderr, "not converged! \n");
-            }
-            fprintf(stderr, "final residual: %.14lf\n", final_res_norm);
 
             HYPRE_IJVectorGetValues(x_p, num_tc, vector_rows, vector_res);
             for (int i = 0; i <= Nx+1; i++) {
