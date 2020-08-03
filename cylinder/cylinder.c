@@ -10,9 +10,11 @@
 #include "HYPRE_krylov.h"
 #include "_hypre_utilities.h"
 
+#define SWAP(a, b) ({ __auto_type tmp = a; a = b; b = tmp;})
+
 const int adj[4][2] = {{0, 1}, {1, 0}, {0, -1}, {-1, 0}};
 
-int bs_upper_bound(int len, double arr[static len], double val) {
+int bs_upper_bound(const int len, double arr[const static len], const double val) {
     int l = 0;
     int h = len;
     while (l < h) {
@@ -97,37 +99,35 @@ int main(int argc, char **argv) {
     double (*gc_interp_coeff)[4];
 
     /* Pressure and velocities */
-    double (*const p       )[Ny+2] = calloc(Nx+2, sizeof(double [Ny+2]));
-    double (*const p_next  )[Ny+2] = calloc(Nx+2, sizeof(double [Ny+2]));
+    double (*      p       )[Ny+2] = calloc(Nx+2, sizeof(double [Ny+2]));
+    double (*      p_next  )[Ny+2] = calloc(Nx+2, sizeof(double [Ny+2]));
     double (*const p_prime )[Ny+2] = calloc(Nx+2, sizeof(double [Ny+2]));
 
-    double (*const u1      )[Ny+2] = calloc(Nx+2, sizeof(double [Ny+2]));
-    double (*const u1_next )[Ny+2] = calloc(Nx+2, sizeof(double [Ny+2]));
+    double (*      u1      )[Ny+2] = calloc(Nx+2, sizeof(double [Ny+2]));
+    double (*      u1_next )[Ny+2] = calloc(Nx+2, sizeof(double [Ny+2]));
     double (*const u1_star )[Ny+2] = calloc(Nx+2, sizeof(double [Ny+2]));
     double (*const u1_tilde)[Ny+2] = calloc(Nx+2, sizeof(double [Ny+2]));
 
-    double (*const u2      )[Ny+2] = calloc(Nx+2, sizeof(double [Ny+2]));
-    double (*const u2_next )[Ny+2] = calloc(Nx+2, sizeof(double [Ny+2]));
+    double (*      u2      )[Ny+2] = calloc(Nx+2, sizeof(double [Ny+2]));
+    double (*      u2_next )[Ny+2] = calloc(Nx+2, sizeof(double [Ny+2]));
     double (*const u2_star )[Ny+2] = calloc(Nx+2, sizeof(double [Ny+2]));
     double (*const u2_tilde)[Ny+2] = calloc(Nx+2, sizeof(double [Ny+2]));
 
-    double (*const U1      )[Ny+2] = calloc(Nx+1, sizeof(double [Ny+2]));
-    double (*const U1_next )[Ny+2] = calloc(Nx+1, sizeof(double [Ny+2]));
+    double (*      U1      )[Ny+2] = calloc(Nx+1, sizeof(double [Ny+2]));
+    double (*      U1_next )[Ny+2] = calloc(Nx+1, sizeof(double [Ny+2]));
     double (*const U1_star )[Ny+2] = calloc(Nx+1, sizeof(double [Ny+2]));
 
-    double (*const U2      )[Ny+1] = calloc(Nx+2, sizeof(double [Ny+1]));
-    double (*const U2_next )[Ny+1] = calloc(Nx+2, sizeof(double [Ny+1]));
+    double (*      U2      )[Ny+1] = calloc(Nx+2, sizeof(double [Ny+1]));
+    double (*      U2_next )[Ny+1] = calloc(Nx+2, sizeof(double [Ny+1]));
     double (*const U2_star )[Ny+1] = calloc(Nx+2, sizeof(double [Ny+1]));
 
     /* Fluxes */
-    double (*const N1      )[Ny+2] = calloc(Nx+2, sizeof(double [Ny+2]));
-    double (*const N1_prev )[Ny+2] = calloc(Nx+2, sizeof(double [Ny+2]));
-    double (*const N2      )[Ny+2] = calloc(Nx+2, sizeof(double [Ny+2]));
-    double (*const N2_prev )[Ny+2] = calloc(Nx+2, sizeof(double [Ny+2]));
+    double (*      N1      )[Ny+2] = calloc(Nx+2, sizeof(double [Ny+2]));
+    double (*      N1_prev )[Ny+2] = calloc(Nx+2, sizeof(double [Ny+2]));
+    double (*      N2      )[Ny+2] = calloc(Nx+2, sizeof(double [Ny+2]));
+    double (*      N2_prev )[Ny+2] = calloc(Nx+2, sizeof(double [Ny+2]));
 
     /* Others */
-    double (*const RHS1)[Ny+2] = calloc(Nx+2, sizeof(double [Ny+2]));
-    double (*const RHS2)[Ny+2] = calloc(Nx+2, sizeof(double [Ny+2]));
     double kx_W[Nx+2], kx_E[Nx+2];
     double ky_S[Ny+2], ky_N[Ny+2];
 
@@ -666,10 +666,6 @@ int main(int argc, char **argv) {
 
     for (int i = 0; i < num_tc; i++) {
         vector_rows[i] = i + 1;
-        vector_values_u1[i] = 0;
-        vector_values_u2[i] = 0;
-        vector_values_p[i] = 0;
-        vector_zeros[i] = 0;
     }
 
     for (int i = 1; i <= Nx; i++) {
@@ -734,30 +730,17 @@ int main(int argc, char **argv) {
             }
         }
 
-        /* Calculate RHS */
-        for (int i = 1; i <= Nx; i++) {
-            for (int j = 1; j <= Ny; j++) {
-                if (flag[i][j] == 1) {
-                    RHS1[i][j] = -dt/2 * (3*N1[i][j] - N1_prev[i][j])
-                        - dt * (p[i+1][j] - p[i-1][j]) / (xc[i+1] - xc[i-1])
-                        + (1 - ky_N[j] - kx_E[i] - ky_S[j] - kx_W[i])*u1[i][j]
-                        + ky_N[j]*u1[i][j+1] + kx_E[i]*u1[i+1][j]
-                        + ky_S[j]*u1[i][j-1] + kx_W[i]*u1[i-1][j];
-                    RHS2[i][j] = -dt/2 * (3*N2[i][j] - N2_prev[i][j])
-                        - dt * (p[i][j+1] - p[i][j-1]) / (yc[j+1] - yc[j-1])
-                        + (1 - ky_N[j] - kx_E[i] - ky_S[j] - kx_W[i])*u2[i][j]
-                        + ky_N[j]*u2[i][j+1] + kx_E[i]*u2[i+1][j]
-                        + ky_S[j]*u2[i][j-1] + kx_W[i]*u2[i-1][j];
-                }
-            }
-        }
-
         /* Calculate u_star */
         {
             for (int i = 1; i <= Nx; i++) {
                 for (int j = 1; j <= Ny; j++) {
                     if (flag[i][j] == 1) {
-                        vector_values_u1[cell_id[i][j]-1] = RHS1[i][j];
+                        vector_values_u1[cell_id[i][j]-1]
+                            = -dt/2 * (3*N1[i][j] - N1_prev[i][j])
+                            - dt * (p[i+1][j] - p[i-1][j]) / (xc[i+1] - xc[i-1])
+                            + (1 - ky_N[j] - kx_E[i] - ky_S[j] - kx_W[i])*u1[i][j]
+                            + ky_N[j]*u1[i][j+1] + kx_E[i]*u1[i+1][j]
+                            + ky_S[j]*u1[i][j-1] + kx_W[i]*u1[i-1][j];;
                     }
                 }
             }
@@ -766,7 +749,12 @@ int main(int argc, char **argv) {
             for (int i = 1; i <= Nx; i++) {
                 for (int j = 1; j <= Ny; j++) {
                     if (flag[i][j] == 1) {
-                        vector_values_u2[cell_id[i][j]-1] = RHS2[i][j];
+                        vector_values_u2[cell_id[i][j]-1]
+                        = -dt/2 * (3*N2[i][j] - N2_prev[i][j])
+                        - dt * (p[i][j+1] - p[i][j-1]) / (yc[j+1] - yc[j-1])
+                        + (1 - ky_N[j] - kx_E[i] - ky_S[j] - kx_W[i])*u2[i][j]
+                        + ky_N[j]*u2[i][j+1] + kx_E[i]*u2[i+1][j]
+                        + ky_S[j]*u2[i][j-1] + kx_W[i]*u2[i-1][j];
                     }
                 }
             }
@@ -965,13 +953,13 @@ int main(int argc, char **argv) {
         }
 
         /* Update for next time step */
-        memcpy(p, p_next, sizeof(double)*(Nx+2)*(Ny+2));
-        memcpy(u1, u1_next, sizeof(double)*(Nx+2)*(Ny+2));
-        memcpy(u2, u2_next, sizeof(double)*(Nx+2)*(Ny+2));
-        memcpy(U1, U1_next, sizeof(double)*(Nx+1)*(Ny+2));
-        memcpy(U2, U2_next, sizeof(double)*(Nx+2)*(Ny+1));
-        memcpy(N1_prev, N1, sizeof(double)*(Nx+2)*(Ny+2));
-        memcpy(N2_prev, N2, sizeof(double)*(Nx+2)*(Ny+2));
+        SWAP(p, p_next);
+        SWAP(u1, u1_next);
+        SWAP(u2, u2_next);
+        SWAP(U1, U1_next);
+        SWAP(U2, U2_next);
+        SWAP(N1_prev, N1);
+        SWAP(N2_prev, N2);
 
         if (tstep % 50 == 0) {
             printf("tstep: %d\n", tstep);
@@ -1024,8 +1012,6 @@ int main(int argc, char **argv) {
 
     free(N1); free(N1_prev);
     free(N2); free(N2_prev);
-
-    free(RHS1); free(RHS2);
 
     HYPRE_IJMatrixDestroy(A_u1); HYPRE_IJMatrixDestroy(A_u2);
     HYPRE_IJVectorDestroy(b_u1); HYPRE_IJVectorDestroy(b_u2);
