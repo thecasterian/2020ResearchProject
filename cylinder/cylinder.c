@@ -1,9 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
-#include <stdbool.h>
 #include <math.h>
-#include <assert.h>
 
 #include "HYPRE.h"
 #include "HYPRE_parcsr_ls.h"
@@ -195,7 +192,7 @@ int main(int argc, char **argv) {
                 flag[i][j] = 1;
             }
             else {
-                bool is_ghost_cell = false;
+                int is_ghost_cell = 0;
                 for (int k = 0; k < 4; k++) {
                     int ni = i + adj[k][0], nj = j + adj[k][1];
                     if (0 <= ni && ni <= Nx+1 && 0 <= j && j <= Ny+1) {
@@ -374,18 +371,25 @@ int main(int argc, char **argv) {
             HYPRE_IJMatrixSetValues(A_u1, 1, &ncols, &cell_id[i][Ny+1], cols, values);
         }
         for (int j = 1; j <= Ny; j++) {
-            int ncols = 2;
-            int cols[2];
-            double values[2] = {1, 1};
+            int ncols;
+            int cols[3];
+            double values[3];
 
             /* i = 0; u1[0][j] + u1[1][j] = 2 */
+            ncols = 2;
             cols[0] = cell_id[0][j];
             cols[1] = cell_id[1][j];
+            values[0] = values[1] = 1;
             HYPRE_IJMatrixSetValues(A_u1, 1, &ncols, &cell_id[0][j], cols, values);
 
             /* i = Nx+1; u1[Nx+1][j] + u1[Nx][j] = 2 */
+            ncols = 3;
             cols[0] = cell_id[Nx+1][j];
             cols[1] = cell_id[Nx][j];
+            cols[2] = cell_id[Nx-1][j];
+            values[0] = xc[Nx] - xc[Nx-1];
+            values[1] = -(xc[Nx+1] - xc[Nx-1]);
+            values[2] = xc[Nx+1] - xc[Nx];
             HYPRE_IJMatrixSetValues(A_u1, 1, &ncols, &cell_id[Nx+1][j], cols, values);
         }
 
@@ -472,18 +476,25 @@ int main(int argc, char **argv) {
             HYPRE_IJMatrixSetValues(A_u2, 1, &ncols, &cell_id[i][Ny+1], cols, values);
         }
         for (int j = 1; j <= Ny; j++) {
-            int ncols = 2;
-            int cols[2];
-            double values[2] = {1, 1};
+            int ncols;
+            int cols[3];
+            double values[3];
 
             /* i = 0; u2[0][j] + u2[1][j] = 0 */
+            ncols = 2;
             cols[0] = cell_id[0][j];
             cols[1] = cell_id[1][j];
+            values[0] = values[1] = 1;
             HYPRE_IJMatrixSetValues(A_u2, 1, &ncols, &cell_id[0][j], cols, values);
 
             /* i = Nx+1; u2[Nx+1][j] + u2[Nx][j] = 0 */
+            ncols = 3;
             cols[0] = cell_id[Nx+1][j];
             cols[1] = cell_id[Nx][j];
+            cols[2] = cell_id[Nx-1][j];
+            values[0] = xc[Nx] - xc[Nx-1];
+            values[1] = -(xc[Nx+1] - xc[Nx-1]);
+            values[2] = xc[Nx+1] - xc[Nx];
             HYPRE_IJMatrixSetValues(A_u2, 1, &ncols, &cell_id[Nx+1][j], cols, values);
         }
 
@@ -497,14 +508,6 @@ int main(int argc, char **argv) {
 
         for (int i = 1; i <= Nx; i++) {
             for (int j = 1; j <= Ny; j++) {
-                if (i == 1 && j == Ny/2) {
-                    int ncols = 2;
-                    int cols[2] = {cell_id[i][j], cell_id[i][j+1]};
-                    double values[2] = {1, 1};
-                    HYPRE_IJMatrixSetValues(A_p, 1, &ncols, &cell_id[i][j], cols, values);
-                    continue;
-                }
-
                 int ncols;
                 int cols[5];
                 double values[5];
@@ -588,9 +591,10 @@ int main(int argc, char **argv) {
             cols[1] = cell_id[1][j];
             HYPRE_IJMatrixSetValues(A_p, 1, &ncols, &cell_id[0][j], cols, values);
 
-            /* i = Nx+1; p[Nx+1][j] - p[Nx][j] = 0 */
+            /* i = Nx+1; p[Nx+1][j] + p[Nx][j] = 0 */
             cols[0] = cell_id[Nx+1][j];
             cols[1] = cell_id[Nx][j];
+            values[1] = 1;
             HYPRE_IJMatrixSetValues(A_p, 1, &ncols, &cell_id[Nx+1][j], cols, values);
         }
 
@@ -674,7 +678,6 @@ int main(int argc, char **argv) {
     }
     for (int j = 1; j <= Ny; j++) {
         vector_values_u1[cell_id[0][j]-1] = 2;
-        vector_values_u1[cell_id[Nx+1][j]-1] = 2;
     }
 
     fprintf(stderr, "HYPRE done\n");
@@ -828,7 +831,7 @@ int main(int argc, char **argv) {
         }
         for (int j = 1; j <= Ny; j++) {
             U1_star[0][j] = 1;
-            U1_star[Nx][j] = 1;
+            U1_star[Nx][j] = (U1_star[Nx-1][j]*(dx[Nx-1]+dx[Nx]) - U1_star[Nx-2][j]*dx[Nx]) / dx[Nx-1];
         }
         for (int i = 1; i <= Nx; i++) {
             U2_star[i][0] = 0;
@@ -836,7 +839,7 @@ int main(int argc, char **argv) {
         }
         for (int j = 1; j <= Ny-1; j++) {
             U2_star[0][j] = -U2_star[1][j];
-            U2_star[Nx+1][j] = -U2_star[Nx][j];
+            U2_star[Nx+1][j] = (U2_star[Nx][j]*(xc[Nx+1]-xc[Nx-1]) - U2_star[Nx-1][j]*(xc[Nx+1]-xc[Nx])) / (xc[Nx]-xc[Nx-1]);
         }
 
         /* Calculate p_prime */
@@ -849,9 +852,6 @@ int main(int argc, char **argv) {
                             (U1_star[i][j] - U1_star[i-1][j]) / dx[i]
                             + (U2_star[i][j] - U2_star[i][j-1]) / dy[j]
                         );
-                        if (i == 1 && j == Ny/2) {
-                            vector_values_p[cell_id[i][j]-1] = 0;
-                        }
                     }
                 }
             }
@@ -919,9 +919,9 @@ int main(int argc, char **argv) {
         }
         for (int j = 1; j <= Ny; j++) {
             u1_next[0][j] = 2 - u1_next[1][j];
-            u1_next[Nx+1][j] = 2 - u1_next[Nx][j];
+            u1_next[Nx+1][j] = (u1_next[Nx][j]*(xc[Nx+1]-xc[Nx-1]) - u1_next[Nx-1][j]*(xc[Nx+1]-xc[Nx])) / (xc[Nx]-xc[Nx-1]);
             u2_next[0][j] = -u2_next[1][j];
-            u2_next[Nx+1][j] = -u2_next[Nx][j];
+            u2_next[Nx+1][j] = (u2_next[Nx][j]*(xc[Nx+1]-xc[Nx-1]) - u2_next[Nx-1][j]*(xc[Nx+1]-xc[Nx])) / (xc[Nx]-xc[Nx-1]);
         }
 
         for (int i = 1; i <= Nx-1; i++) {
@@ -930,7 +930,7 @@ int main(int argc, char **argv) {
         }
         for (int j = 1; j <= Ny; j++) {
             U1_next[0][j] = 1;
-            U1_next[Nx][j] = 1;
+            U1_next[Nx][j] = (U1_next[Nx-1][j]*(dx[Nx-1]+dx[Nx]) - U1_next[Nx-2][j]*dx[Nx]) / dx[Nx-1];
         }
 
         for (int i = 1; i <= Nx; i++) {
@@ -939,7 +939,7 @@ int main(int argc, char **argv) {
         }
         for (int j = 1; j <= Ny-1; j++) {
             U2_next[0][j] = -U2_next[1][j];
-            U2_next[Nx+1][j] = -U2_next[Nx][j];
+            U2_next[Nx+1][j] = (U2_next[Nx][j]*(xc[Nx+1]-xc[Nx-1]) - U2_next[Nx-1][j]*(xc[Nx+1]-xc[Nx])) / (xc[Nx]-xc[Nx-1]);
         }
 
         /* Set pressure boundary conditions */
@@ -949,7 +949,7 @@ int main(int argc, char **argv) {
         }
         for (int j = 1; j <= Ny; j++) {
             p_next[0][j] = p_next[1][j];
-            p_next[Nx+1][j] = p_next[Nx][j];
+            p_next[Nx+1][j] = -p_next[Nx][j];
         }
 
         /* Update for next time step */
