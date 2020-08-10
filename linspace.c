@@ -3,30 +3,25 @@
 #include <math.h>
 
 int main(int argc, char **argv) {
-    if (argc < 2) {
-        printf("please specify #points\n");
-        return 0;
-    }
-    if (argc == 3) {
-        printf("please specify both left and right end\n");
+    if (argc < 4) {
+        printf("not enough #args\n");
         return 0;
     }
 
-    int n = atoi(argv[1]);
-    double a, b;
-    if (argc >= 4) {
-        a = atof(argv[2]);
-        b = atof(argv[3]);
-    }
-    else {
-        a = 0;
-        b = 1;
-    }
+    int num_segs = argc / 2 - 1;
+    int num_pts = 0;
 
-    for (int i = 0; i < n; i++) {
-        printf("%.8lf ", a + (b - a) * i / (n-1));
+    printf("%.8lf ", atof(argv[1]));
+    for (int i = 0; i < num_segs; i++) {
+        double a = atof(argv[2*i+1]);
+        double b = atof(argv[2*i+3]);
+        int n = atoi(argv[2*i+2]);
+        num_pts += n;
+        for (int j = 1; j <= n; j++) {
+            printf("%.8lf ", a + (b - a) * j / n);
+        }
     }
-    printf("\n");
+    printf("\n%d\n", num_pts);
 
     return 0;
 }

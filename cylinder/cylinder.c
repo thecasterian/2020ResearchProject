@@ -149,6 +149,9 @@ int main(int argc, char **argv) {
     double *vector_values_u1, *vector_values_u2, *vector_values_p;
     double *vector_zeros, *vector_res;
 
+    int num_iters;
+    double final_res_norm;
+
     /*===== Calculate grid variables =========================================*/
     for (int i = 1; i <= Nx; i++) {
         dx[i] = xf[i] - xf[i-1];
@@ -636,16 +639,22 @@ int main(int argc, char **argv) {
     /* Initialize solver */
     {
         HYPRE_ParCSRBiCGSTABCreate(MPI_COMM_WORLD, &solver_u1);
+        HYPRE_ParCSRBiCGSTABSetLogging(solver_u1, 1);
         HYPRE_BiCGSTABSetMaxIter(solver_u1, 1000);
-        HYPRE_BiCGSTABSetTol(solver_u1, 1e-9);
+        HYPRE_BiCGSTABSetTol(solver_u1, 1e-6);
+        // HYPRE_BiCGSTABSetPrintLevel(solver_u1, 2);
 
         HYPRE_ParCSRBiCGSTABCreate(MPI_COMM_WORLD, &solver_u2);
+        HYPRE_ParCSRBiCGSTABSetLogging(solver_u2, 1);
         HYPRE_BiCGSTABSetMaxIter(solver_u2, 1000);
-        HYPRE_BiCGSTABSetTol(solver_u2, 1e-9);
+        HYPRE_BiCGSTABSetTol(solver_u2, 1e-6);
+        // HYPRE_BiCGSTABSetPrintLevel(solver_u2, 2);
 
         HYPRE_ParCSRBiCGSTABCreate(MPI_COMM_WORLD, &solver_p);
+        HYPRE_ParCSRBiCGSTABSetLogging(solver_p, 1);
         HYPRE_BiCGSTABSetMaxIter(solver_p, 1000);
-        HYPRE_BiCGSTABSetTol(solver_p, 1e-9);
+        HYPRE_BiCGSTABSetTol(solver_p, 1e-6);
+        // HYPRE_BiCGSTABSetPrintLevel(solver_p, 2);
 
         HYPRE_BoomerAMGCreate(&precond);
         HYPRE_BoomerAMGSetCoarsenType(precond, 6);
@@ -681,48 +690,48 @@ int main(int argc, char **argv) {
     fprintf(stderr, "HYPRE done\n");
 
     /*===== Initialize flow ==================================================*/
-    // for (int i = 0; i <= Nx+1; i++) {
-    //     for (int j = 0; j <= Ny+1; j++) {
-    //         u1[i][j] = 1;
-    //     }
-    // }
-    // for (int i = 0; i <= Nx; i++) {
-    //     for (int j = 0; j <= Ny+1; j++) {
-    //         U1[i][j] = 1;
-    //     }
-    // }
-
-    fp_in = fopen("u1.txt", "r");
     for (int i = 0; i <= Nx+1; i++) {
         for (int j = 0; j <= Ny+1; j++) {
-            fscanf(fp_in, "%lf", &u1[i][j]);
+            u1[i][j] = 1;
         }
     }
-    fclose(fp_in);
-    fp_in = fopen("u2.txt", "r");
-    for (int i = 0; i <= Nx+1; i++) {
-        for (int j = 0; j <= Ny+1; j++) {
-            fscanf(fp_in, "%lf", &u2[i][j]);
-        }
-    }
-    fclose(fp_in);
-    fp_in = fopen("p.txt", "r");
-    for (int i = 0; i <= Nx+1; i++) {
-        for (int j = 0; j <= Ny+1; j++) {
-            fscanf(fp_in, "%lf", &p[i][j]);
-        }
-    }
-    fclose(fp_in);
     for (int i = 0; i <= Nx; i++) {
         for (int j = 0; j <= Ny+1; j++) {
-            U1[i][j] = (u1[i+1][j] + u1[i][j]) / 2;
+            U1[i][j] = 1;
         }
     }
-    for (int i = 0; i <= Nx+1; i++) {
-        for (int j = 0; j <= Ny; j++) {
-            U2[i][j] = (u2[i][j+1] + u2[i][j]) / 2;
-        }
-    }
+
+    // fp_in = fopen("u1.txt", "r");
+    // for (int i = 0; i <= Nx+1; i++) {
+    //     for (int j = 0; j <= Ny+1; j++) {
+    //         fscanf(fp_in, "%lf", &u1[i][j]);
+    //     }
+    // }
+    // fclose(fp_in);
+    // fp_in = fopen("u2.txt", "r");
+    // for (int i = 0; i <= Nx+1; i++) {
+    //     for (int j = 0; j <= Ny+1; j++) {
+    //         fscanf(fp_in, "%lf", &u2[i][j]);
+    //     }
+    // }
+    // fclose(fp_in);
+    // fp_in = fopen("p.txt", "r");
+    // for (int i = 0; i <= Nx+1; i++) {
+    //     for (int j = 0; j <= Ny+1; j++) {
+    //         fscanf(fp_in, "%lf", &p[i][j]);
+    //     }
+    // }
+    // fclose(fp_in);
+    // for (int i = 0; i <= Nx; i++) {
+    //     for (int j = 0; j <= Ny+1; j++) {
+    //         U1[i][j] = (u1[i+1][j] + u1[i][j]) / 2;
+    //     }
+    // }
+    // for (int i = 0; i <= Nx+1; i++) {
+    //     for (int j = 0; j <= Ny; j++) {
+    //         U2[i][j] = (u2[i][j+1] + u2[i][j]) / 2;
+    //     }
+    // }
 
     for (int i = 1; i <= Nx; i++) {
         for (int j = 1; j <= Ny; j++) {
@@ -829,6 +838,15 @@ int main(int argc, char **argv) {
                     }
                 }
             }
+
+            HYPRE_BiCGSTABGetFinalRelativeResidualNorm(solver_u1, &final_res_norm);
+            if (final_res_norm >= 1e-4) {
+                fprintf(stderr, "not converged!\n");
+            }
+            HYPRE_BiCGSTABGetFinalRelativeResidualNorm(solver_u2, &final_res_norm);
+            if (final_res_norm >= 1e-4) {
+                fprintf(stderr, "not converged!\n");
+            }
         }
 
         /* Calculate u_tilde */
@@ -840,15 +858,19 @@ int main(int argc, char **argv) {
                 }
             }
         }
+        for (int j = 1; j <= Ny; j++) {
+            u1_tilde[Nx+1][j] = u1_star[Nx+1][j] + dt * (p[Nx+1][j] - p[Nx][j]) / (xc[Nx+1] - xc[Nx]);
+            u2_tilde[Nx+1][j] = u2_star[Nx+1][j] + dt * (p[Nx+1][j+1] - p[Nx+1][j-1]) / (yc[j+1] - yc[j-1]);
+        }
 
         /* Calculate U_star */
-        for (int i = 1; i <= Nx-1; i++) {
+        for (int i = 1; i <= Nx; i++) {
             for (int j = 1; j <= Ny; j++) {
                 U1_star[i][j] = (u1_tilde[i][j]*dx[i+1] + u1_tilde[i+1][j]*dx[i]) / (dx[i] + dx[i+1])
                     - dt * (p[i+1][j] - p[i][j]) / (xc[i+1] - xc[i]);
             }
         }
-        for (int i = 1; i <= Nx; i++) {
+        for (int i = 1; i <= Nx+1; i++) {
             for (int j = 1; j <= Ny-1; j++) {
                 U2_star[i][j] = (u2_tilde[i][j]*dy[j+1] + u2_tilde[i][j+1]*dy[j]) / (dy[j] + dy[j+1])
                     - dt * (p[i][j+1] - p[i][j]) / (yc[j+1] - yc[j]);
@@ -861,7 +883,6 @@ int main(int argc, char **argv) {
         }
         for (int j = 1; j <= Ny; j++) {
             U1_star[0][j] = 1;
-            U1_star[Nx][j] = (U1_star[Nx-1][j]*(dx[Nx-1]+dx[Nx]) - U1_star[Nx-2][j]*dx[Nx]) / dx[Nx-1];
         }
         for (int i = 1; i <= Nx; i++) {
             U2_star[i][0] = 0;
@@ -869,7 +890,6 @@ int main(int argc, char **argv) {
         }
         for (int j = 1; j <= Ny-1; j++) {
             U2_star[0][j] = -U2_star[1][j];
-            U2_star[Nx+1][j] = (U2_star[Nx][j]*(xc[Nx+1]-xc[Nx-1]) - U2_star[Nx-1][j]*(xc[Nx+1]-xc[Nx])) / (xc[Nx]-xc[Nx-1]);
         }
 
         /* Calculate p_prime */
@@ -906,6 +926,13 @@ int main(int argc, char **argv) {
                         p_prime[i][j] = vector_res[cell_id[i][j]-1];
                     }
                 }
+            }
+
+            HYPRE_BiCGSTABGetNumIterations(solver_p, &num_iters);
+            HYPRE_BiCGSTABGetFinalRelativeResidualNorm(solver_p, &final_res_norm);
+
+            if (final_res_norm >= 1e-4) {
+                fprintf(stderr, "not converged!\n");
             }
         }
 
@@ -977,7 +1004,7 @@ int main(int argc, char **argv) {
             p_next[i][0] = p_next[i][1];
             p_next[i][Ny+1] = p_next[i][Ny];
         }
-        for (int j = 1; j <= Ny; j++) {
+        for (int j = 0; j <= Ny+1; j++) {
             p_next[0][j] = p_next[1][j];
             p_next[Nx+1][j] = -p_next[Nx][j];
         }
@@ -1022,6 +1049,22 @@ int main(int argc, char **argv) {
         for (int i = 0; i <= Nx+1; i++) {
             for (int j = 0; j <= Ny+1; j++) {
                 fprintf(fp_out, "%17.14lf ", p[i][j]);
+            }
+            fprintf(fp_out, "\n");
+        }
+        fclose(fp_out);
+    }
+
+    fp_out = fopen("omega.txt", "w");
+    if (fp_out) {
+        for (int i = 1; i <= Nx; i++) {
+            for (int j = 1; j <= Ny; j++) {
+                fprintf(
+                    fp_out,
+                    "%17.14lf ",
+                    (u2[i+1][j] - u2[i-1][j]) / (xc[i+1] - xc[i-1])
+                        - (u1[i][j+1] - u1[i][j-1]) / (yc[j+1] - yc[j-1])
+                );
             }
             fprintf(fp_out, "\n");
         }
