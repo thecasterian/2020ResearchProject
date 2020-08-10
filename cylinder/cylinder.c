@@ -51,6 +51,10 @@ int main(int argc, char **argv) {
     double Re, dt;
     int numtstep;
 
+    int init_using_file;
+    char init_file_u1[100], init_file_u2[100], init_file_p[100];
+    char output_file_u1[100], output_file_u2[100], output_file_p[100];
+
     FILE *fp_in = fopen("cylinder.in", "r");
     if (!fp_in) {
         printf("cannot open file!\n");
@@ -76,6 +80,17 @@ int main(int argc, char **argv) {
     /* Read Re, dt, numtstep */
     fscanf(fp_in, "%*s %lf", &Re);
     fscanf(fp_in, "%*s %lf %*s %d", &dt, &numtstep);
+
+    /* File for initialization */
+    fscanf(fp_in, "%*s %d", &init_using_file);
+    fscanf(fp_in, "%*s %s", init_file_u1);
+    fscanf(fp_in, "%*s %s", init_file_u2);
+    fscanf(fp_in, "%*s %s", init_file_p);
+
+    /* File for output */
+    fscanf(fp_in, "%*s %s", output_file_u1);
+    fscanf(fp_in, "%*s %s", output_file_u2);
+    fscanf(fp_in, "%*s %s", output_file_p);
 
     fclose(fp_in);
 
@@ -690,48 +705,60 @@ int main(int argc, char **argv) {
     fprintf(stderr, "HYPRE done\n");
 
     /*===== Initialize flow ==================================================*/
-    for (int i = 0; i <= Nx+1; i++) {
-        for (int j = 0; j <= Ny+1; j++) {
-            u1[i][j] = 1;
-        }
-    }
-    for (int i = 0; i <= Nx; i++) {
-        for (int j = 0; j <= Ny+1; j++) {
-            U1[i][j] = 1;
-        }
-    }
+    if (init_using_file) {
+        FILE *fp_init;
 
-    // fp_in = fopen("u1.txt", "r");
-    // for (int i = 0; i <= Nx+1; i++) {
-    //     for (int j = 0; j <= Ny+1; j++) {
-    //         fscanf(fp_in, "%lf", &u1[i][j]);
-    //     }
-    // }
-    // fclose(fp_in);
-    // fp_in = fopen("u2.txt", "r");
-    // for (int i = 0; i <= Nx+1; i++) {
-    //     for (int j = 0; j <= Ny+1; j++) {
-    //         fscanf(fp_in, "%lf", &u2[i][j]);
-    //     }
-    // }
-    // fclose(fp_in);
-    // fp_in = fopen("p.txt", "r");
-    // for (int i = 0; i <= Nx+1; i++) {
-    //     for (int j = 0; j <= Ny+1; j++) {
-    //         fscanf(fp_in, "%lf", &p[i][j]);
-    //     }
-    // }
-    // fclose(fp_in);
-    // for (int i = 0; i <= Nx; i++) {
-    //     for (int j = 0; j <= Ny+1; j++) {
-    //         U1[i][j] = (u1[i+1][j] + u1[i][j]) / 2;
-    //     }
-    // }
-    // for (int i = 0; i <= Nx+1; i++) {
-    //     for (int j = 0; j <= Ny; j++) {
-    //         U2[i][j] = (u2[i][j+1] + u2[i][j]) / 2;
-    //     }
-    // }
+        fp_init = fopen(init_file_u1, "r");
+        if (fp_init) {
+            for (int i = 0; i <= Nx+1; i++) {
+                for (int j = 0; j <= Ny+1; j++) {
+                    fscanf(fp_init, "%lf", &u1[i][j]);
+                }
+            }
+            fclose(fp_init);
+        }
+        fp_init = fopen(init_file_u2, "r");
+        if (fp_init) {
+            for (int i = 0; i <= Nx+1; i++) {
+                for (int j = 0; j <= Ny+1; j++) {
+                    fscanf(fp_init, "%lf", &u2[i][j]);
+                }
+            }
+            fclose(fp_init);
+        }
+        fp_init = fopen(init_file_p, "r");
+        if (fp_init) {
+            for (int i = 0; i <= Nx+1; i++) {
+                for (int j = 0; j <= Ny+1; j++) {
+                    fscanf(fp_init, "%lf", &p[i][j]);
+                }
+            }
+            fclose(fp_init);
+        }
+
+        for (int i = 0; i <= Nx; i++) {
+            for (int j = 0; j <= Ny+1; j++) {
+                U1[i][j] = (u1[i+1][j] + u1[i][j]) / 2;
+            }
+        }
+        for (int i = 0; i <= Nx+1; i++) {
+            for (int j = 0; j <= Ny; j++) {
+                U2[i][j] = (u2[i][j+1] + u2[i][j]) / 2;
+            }
+        }
+    }
+    else {
+        for (int i = 0; i <= Nx+1; i++) {
+            for (int j = 0; j <= Ny+1; j++) {
+                u1[i][j] = 1;
+            }
+        }
+        for (int i = 0; i <= Nx; i++) {
+            for (int j = 0; j <= Ny+1; j++) {
+                U1[i][j] = 1;
+            }
+        }
+    }
 
     for (int i = 1; i <= Nx; i++) {
         for (int j = 1; j <= Ny; j++) {
@@ -1024,7 +1051,9 @@ int main(int argc, char **argv) {
     }
 
     /*===== Export result ====================================================*/
-    FILE *fp_out = fopen("u1.txt", "w");
+    FILE *fp_out;
+
+    fp_out = fopen(output_file_u1, "w");
     if (fp_out) {
         for (int i = 0; i <= Nx+1; i++) {
             for (int j = 0; j <= Ny+1; j++) {
@@ -1034,7 +1063,7 @@ int main(int argc, char **argv) {
         }
         fclose(fp_out);
     }
-    fp_out = fopen("u2.txt", "w");
+    fp_out = fopen(output_file_u2, "w");
     if (fp_out) {
         for (int i = 0; i <= Nx+1; i++) {
             for (int j = 0; j <= Ny+1; j++) {
@@ -1044,7 +1073,7 @@ int main(int argc, char **argv) {
         }
         fclose(fp_out);
     }
-    fp_out = fopen("p.txt", "w");
+    fp_out = fopen(output_file_p, "w");
     if (fp_out) {
         for (int i = 0; i <= Nx+1; i++) {
             for (int j = 0; j <= Ny+1; j++) {
