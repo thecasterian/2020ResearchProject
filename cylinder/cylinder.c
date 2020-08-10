@@ -358,14 +358,14 @@ int main(int argc, char **argv) {
         for (int i = 1; i <= Nx; i++) {
             int ncols = 2;
             int cols[2];
-            double values[2] = {1, 1};
+            double values[2] = {1, -1};
 
-            /* j = 0; u1[i][0] + u[i][1] = 2 */
+            /* j = 0; u1[i][0] - u[i][1] = 0 */
             cols[0] = cell_id[i][0];
             cols[1] = cell_id[i][1];
             HYPRE_IJMatrixSetValues(A_u1, 1, &ncols, &cell_id[i][0], cols, values);
 
-            /* j = Ny+1; u1[i][Ny+1] + u1[i][Ny] = 2 */
+            /* j = Ny+1; u1[i][Ny+1] - u1[i][Ny] = 0 */
             cols[0] = cell_id[i][Ny+1];
             cols[1] = cell_id[i][Ny];
             HYPRE_IJMatrixSetValues(A_u1, 1, &ncols, &cell_id[i][Ny+1], cols, values);
@@ -379,7 +379,8 @@ int main(int argc, char **argv) {
             ncols = 2;
             cols[0] = cell_id[0][j];
             cols[1] = cell_id[1][j];
-            values[0] = values[1] = 1;
+            values[0] = 1;
+            values[1] = 1;
             HYPRE_IJMatrixSetValues(A_u1, 1, &ncols, &cell_id[0][j], cols, values);
 
             /* i = Nx+1; u1[Nx+1][j] + u1[Nx][j] = 2 */
@@ -484,7 +485,8 @@ int main(int argc, char **argv) {
             ncols = 2;
             cols[0] = cell_id[0][j];
             cols[1] = cell_id[1][j];
-            values[0] = values[1] = 1;
+            values[0] = 1;
+            values[1] = 1;
             HYPRE_IJMatrixSetValues(A_u2, 1, &ncols, &cell_id[0][j], cols, values);
 
             /* i = Nx+1; u2[Nx+1][j] + u2[Nx][j] = 0 */
@@ -635,15 +637,15 @@ int main(int argc, char **argv) {
     {
         HYPRE_ParCSRBiCGSTABCreate(MPI_COMM_WORLD, &solver_u1);
         HYPRE_BiCGSTABSetMaxIter(solver_u1, 1000);
-        HYPRE_BiCGSTABSetTol(solver_u1, 1e-6);
+        HYPRE_BiCGSTABSetTol(solver_u1, 1e-9);
 
         HYPRE_ParCSRBiCGSTABCreate(MPI_COMM_WORLD, &solver_u2);
         HYPRE_BiCGSTABSetMaxIter(solver_u2, 1000);
-        HYPRE_BiCGSTABSetTol(solver_u2, 1e-6);
+        HYPRE_BiCGSTABSetTol(solver_u2, 1e-9);
 
         HYPRE_ParCSRBiCGSTABCreate(MPI_COMM_WORLD, &solver_p);
         HYPRE_BiCGSTABSetMaxIter(solver_p, 1000);
-        HYPRE_BiCGSTABSetTol(solver_p, 1e-6);
+        HYPRE_BiCGSTABSetTol(solver_p, 1e-9);
 
         HYPRE_BoomerAMGCreate(&precond);
         HYPRE_BoomerAMGSetCoarsenType(precond, 6);
@@ -672,10 +674,6 @@ int main(int argc, char **argv) {
         vector_rows[i] = i + 1;
     }
 
-    for (int i = 1; i <= Nx; i++) {
-        vector_values_u1[cell_id[i][0]-1] = 2;
-        vector_values_u1[cell_id[i][Ny+1]-1] = 2;
-    }
     for (int j = 1; j <= Ny; j++) {
         vector_values_u1[cell_id[0][j]-1] = 2;
     }
@@ -683,14 +681,46 @@ int main(int argc, char **argv) {
     fprintf(stderr, "HYPRE done\n");
 
     /*===== Initialize flow ==================================================*/
+    // for (int i = 0; i <= Nx+1; i++) {
+    //     for (int j = 0; j <= Ny+1; j++) {
+    //         u1[i][j] = 1;
+    //     }
+    // }
+    // for (int i = 0; i <= Nx; i++) {
+    //     for (int j = 0; j <= Ny+1; j++) {
+    //         U1[i][j] = 1;
+    //     }
+    // }
+
+    fp_in = fopen("u1.txt", "r");
     for (int i = 0; i <= Nx+1; i++) {
         for (int j = 0; j <= Ny+1; j++) {
-            u1[i][j] = 1;
+            fscanf(fp_in, "%lf", &u1[i][j]);
         }
     }
+    fclose(fp_in);
+    fp_in = fopen("u2.txt", "r");
+    for (int i = 0; i <= Nx+1; i++) {
+        for (int j = 0; j <= Ny+1; j++) {
+            fscanf(fp_in, "%lf", &u2[i][j]);
+        }
+    }
+    fclose(fp_in);
+    fp_in = fopen("p.txt", "r");
+    for (int i = 0; i <= Nx+1; i++) {
+        for (int j = 0; j <= Ny+1; j++) {
+            fscanf(fp_in, "%lf", &p[i][j]);
+        }
+    }
+    fclose(fp_in);
     for (int i = 0; i <= Nx; i++) {
         for (int j = 0; j <= Ny+1; j++) {
-            U1[i][j] = 1;
+            U1[i][j] = (u1[i+1][j] + u1[i][j]) / 2;
+        }
+    }
+    for (int i = 0; i <= Nx+1; i++) {
+        for (int j = 0; j <= Ny; j++) {
+            U2[i][j] = (u2[i][j+1] + u2[i][j]) / 2;
         }
     }
 
@@ -826,8 +856,8 @@ int main(int argc, char **argv) {
         }
 
         for (int i = 1; i <= Nx-1; i++) {
-            U1_star[i][0] = 2 - U1_star[i][1];
-            U1_star[i][Ny+1] = 2 - U1_star[i][Ny];
+            U1_star[i][0] = U1_star[i][1];
+            U1_star[i][Ny+1] = U1_star[i][Ny];
         }
         for (int j = 1; j <= Ny; j++) {
             U1_star[0][j] = 1;
@@ -925,8 +955,8 @@ int main(int argc, char **argv) {
         }
 
         for (int i = 1; i <= Nx-1; i++) {
-            U1_next[i][0] = 2 - U1_next[i][1];
-            U1_next[i][Ny+1] = 2 - U1_next[i][Ny];
+            U1_next[i][0] = U1_next[i][1];
+            U1_next[i][Ny+1] = U1_next[i][Ny];
         }
         for (int j = 1; j <= Ny; j++) {
             U1_next[0][j] = 1;
