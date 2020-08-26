@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
+#include <time.h>
 
 #include "HYPRE.h"
 #include "HYPRE_parcsr_ls.h"
@@ -656,19 +657,19 @@ int main(int argc, char **argv) {
         HYPRE_ParCSRBiCGSTABCreate(MPI_COMM_WORLD, &solver_u1);
         HYPRE_ParCSRBiCGSTABSetLogging(solver_u1, 1);
         HYPRE_BiCGSTABSetMaxIter(solver_u1, 1000);
-        HYPRE_BiCGSTABSetTol(solver_u1, 1e-6);
+        HYPRE_BiCGSTABSetTol(solver_u1, 1e-5);
         // HYPRE_BiCGSTABSetPrintLevel(solver_u1, 2);
 
         HYPRE_ParCSRBiCGSTABCreate(MPI_COMM_WORLD, &solver_u2);
         HYPRE_ParCSRBiCGSTABSetLogging(solver_u2, 1);
         HYPRE_BiCGSTABSetMaxIter(solver_u2, 1000);
-        HYPRE_BiCGSTABSetTol(solver_u2, 1e-6);
+        HYPRE_BiCGSTABSetTol(solver_u2, 1e-5);
         // HYPRE_BiCGSTABSetPrintLevel(solver_u2, 2);
 
         HYPRE_ParCSRBiCGSTABCreate(MPI_COMM_WORLD, &solver_p);
         HYPRE_ParCSRBiCGSTABSetLogging(solver_p, 1);
         HYPRE_BiCGSTABSetMaxIter(solver_p, 1000);
-        HYPRE_BiCGSTABSetTol(solver_p, 1e-6);
+        HYPRE_BiCGSTABSetTol(solver_p, 1e-5);
         // HYPRE_BiCGSTABSetPrintLevel(solver_p, 2);
 
         HYPRE_BoomerAMGCreate(&precond);
@@ -777,6 +778,12 @@ int main(int argc, char **argv) {
                 + (U2[i][j]*u2_n - U2[i][j-1]*u2_s) / dy[j];
         }
     }
+
+    fprintf(stderr, "initialization done\n");
+
+    /*===== Get current time =================================================*/
+    struct timespec t_start;
+    clock_gettime(CLOCK_REALTIME, &t_start);
 
     /*===== Main loop ========================================================*/
     for (int tstep = 1; tstep <= numtstep; tstep++) {
@@ -1049,6 +1056,13 @@ int main(int argc, char **argv) {
             printf("tstep: %d\n", tstep);
         }
     }
+
+    /*===== Calculate elapsed time ===========================================*/
+    struct timespec t_end;
+    clock_gettime(CLOCK_REALTIME, &t_end);
+
+    fprintf(stderr, "elapsed time: %ld ms\n",
+            (t_end.tv_sec-t_start.tv_sec)*1000 + (t_end.tv_nsec-t_start.tv_nsec)/1000000);
 
     /*===== Export result ====================================================*/
     FILE *fp_out;
