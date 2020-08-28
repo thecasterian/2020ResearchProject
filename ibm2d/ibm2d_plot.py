@@ -1,0 +1,71 @@
+import numpy as np
+import matplotlib.pyplot as plt
+from matplotlib.patches import Polygon
+from matplotlib.collections import PatchCollection
+
+# Read output files
+fp_in = open("ibm2d.in", "r")
+
+numvert = int(fp_in.readline().split()[1])
+vert = [[], []]
+for i in range(numvert):
+    vx, vy = map(float, fp_in.readline().split())
+    vert[0].append(vx)
+    vert[1].append(vy)
+vert = np.array(vert).T
+fp_in.readline()
+
+Nx = int(fp_in.readline().split()[1])
+xf = np.fromiter(map(float, fp_in.readline().split()), dtype=np.float64)
+Ny = int(fp_in.readline().split()[1])
+yf = np.fromiter(map(float, fp_in.readline().split()), dtype=np.float64)
+
+fp_in.close()
+
+xc = (xf[1:] + xf[:-1]) / 2
+yc = (yf[1:] + yf[:-1]) / 2
+
+X, Y = np.meshgrid(xc, yc)
+
+u1 = np.loadtxt("u1.txt")[1:-1, 1:-1].T
+u2 = np.loadtxt("u2.txt")[1:-1, 1:-1].T
+p = np.loadtxt("p.txt")[1:-1, 1:-1].T
+omega = np.loadtxt("omega.txt").T
+
+vel = np.sqrt(u1**2 + u2**2)
+
+patch1 = PatchCollection([Polygon(vert, True)])
+patch2 = PatchCollection([Polygon(vert, True)])
+patch3 = PatchCollection([Polygon(vert, True)])
+patch1.set_color('gray')
+patch2.set_color('gray')
+patch3.set_color('gray')
+
+# Plot
+fig, (ax1, ax2) = plt.subplots(2, 1)
+
+ax1.set_title('Velocity')
+C1 = ax1.contourf(X, Y, vel, 100, cmap='hot')
+ax1.set_ylim(yc[0], yc[-1])
+ax1.set_aspect('equal', 'box')
+ax1.add_artist(patch1)
+fig.colorbar(C1, ax=ax1)
+
+ax2.set_title('Pressure')
+C2 = ax2.contourf(X, Y, p, 100, cmap='hot')
+ax2.set_ylim(yc[0], yc[-1])
+ax2.set_aspect('equal', 'box')
+ax2.add_artist(patch2)
+fig.colorbar(C2, ax=ax2)
+
+fig.tight_layout()
+
+fig, ax = plt.subplots(1, 1)
+ax.contourf(X, Y, omega, 100, cmap='seismic')
+ax.set_ylim(yc[0], yc[-1])
+ax.set_aspect('equal', 'box')
+ax.add_artist(patch3)
+
+fig.tight_layout()
+
+plt.show()
