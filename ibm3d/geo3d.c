@@ -207,20 +207,14 @@ double Geo3dPolyhedron_sgndist(Geo3dPolyhedron *poly, Geo3dVector v) {
         Geo3dPlane p = Geo3dPlane_3pts(a, b, c);
         Geo3dVector h = Geo3dPlane_proj(p, v);
 
-        // print_vector(face->n, "face normal");
-        // print_vector(h, "h");
-
         double area = 0.5 * Geo3dVector_dot(Geo3dVector_crs(ab, bc), face->n);
         double ka = 0.5 * Geo3dVector_dot(Geo3dVector_crs(Geo3dVector_sub(b, h), bc), face->n) / area;
         double kb = 0.5 * Geo3dVector_dot(Geo3dVector_crs(Geo3dVector_sub(c, h), ca), face->n) / area;
         double kc = 1 - ka - kb;
 
-        // printf("area: %lf, ka: %lf, kb: %lf, kc: %lf\n", area, ka, kb, kc);
-
         /* h is on the face */
-        if (ka > 0 && kb > 0 && kc > 0) {
+        if (ka >= 0 && kb >= 0 && kc >= 0) {
             double dist = Geo3dVector_dist(v, h);
-            // printf("dist: %lf\n", dist);
             if (Geo3dVector_dot(Geo3dVector_sub(v, h), face->n) < 0) {
                 dist = -dist;
             }
@@ -338,6 +332,7 @@ double Geo3dPolyhedron_sgndist(Geo3dPolyhedron *poly, Geo3dVector v) {
         }
         else {
             printf("FATAL ERROR: %d %d %d\n", (int)neara, (int)nearb, (int)nearc);
+            printf("ka: %.4lf, kb: %.4lf, kc: %.4lf\n", ka, kb, kc);
         }
     }
 

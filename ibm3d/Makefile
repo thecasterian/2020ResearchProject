@@ -1,7 +1,15 @@
+UNAME = $(shell uname)
+
 CC = mpicc
-CFLAGS = -Wall -Wno-unused-result -O2
-INCLUDE = -I/usr/include/glib-2.0 -I/usr/local/include
-LDLIBS = -lm -lglib-2.0
+CFLAGS = -Wall -Wno-unused-result -O3
+
+ifeq ($(UNAME), Darwin)
+	INCLUDE = -I/usr/local/Cellar/glib/2.66.0/include/glib-2.0 -I/usr/local/include
+	LDLIBS = -lm -lglib-2.0 -L/usr/local/Cellar/glib/2.66.0/lib -L/usr/local/opt/gettext/lib -lintl
+else
+	INCLUDE = -I/usr/local/include
+	LDLIBS = -lm -lglib-2.0
+endif
 
 HYPRE = /usr/local/lib/libHYPRE.a
 

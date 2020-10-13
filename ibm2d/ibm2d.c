@@ -8,10 +8,12 @@
 #include "HYPRE_krylov.h"
 #include "_hypre_utilities.h"
 
-#define SWAP(a, b) ({ __auto_type tmp = a; a = b; b = tmp;})
+#define SWAP(a, b) do {double (*tmp)[] = a; a = b; b = tmp;} while (0)
 
 const int adj[4][2] = {{0, 1}, {1, 0}, {0, -1}, {-1, 0}};
 
+/* Find the index of the first element in `arr` which is greater than `val`.
+   `arr` must be sorted in increasing order. */
 int bs_upper_bound(const int len, double arr[const static len], const double val) {
     int l = 0;
     int h = len;
@@ -26,11 +28,13 @@ int bs_upper_bound(const int len, double arr[const static len], const double val
     return l;
 }
 
-double dist(double a[static 2], double b[static 2]) {
+/* Calculate the distance between two 2-D point `a` and `b` */
+double dist(const double a[const static 2], const double b[const static 2]) {
     return sqrt((b[0]-a[0])*(b[0]-a[0]) + (b[1]-a[1])*(b[1]-a[1]));
 }
 
-double vecang(double a[static 2], double b[static 2]) {
+/* Calculate the angle from 2-D vector `a` to `b`, in CCW direction */
+double vecang(const double a[const static 2], const double b[const static 2]) {
     double lena = sqrt(a[0]*a[0]+a[1]*a[1]);
     double lenb = sqrt(b[0]*b[0]+b[1]*b[1]);
 
@@ -485,7 +489,8 @@ int main(int argc, char **argv) {
             values[1] = 1;
             HYPRE_IJMatrixSetValues(A_u1, 1, &ncols, &cell_id[0][j], cols, values);
 
-            /* i = Nx+1; u1[Nx+1][j] + u1[Nx][j] = 2 */
+            /* i = Nx+1; u1[Nx+1][j] is linearly extrapolated using u1[Nx-1][j]
+               and u1[Nx][j] */
             ncols = 3;
             cols[0] = cell_id[Nx+1][j];
             cols[1] = cell_id[Nx][j];
