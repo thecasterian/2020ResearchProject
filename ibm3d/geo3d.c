@@ -7,382 +7,357 @@
 
 const double PI = 3.141592653589793;
 
-struct pairint {
-    int first, second;
+/* Vertex of polyhedron. */
+typedef struct _vertex {
+    Vector coord;           /* Coordinates. */
+    int num_faces;          /* Number of faces containing this vertex. */
+    int *face_idx;          /* Indices of faces containing this vertex. */
+} Vertex;
+
+/* Edge of polyhedron. */
+typedef struct _edge {
+    int vertex_idx[2];      /* Indices of two vertices. */
+    int face_idx[2];        /* Indices of two faces containing this edge. */
+} Edge;
+
+/* Face of polyhedron. */
+typedef struct _face {
+    int vertex_idx[3];      /* Indices of three vertices. */
+    int edge_idx[3];        /* Indices of three edges. */
+    Vector n;               /* Outward unit normal vector. */
+} Face;
+
+struct _polyhedron {
+    size_t num_vertices;    /* Number of vertices. */
+    size_t num_edges;       /* Number of edges. */
+    size_t num_faces;       /* Number of faces. */
+
+    Vertex *vertex_list;    /* List of vertices. */
+    Edge *edge_list;        /* List of edges. */
+    Face *face_list;        /* List of faces. */
 };
 
-static int cmp_vertex(const void *v1, const void *v2, void *aux G_GNUC_UNUSED);
-static int cmp_pairint(const void *v1, const void *v2, void *aux G_GNUC_UNUSED);
-static int store_vertex(void *key, void *value, void *aux);
-static double vecang(Geo3dVector, Geo3dVector, Geo3dVector);
+typedef struct _face_extrusion {
+    Vector pts[6];
+    int sgn;
+} FaceExtrusion;
 
-static void print_vector(const Geo3dVector, const char *);
+typedef struct _edge_extrusion {
+    Vector pts[6];
+    int sgn;
+} EdgeExtrusion;
 
-Geo3dVector Geo3dVector_add(const Geo3dVector a, const Geo3dVector b) {
-    Geo3dVector res;
+typedef struct _vertex_extrusion {
+    Vector vertex;
+    Vector axis;
+    double height;
+    double angle;
+    int sgn;
+} VertexExtrusion;
+
+typedef struct _plane {
+    union {
+        struct {
+            double a, b, c;
+        };
+        Vector n;
+    };
+    double d;
+} Plane;
+
+typedef struct _pair_int {
+    int first, second;
+} PairInt;
+
+typedef struct _vert_tree_value {
+    int vert_idx, num_faces, face_idx;
+} VertTreeValue;
+
+typedef struct _edge_tree_value {
+    int edge_idx, face_idx[2];
+} EdgeTreeValue;
+
+static int cmp_vertex(const void *, const void *, void *);
+static int cmp_pairint(const void *, const void *, void *);
+static int store_vertex(void *, void *, void *);
+static int store_edge(void *, void *, void *);
+static double vecang(Vector, Vector, Vector);
+
+static int int_min(int, int);
+static int int_max(int, int);
+
+Vector Vector_add(const Vector a, const Vector b) {
+    Vector res;
     res.x = a.x + b.x;
     res.y = a.y + b.y;
     res.z = a.z + b.z;
     return res;
 }
 
-Geo3dVector Geo3dVector_sub(const Geo3dVector a, const Geo3dVector b) {
-    Geo3dVector res;
+Vector Vector_sub(const Vector a, const Vector b) {
+    Vector res;
     res.x = a.x - b.x;
     res.y = a.y - b.y;
     res.z = a.z - b.z;
     return res;
 }
 
-double Geo3dVector_dot(const Geo3dVector a, const Geo3dVector b) {
+double Vector_dot(const Vector a, const Vector b) {
     return a.x*b.x + a.y*b.y + a.z*b.z;
 }
 
-Geo3dVector Geo3dVector_crs(const Geo3dVector a, const Geo3dVector b) {
-    Geo3dVector res;
+Vector Vector_crs(const Vector a, const Vector b) {
+    Vector res;
     res.x = a.y*b.z - a.z*b.y;
     res.y = a.z*b.x - a.x*b.z;
     res.z = a.x*b.y - a.y*b.x;
     return res;
 }
 
-double Geo3dVector_norm(const Geo3dVector v) {
-    return sqrt(Geo3dVector_dot(v, v));
+double Vector_norm(const Vector v) {
+    return sqrt(Vector_dot(v, v));
 }
 
-double Geo3dVector_dist(const Geo3dVector a, const Geo3dVector b) {
-    return Geo3dVector_norm(Geo3dVector_sub(a, b));
+double Vector_dist(const Vector a, const Vector b) {
+    return Vector_norm(Vector_sub(a, b));
 }
 
-/* Initialize stl object */
-void Geo3dPolyhedron_init(Geo3dPolyhedron *poly) {
-    poly->num_vertices = poly->num_faces = 0;
+/* Allocate new polyhedron. */
+Polyhedron *Polyhedron_new(void) {
+    Polyhedron *poly = malloc(sizeof(Polyhedron));
+    poly->num_vertices = poly->num_edges = poly->num_faces = 0;
     poly->vertex_list = NULL;
+    poly->edge_list = NULL;
     poly->face_list = NULL;
+    return poly;
 }
 
-/* Read (binary) STL file */
-void Geo3dPolyhedron_read_stl(Geo3dPolyhedron *poly, FILE *f) {
+/* Read (binary) STL file. */
+void Polyhedron_read_stl(Polyhedron *poly, FILE *f) {
     char header[81] = "";
     uint32_t num_faces;
     float coord[3];
-    Geo3dVector vtmp[3];
+    Vector vtmp[3];
     uint16_t attr;
 
-    /* Read header (first 80 bytes) */
+    /* Read header (first 80 bytes). */
     fread(header, 1, 80, f);
 
-    /* Read number of triangels (next 4-bytes unsigned integer) */
+    /* Read number of faces. (next 4-bytes unsigned integer) */
     fread(&num_faces, 4, 1, f);
     poly->num_faces = num_faces;
 
-    /* Read each faces and vertices */
-    poly->face_list = calloc(poly->num_faces, sizeof(Geo3dPolyhedronFace));
+    /* Allocate face list. */
+    poly->face_list = calloc(poly->num_faces, sizeof(Face));
+
+    /* Vertex search tree. Vector -> VertTreeValue */
     GTree *vert_tree = g_tree_new_full(cmp_vertex, NULL, g_free, g_free);
 
     for (int i = 0; i < poly->num_faces; i++) {
-        /* Read normal vector */
+        /* Read normal vector. (3 x 4 bytes) */
         fread(coord, 4, 3, f);
         poly->face_list[i].n.x = coord[0];
         poly->face_list[i].n.y = coord[1];
         poly->face_list[i].n.z = coord[2];
-        /* Read coordinates of 3 vertices */
+        /* Read coordinates of 3 vertices temporarily in `vtmp`.
+           (3 x 3 x 4 bytes) */
         for (int j = 0; j < 3; j++) {
             fread(coord, 4, 3, f);
             vtmp[j].x = coord[0];
             vtmp[j].y = coord[1];
             vtmp[j].z = coord[2];
         }
-        /* Read attribute */
+        /* Read attribute. (2 bytes; discarded) */
         fread(&attr, 2, 1, f);
 
-        /* Check if vertex is already indexed */
         for (int j = 0; j < 3; j++) {
-            int *idx = g_tree_lookup(vert_tree, &vtmp[j]);
-            /* If not indexed, insert to `vert_tree` */
-            if (!idx) {
-                Geo3dVector *key = calloc(1, sizeof(Geo3dVector));
-                memcpy(key, &vtmp[j], sizeof(Geo3dVector));
-                int *value = malloc(sizeof(int));
-                *value = g_tree_nnodes(vert_tree);
+            /* Check if vertex is already indexed. */
+            VertTreeValue *v = g_tree_lookup(vert_tree, &vtmp[j]);
+
+            if (!v) {
+                /* If not indexed, insert it to vertex search tree. */
+                Vector *key = malloc(sizeof(Vector));
+                VertTreeValue *value = malloc(sizeof(VertTreeValue));
+
+                memcpy(key, &vtmp[j], sizeof(Vector));
+                value->vert_idx = g_tree_nnodes(vert_tree);
+                value->num_faces = 0;
+                value->face_idx = i;
+
                 g_tree_insert(vert_tree, key, value);
 
-                idx = value;
+                v = value;
             }
+
             /* Store the index of vertex in triangle */
-            poly->face_list[i].vertex_idx[j] = *idx;
+            poly->face_list[i].vertex_idx[j] = v->vert_idx;
+
+            v->num_faces++;
         }
     }
 
+    /* Allocate vertex list and store the contents of vertex search tree into
+       the list. */
     poly->num_vertices = g_tree_nnodes(vert_tree);
-    poly->vertex_list = calloc(poly->num_vertices, sizeof(Geo3dVector));
-
+    poly->vertex_list = calloc(poly->num_vertices, sizeof(Vertex));
     g_tree_foreach(vert_tree, store_vertex, poly->vertex_list);
 
     g_tree_destroy(vert_tree);
 
-    /* Calculate adjacency of triangles */
+    /* Edge search tree. PairInt -> EdgeTreeValue */
     GTree *edge_tree = g_tree_new_full(cmp_pairint, NULL, g_free, g_free);
 
+    PairInt etmp;
+
     for (int i = 0; i < poly->num_faces; i++) {
-        struct pairint etmp;
         for (int j = 0; j < 3; j++) {
             etmp.first = poly->face_list[i].vertex_idx[j];
             etmp.second = poly->face_list[i].vertex_idx[(j+1)%3];
-            if (etmp.first > etmp.second) {
-                int tmp = etmp.first;
-                etmp.first = etmp.second;
-                etmp.second = tmp;
-            }
 
-            struct pairint *idx = g_tree_lookup(edge_tree, &etmp);
-            if (!idx) {
-                struct pairint *key = calloc(1, sizeof(struct pairint));
-                memcpy(key, &etmp, sizeof(struct pairint));
-                struct pairint *value = calloc(1, sizeof(struct pairint));
-                value->first = i;
-                value->second = j;
+            /* Check if vertex is already indexed. */
+            EdgeTreeValue *v = g_tree_lookup(edge_tree, &etmp);
+
+            if (!v) {
+                /* If not indexed, insert it to edge search tree. */
+                PairInt *key = malloc(sizeof(PairInt));
+                EdgeTreeValue *value = malloc(sizeof(EdgeTreeValue));
+
+                memcpy(key, &etmp, sizeof(PairInt));
+                value->edge_idx = g_tree_nnodes(edge_tree);
+                value->face_idx[0] = i;
+
                 g_tree_insert(edge_tree, key, value);
+
+                v = value;
             }
             else {
-                poly->face_list[idx->first].adj_face_idx[idx->second] = i;
-                poly->face_list[i].adj_face_idx[j] = idx->first;
+                /* If indexed, set one remained face index. */
+                v->face_idx[1] = i;
             }
+
+            /* Set edge index of face. */
+            poly->face_list[i].edge_idx[j] = v->edge_idx;
         }
     }
+
+    /* Allocate edge list and store the contents of egde search tree into the
+       list. */
+    poly->num_edges = g_tree_nnodes(edge_tree);
+    poly->edge_list = calloc(poly->num_edges, sizeof(Edge));
+    g_tree_foreach(edge_tree, store_edge, poly->edge_list);
 
     g_tree_destroy(edge_tree);
-
-    /* Calculate dihedral angles between adjacent faces */
-    for (int i = 0; i < poly->num_faces; i++) {
-        Geo3dVector n = poly->face_list[i].n;
-        for (int j = 0; j < 3; j++) {
-            Geo3dVector nprime = poly->face_list[poly->face_list[i].adj_face_idx[j]].n;
-            Geo3dVector e = Geo3dVector_sub(
-                poly->vertex_list[poly->face_list[i].vertex_idx[(j+1)%3]],
-                poly->vertex_list[poly->face_list[i].vertex_idx[j]]
-            );
-            Geo3dVector h = Geo3dVector_crs(n, e);
-            Geo3dVector hprime = Geo3dVector_crs(e, nprime);
-            poly->face_list[i].adj_face_angle[j] = vecang(hprime, h, e);
-        }
-    }
 }
 
-Geo3dPlane Geo3dPlane_3pts(Geo3dVector a, Geo3dVector b, Geo3dVector c) {
-    Geo3dVector ab = Geo3dVector_sub(b, a);
-    Geo3dVector ac = Geo3dVector_sub(c, a);
-    Geo3dVector n = Geo3dVector_crs(ab, ac);
+void Polyhedron_cpt(
+    const Polyhedron *const poly,
+    const int nx, const int ny, const int nz,
+    const double x[const static nx],
+    const double y[const static ny],
+    const double z[const static nz],
+    double f[const static nx][ny][nz]
+) {
 
-    Geo3dPlane res;
+}
+
+Plane Plane_3pts(Vector a, Vector b, Vector c) {
+    Vector ab = Vector_sub(b, a);
+    Vector ac = Vector_sub(c, a);
+    Vector n = Vector_crs(ab, ac);
+
+    Plane res;
     res.n = n;
-    res.d = -Geo3dVector_dot(n, a);
+    res.d = -Vector_dot(n, a);
 
     return res;
 }
 
-Geo3dVector Geo3dPlane_proj(Geo3dPlane p, Geo3dVector v) {
+Vector Plane_proj(Plane p, Vector v) {
     double k = (p.a*v.x+p.b*v.y+p.c*v.z+p.d) / (p.a*p.a+p.b*p.b+p.c*p.c);
-    Geo3dVector res;
+    Vector res;
     res.x = v.x - k*p.a;
     res.y = v.y - k*p.b;
     res.z = v.z - k*p.c;
     return res;
 }
 
-double Geo3dPolyhedron_sgndist(Geo3dPolyhedron *poly, Geo3dVector v) {
-    double res = INFINITY;
+static int cmp_vertex(const void *_v1, const void *_v2, void *_aux G_GNUC_UNUSED) {
+    const Vertex *v1 = _v1, *v2 = _v2;
+    if (v1->coord.x != v2->coord.x)
+        return v1->coord.x < v2->coord.x ? -1 : 1;
+    if (v1->coord.y != v2->coord.y)
+        return v1->coord.y < v2->coord.y ? -1 : 1;
+    if (v1->coord.z != v2->coord.z)
+        return v1->coord.z < v2->coord.z ? -1 : 1;
+    return 0;
+}
 
-    for (int i = 0; i < poly->num_faces; i++) {
-        Geo3dPolyhedronFace *face = &poly->face_list[i];
+static int store_vertex(void *_key, void *_value, void *_aux) {
+    Vector *key = _key;
+    VertTreeValue *value = _value;
+    Vertex *vertex_list = _aux;
 
-        Geo3dVector a = poly->vertex_list[face->vertex_idx[0]];
-        Geo3dVector b = poly->vertex_list[face->vertex_idx[1]];
-        Geo3dVector c = poly->vertex_list[face->vertex_idx[2]];
-
-        Geo3dVector ab = Geo3dVector_sub(b, a);
-        Geo3dVector bc = Geo3dVector_sub(c, b);
-        Geo3dVector ca = Geo3dVector_sub(a, c);
-
-        Geo3dPlane p = Geo3dPlane_3pts(a, b, c);
-        Geo3dVector h = Geo3dPlane_proj(p, v);
-
-        double area = 0.5 * Geo3dVector_dot(Geo3dVector_crs(ab, bc), face->n);
-        double ka = 0.5 * Geo3dVector_dot(Geo3dVector_crs(Geo3dVector_sub(b, h), bc), face->n) / area;
-        double kb = 0.5 * Geo3dVector_dot(Geo3dVector_crs(Geo3dVector_sub(c, h), ca), face->n) / area;
-        double kc = 1 - ka - kb;
-
-        /* h is on the face */
-        if (ka >= 0 && kb >= 0 && kc >= 0) {
-            double dist = Geo3dVector_dist(v, h);
-            if (Geo3dVector_dot(Geo3dVector_sub(v, h), face->n) < 0) {
-                dist = -dist;
-            }
-            if (fabs(dist) < fabs(res)) {
-                res = dist;
-            }
-            continue;
-        }
-
-        double tab = Geo3dVector_dot(Geo3dVector_sub(v, a), ab) / Geo3dVector_dot(ab, ab);
-        double tbc = Geo3dVector_dot(Geo3dVector_sub(v, b), bc) / Geo3dVector_dot(bc, bc);
-        double tca = Geo3dVector_dot(Geo3dVector_sub(v, c), ca) / Geo3dVector_dot(ca, ca);
-
-        Geo3dVector habv, hbcv, hcav;
-
-        habv.x = v.x - (1-tab)*a.x - tab*b.x;
-        habv.y = v.y - (1-tab)*a.y - tab*b.y;
-        habv.z = v.z - (1-tab)*a.z - tab*b.z;
-
-        hbcv.x = v.x - (1-tbc)*b.x - tbc*c.x;
-        hbcv.y = v.y - (1-tbc)*b.y - tbc*c.y;
-        hbcv.z = v.z - (1-tbc)*b.z - tbc*c.z;
-
-        hcav.x = v.x - (1-tca)*c.x - tca*a.x;
-        hcav.y = v.y - (1-tca)*c.y - tca*a.y;
-        hcav.z = v.z - (1-tca)*c.z - tca*a.z;
-
-        double thetaab = 1.5*PI - vecang(face->n, habv, ab);
-        double thetabc = 1.5*PI - vecang(face->n, hbcv, bc);
-        double thetaca = 1.5*PI - vecang(face->n, hcav, ca);
-
-        bool neara = false, nearb = false, nearc = false;
-
-        if (ka < 0) {
-            if (tbc < 0) {
-                nearb = true;
-            }
-            else if (tbc > 1) {
-                nearc = true;
-            }
-            else {
-                double dist = Geo3dVector_norm(hbcv);
-                if (face->adj_face_angle[1] > thetabc) {
-                    dist = -dist;
-                }
-                if (fabs(dist) < fabs(res)) {
-                    res = dist;
-                }
-                continue;
-            }
-        }
-        else if (kb < 0) {
-            if (tca < 0) {
-                nearc = true;
-            }
-            else if (tca > 1) {
-                neara = true;
-            }
-            else {
-                double dist = Geo3dVector_norm(hcav);
-                if (face->adj_face_angle[2] > thetaca) {
-                    dist = -dist;
-                }
-                if (fabs(dist) < fabs(res)) {
-                    res = dist;
-                }
-                continue;
-            }
-        }
-        else if (kc < 0) {
-            if (tab < 0) {
-                neara = true;
-            }
-            else if (tab > 1) {
-                nearb = true;
-            }
-            else {
-                double dist = Geo3dVector_norm(habv);
-                if (face->adj_face_angle[0] > thetaab) {
-                    dist = -dist;
-                }
-                if (fabs(dist) < fabs(res)) {
-                    res = dist;
-                }
-                continue;
-            }
-        }
-
-        if (neara && !nearb && !nearc) {
-            double dist = Geo3dVector_dist(v, a);
-            if (face->adj_face_angle[2] > thetaca && face->adj_face_angle[0] > thetaab) {
-                dist = -dist;
-            }
-            if (fabs(dist) < fabs(res)) {
-                res = dist;
-            }
-        }
-        else if (!neara && nearb && !nearc) {
-            double dist = Geo3dVector_dist(v, b);
-            if (face->adj_face_angle[0] > thetaab && face->adj_face_angle[1] > thetabc) {
-                dist = -dist;
-            }
-            if (fabs(dist) < fabs(res)) {
-                res = dist;
-            }
-        }
-        else if (!neara && !nearb && nearc) {
-            double dist = Geo3dVector_dist(v, c);
-            if (face->adj_face_angle[1] > thetabc && face->adj_face_angle[2] > thetaca) {
-                dist = -dist;
-            }
-            if (fabs(dist) < fabs(res)) {
-                res = dist;
-            }
-        }
-        else {
-            printf("FATAL ERROR: %d %d %d\n", (int)neara, (int)nearb, (int)nearc);
-            printf("ka: %.4lf, kb: %.4lf, kc: %.4lf\n", ka, kb, kc);
-        }
+    /* Store coordinates. */
+    memcpy(&vertex_list[value->vert_idx].coord, key, sizeof(Vector));
+    /* Store number of faces. */
+    vertex_list[value->vert_idx].num_faces = value->num_faces;
+    /* Allocate face list of vertex. */
+    vertex_list[value->vert_idx].face_idx = malloc(value->num_faces * sizeof(int));
+    /* Store index of a face. */
+    vertex_list[value->vert_idx].face_idx[0] = value->face_idx;
+    for (int i = 1; i < value->num_faces; i++) {
+        vertex_list[value->vert_idx].face_idx[i] = -1;
     }
 
-    return res;
-}
-
-static int cmp_vertex(const void *v1, const void *v2, void *aux G_GNUC_UNUSED) {
-    const Geo3dVector *vt1 = v1, *vt2 = v2;
-    if (vt1->x != vt2->x)
-        return vt1->x < vt2->x ? -1 : 1;
-    if (vt1->y != vt2->y)
-        return vt1->y < vt2->y ? -1 : 1;
-    if (vt1->z != vt2->z)
-        return vt1->z < vt2->z ? -1 : 1;
     return 0;
 }
 
-static int store_vertex(void *key, void *value, void *aux) {
-    Geo3dVector *vertex_list = aux;
-    int idx = *(int *)value;
-    memcpy(&vertex_list[idx], key, sizeof(Geo3dVector));
+static int store_edge(void *_key, void *_value, void *_aux) {
+    PairInt *key = _key;
+    EdgeTreeValue *value = _value;
+    Edge *edge_list = _aux;
+
+    /* Store indices of verticies. */
+    memcpy(edge_list[value->edge_idx].vertex_idx, key, sizeof(PairInt));
+    /* Store indices of faces. */
+    memcpy(edge_list[value->edge_idx].face_idx, value->face_idx, 2*sizeof(int));
+
     return 0;
 }
 
-static int cmp_pairint(const void *v1, const void *v2, void *aux G_GNUC_UNUSED) {
-    const struct pairint *p1 = v1, *p2 = v2;
-    if (p1->first != p2->first)
-        return p1->first - p2->first;
-    return p1->second - p2->second;
+static int cmp_pairint(const void *_v1, const void *_v2, void *_aux G_GNUC_UNUSED) {
+    const PairInt *v1 = _v1, *v2 = _v2;
+    PairInt u1 = {int_min(v1->first, v1->second), int_max(v1->first, v1->second)};
+    PairInt u2 = {int_min(v2->first, v2->second), int_max(v2->first, v2->second)};
+
+    if (u1.first != u2.first)
+        return u1.first - u2.first;
+    return u1.second - u2.second;
 }
 
-static double vecang(Geo3dVector a, Geo3dVector b, Geo3dVector axis) {
-    double lena = Geo3dVector_norm(a);
-    double lenb = Geo3dVector_norm(b);
+static double vecang(Vector a, Vector b, Vector axis) {
+    double lena = Vector_norm(a);
+    double lenb = Vector_norm(b);
 
-    double costheta = Geo3dVector_dot(a, b) / (lena*lenb);
+    double costheta = Vector_dot(a, b) / (lena*lenb);
     if (costheta < -1)
         costheta = -1;
     else if (costheta > 1)
         costheta = 1;
 
     double theta = acos(costheta);
-    Geo3dVector crsprd = Geo3dVector_crs(a, b);
-    double projcoeff = Geo3dVector_dot(crsprd, axis) / Geo3dVector_dot(axis, axis);
+    Vector crsprd = Vector_crs(a, b);
+    double projcoeff = Vector_dot(crsprd, axis) / Vector_dot(axis, axis);
     if (projcoeff < 0)
         theta = 2*acos(-1) - theta;
 
     return theta;
 }
 
-static void print_vector(const Geo3dVector v, const char *name) {
-    printf("%s: (%lf, %lf, %lf)\n", name, v.x, v.y, v.z);
+static int int_min(int a, int b) {
+    return a < b ? a : b;
+}
+
+static int int_max(int a, int b) {
+    return a > b ? a : b;
 }

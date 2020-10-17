@@ -1,50 +1,34 @@
-#ifndef GEO3D_H
-#define GEO3D_H
+#ifndef _H
+#define _H
 
 #include <stdio.h>
 
-typedef struct _geo3dvector {
-    double x, y, z;
-} Geo3dVector;
+/* 3-dimensional vector. */
+typedef struct _vector {
+    double x, y, z;         /* Coordinates. */
+} Vector;
 
-typedef struct _geo3dpolyhedronface {
-    int vertex_idx[3];
-    Geo3dVector n;
+/* Polyhedron. */
+typedef struct _polyhedron Polyhedron;
 
-    int adj_face_idx[3];
-    double adj_face_angle[3];
-} Geo3dPolyhedronFace;
+Vector Vector_add(const Vector, const Vector);
+Vector Vector_sub(const Vector, const Vector);
+double Vector_dot(const Vector, const Vector);
+Vector Vector_crs(const Vector, const Vector);
 
-typedef struct _geo3dpolyhedron {
-    size_t num_vertices, num_faces;
-    Geo3dVector *vertex_list;
-    Geo3dPolyhedronFace *face_list;
-} Geo3dPolyhedron;
+double Vector_norm(const Vector);
+double Vector_dist(const Vector, const Vector);
 
-typedef struct _geo3dplane {
-    union {
-        struct {
-            double a, b, c;
-        };
-        Geo3dVector n;
-    };
-    double d;
-} Geo3dPlane;
+Polyhedron *Polyhedron_new(void);
+void Polyhedron_read_stl(Polyhedron *, FILE *);
 
-Geo3dVector Geo3dVector_add(const Geo3dVector, const Geo3dVector);
-Geo3dVector Geo3dVector_sub(const Geo3dVector, const Geo3dVector);
-double      Geo3dVector_dot(const Geo3dVector, const Geo3dVector);
-Geo3dVector Geo3dVector_crs(const Geo3dVector, const Geo3dVector);
-
-double Geo3dVector_norm(const Geo3dVector);
-double Geo3dVector_dist(const Geo3dVector, const Geo3dVector);
-
-void Geo3dPolyhedron_init(Geo3dPolyhedron *);
-void Geo3dPolyhedron_read_stl(Geo3dPolyhedron *, FILE *);
-
-double Geo3dPolyhedron_sgndist(Geo3dPolyhedron *, Geo3dVector);
-
-Geo3dPlane Geo3dPlane_3pts(Geo3dVector, Geo3dVector, Geo3dVector);
-Geo3dVector Geo3dPlane_proj(Geo3dPlane, Geo3dVector);
+void Polyhedron_cpt(
+    const Polyhedron *const poly,
+    const int nx, const int ny, const int nz,
+    const double x[const static nx],
+    const double y[const static ny],
+    const double z[const static nz],
+    double f[const static nx][ny][nz]
+);
 
 #endif
