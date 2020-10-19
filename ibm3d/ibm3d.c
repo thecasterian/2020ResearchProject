@@ -19,7 +19,7 @@
 #define FOR_INNER_CELL(i, j, k) \
     for (int i = 1; i <= Nx; i++) \
         for (int j = 1; j <= Ny; j++) \
-            for (int k = 0; k <= Nz; k++)
+            for (int k = 1; k <= Nz; k++)
 #define SWAP(a, b) do {double (*tmp)[] = a; a = b; b = tmp;} while (1)
 
 /* Index of adjacent cells in 3-d cartesian coordinate */
@@ -27,15 +27,15 @@ const int adj[6][3] = {
     {0, 1, 0}, {1, 0, 0}, {0, -1, 0}, {-1, 0, 0}, {0, 0, -1}, {0, 0, 1}
 };
 /* Order is:
-             5
-           z |  0
-             | / y
-             |/
- 3 ==========+========== 1
-            /|         x
-           / |
-          2  |
-             4
+            5
+          z |  0
+            | / y
+            |/
+ 3 ---------+--------- 1
+           /|        x
+          / |
+         2  |
+            4
 */
 
 /* Find the index of the first element in `arr` which is greater than `val`.
@@ -85,7 +85,7 @@ int main(int argc, char **argv) {
     /* Name of stl file containing polyhedron info. */
     char stl_file[100];
     /* Polyhedron read from stl file */
-    Geo3dPolyhedron poly;
+    Polyhedron *poly;
 
     /* Number of cells in x, y, and z direction, respectively */
     int Nx, Ny, Nz;
@@ -126,8 +126,8 @@ int main(int argc, char **argv) {
         fprintf(stderr, "Error: cannot open polygon file\n");
         MPI_Abort(MPI_COMM_WORLD, -1);
     }
-    Geo3dPolyhedron_init(&poly);
-    Geo3dPolyhedron_read_stl(&poly, fp_poly);
+    poly = Polyhedron_new();
+    Polyhedron_read_stl(poly, fp_poly);
 
     /* Read grid geometry */
     fscanf(fp_in, "%*s %d", &Nx);
@@ -177,28 +177,7 @@ int main(int argc, char **argv) {
     printf("  zmin: %10.4lf, zmax: %10.4lf\n", zf[0], zf[Ny]);
 
     /* Polyhedron statistics */
-    printf(
-        "Input polyhedron size: %zu faces, %zu vertices\n",
-        poly.num_faces,
-        poly.num_vertices
-    );
-    {
-        double xmin = INFINITY, xmax = -INFINITY;
-        double ymin = INFINITY, ymax = -INFINITY;
-        double zmin = INFINITY, zmax = -INFINITY;
-        for (int i = 0; i < poly.num_vertices; i++) {
-            Geo3dVector v = poly.vertex_list[i];
-            xmin = fmin(xmin, v.x);
-            xmax = fmax(xmax, v.x);
-            ymin = fmin(ymin, v.y);
-            ymax = fmax(ymax, v.y);
-            zmin = fmin(zmin, v.z);
-            zmax = fmax(zmax, v.z);
-        }
-        printf("  xmin: %10.4lf, xmax: %10.4lf\n", xmin, xmax);
-        printf("  ymin: %10.4lf, ymax: %10.4lf\n", ymin, ymax);
-        printf("  zmin: %10.4lf, zmax: %10.4lf\n", zmin, zmax);
-    }
+    Polyhedron_print_stats(poly);
 
     /* Reynolds number and delta t */
     printf("\n");
@@ -240,13 +219,13 @@ int main(int argc, char **argv) {
     double (*gc_interp_coeff)[8];
     /* Order of cells is:
          011         111
-          +==========-+
+          +-----------+
      001 /|      101 /|          z
-        +==========-+ |          | y
+        +-----------+ |          | y
         | |         | |          |/
-        | +========-|-+          +=====- x
+        | +---------|-+          +------ x
         |/ 010      |/ 110
-        +==========-+
+        +-----------+
        000         100
     */
 
@@ -373,11 +352,20 @@ int main(int argc, char **argv) {
 
     /****** Calculate level set function **************************************/
 
-    FOR_ALL_CELL (i, j, k) {
-        Geo3dVector v = {xc[i], yc[j], zc[k]};
-        lvset[i][j][k] = Geo3dPolyhedron_sgndist(&poly, v);
+    Polyhedron_cpt(poly, Nx+2, Ny+2, Nz+2, xc, yc, zc, lvset, 1);
+
+    FILE *fp_lvset = fopen("lvset.txt", "w");
+    if (fp_lvset) {
+        FOR_INNER_CELL (i, j, k) {
+            fprintf(fp_lvset, "%.8lf\n", lvset[i][j][k]);
+        }
+        fclose(fp_lvset);
     }
 
+    HYPRE_Finalize();
+    MPI_Finalize();
+
+#if 0
     /****** Calculate flags ***************************************************/
 
     /* Level set function is positive           => fluid cell (flag = 1)
@@ -464,7 +452,7 @@ int main(int argc, char **argv) {
 
             /* Calculate the gradient of level set function, which is the
                outward unit normal vector to polyhedron face */
-            Geo3dVector n;
+            Vector n;
             n.x = (lvset[i+1][j][k] - lvset[i-1][j][k]) / (xc[i+1] - xc[i-1]);
             n.y = (lvset[i][j+1][k] - lvset[i][j-1][k]) / (yc[j+1] - yc[j-1]);
             n.z = k > 0 ?
@@ -472,7 +460,7 @@ int main(int argc, char **argv) {
                 : (lvset[i][j][k+1] - lvset[i][j][k]) / (zc[k+1] - zc[k]);
 
             /* Calculate the coordinate of mirror point of ghost cell */
-            Geo3dVector m;
+            Vector m;
             m.x = xc[i] - 2*lvset[i][j][k]*n.x;
             m.y = yc[j] - 2*lvset[i][j][k]*n.y;
             m.z = zc[k] - 2*lvset[i][j][k]*n.z;
@@ -638,5 +626,5 @@ int main(int argc, char **argv) {
         }
     }
 
-
+#endif
 }

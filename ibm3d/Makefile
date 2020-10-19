@@ -1,13 +1,13 @@
 UNAME = $(shell uname)
 
 CC = mpicc
-CFLAGS = -Wall -Wno-unused-result -O3
+CFLAGS = -Wall -O3 -Wno-unused-result -Wno-unused
 
 ifeq ($(UNAME), Darwin)
 	INCLUDE = -I/usr/local/Cellar/glib/2.66.0/include/glib-2.0 -I/usr/local/include
 	LDLIBS = -lm -lglib-2.0 -L/usr/local/Cellar/glib/2.66.0/lib -L/usr/local/opt/gettext/lib -lintl
 else
-	INCLUDE = -I/usr/local/include
+	INCLUDE = -I/usr/local/include -I/usr/include/glib-2.0
 	LDLIBS = -lm -lglib-2.0
 endif
 
@@ -26,3 +26,6 @@ $(TARGET): ibm3d.c geo3d.o
 
 geo3d.o: geo3d.h geo3d.c
 	$(CC) $(INCLUDE) -c geo3d.c $(LDLIBS) $(CFLAGS)
+
+test: test.c geo3d.o
+	$(CC) $(INCLUDE) geo3d.o test.c -o test $(LDLIBS) $(CFLAGS)

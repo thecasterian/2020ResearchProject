@@ -3,9 +3,13 @@
 #include <stdint.h>
 #include <math.h>
 #include <stdbool.h>
+#include <float.h>
 #include <glib.h>
 
 const double PI = 3.141592653589793;
+
+#define max(a, b) ({typeof(a) _a = a; typeof(b) _b = b; _a > _b ? _a : _b;})
+#define min(a, b) ({typeof(a) _a = a; typeof(b) _b = b; _a < _b ? _a : _b;})
 
 /* Vertex of polyhedron. */
 typedef struct _vertex {
@@ -50,7 +54,7 @@ typedef struct _edge_extrusion {
 typedef struct _vertex_extrusion {
     Vector vertex;
     Vector axis;
-    double height;
+    double radius;
     double angle;
     int sgn;
 } VertexExtrusion;
@@ -81,10 +85,36 @@ static int cmp_vertex(const void *, const void *, void *);
 static int cmp_pairint(const void *, const void *, void *);
 static int store_vertex(void *, void *, void *);
 static int store_edge(void *, void *, void *);
+
+static inline Plane Plane_3pts(Vector, Vector, Vector);
+static inline Vector Plane_proj(Plane, Vector);
+static inline double Plane_dist(Plane, Vector);
+
+static inline double Segment_dist(Vector, Vector, Vector);
+
+static inline void VertexExtrusion_cpt(
+    const VertexExtrusion,
+    const int, const int, const int,
+    const double [], const double [], const double [],
+    double [][*][*]
+);
+static inline void EdgeExtrusion_cpt(
+    const EdgeExtrusion,
+    const int, const int, const int,
+    const double [], const double [], const double [],
+    double [][*][*]
+);
+static inline void FaceExtrusion_cpt(
+    const FaceExtrusion,
+    const int, const int, const int,
+    const double [], const double [], const double [],
+    double [][*][*]
+);
+
 static double vecang(Vector, Vector, Vector);
 
-static int int_min(int, int);
-static int int_max(int, int);
+static int lower_bound(const int, const double [], const double);
+static int upper_bound(const int, const double [], const double);
 
 Vector Vector_add(const Vector a, const Vector b) {
     Vector res;
@@ -120,6 +150,51 @@ double Vector_norm(const Vector v) {
 
 double Vector_dist(const Vector a, const Vector b) {
     return Vector_norm(Vector_sub(a, b));
+}
+
+double Vector_angle(const Vector a, const Vector b) {
+    double lena = Vector_norm(a);
+    double lenb = Vector_norm(b);
+
+    double costheta = Vector_dot(a, b) / (lena*lenb);
+    if (costheta < -1)
+        costheta = -1;
+    else if (costheta > 1)
+        costheta = 1;
+
+    return acos(costheta);
+}
+
+Vector Vector_normalize(const Vector v) {
+    Vector res = v;
+    const double len = Vector_norm(v);
+    res.x = v.x / len;
+    res.y = v.y / len;
+    res.z = v.z / len;
+    return res;
+}
+
+Vector Vector_lincom(const double a, const Vector u, const double b, const Vector v) {
+    Vector res;
+    res.x = a*u.x + b*v.x;
+    res.y = a*u.y + b*v.y;
+    res.z = a*u.z + b*v.z;
+    return res;
+}
+
+Vector Vector_rotate(const Vector v, const Vector axis, const double angle) {
+    const Vector n = Vector_normalize(axis);
+    Vector res;
+    res.x = (cos(angle)+n.x*n.x*(1-cos(angle))) * v.x
+            + (n.x*n.y*(1-cos(angle))-n.z*sin(angle)) * v.y
+            + (n.x*n.z*(1-cos(angle))+n.y*sin(angle)) * v.z;
+    res.y = (n.x*n.y*(1-cos(angle))+n.z*sin(angle)) * v.x
+            + (cos(angle)+n.y*n.y*(1-cos(angle))) * v.y
+            + (n.y*n.z*(1-cos(angle))-n.x*sin(angle)) * v.z;
+    res.z = (n.x*n.z*(1-cos(angle))-n.y*sin(angle)) * v.x
+            + (n.y*n.z*(1-cos(angle))+n.x*sin(angle)) * v.y
+            + (cos(angle)+n.z*n.z*(1-cos(angle))) * v.z;
+    return res;
 }
 
 /* Allocate new polyhedron. */
@@ -196,6 +271,8 @@ void Polyhedron_read_stl(Polyhedron *poly, FILE *f) {
         }
     }
 
+    printf("%d\n", g_tree_nnodes(vert_tree));
+
     /* Allocate vertex list and store the contents of vertex search tree into
        the list. */
     poly->num_vertices = g_tree_nnodes(vert_tree);
@@ -247,20 +324,266 @@ void Polyhedron_read_stl(Polyhedron *poly, FILE *f) {
     g_tree_foreach(edge_tree, store_edge, poly->edge_list);
 
     g_tree_destroy(edge_tree);
+
+    /* For each vertex, find faces containing it. */
+    for (int i = 0; i < poly->num_vertices; i++) {
+        int cur_face_idx = poly->vertex_list[i].face_idx[0];
+        int cur_edge_idx;
+        for (int j = 1; j < poly->vertex_list[i].num_faces; j++) {
+            if (poly->face_list[cur_face_idx].vertex_idx[0] == i) {
+                cur_edge_idx = poly->face_list[cur_face_idx].edge_idx[2];
+            }
+            else if (poly->face_list[cur_face_idx].vertex_idx[1] == i) {
+                cur_edge_idx = poly->face_list[cur_face_idx].edge_idx[0];
+            }
+            else {
+                cur_edge_idx = poly->face_list[cur_face_idx].edge_idx[1];
+            }
+
+            if (poly->edge_list[cur_edge_idx].face_idx[0] == cur_face_idx) {
+                cur_face_idx = poly->edge_list[cur_edge_idx].face_idx[1];
+            }
+            else {
+                cur_face_idx = poly->edge_list[cur_edge_idx].face_idx[0];
+            }
+
+            poly->vertex_list[i].face_idx[j] = cur_face_idx;
+        }
+    }
+
+    /* DEBUG */
+#ifdef DEBUG
+    for (int i = 0; i < poly->num_vertices; i++) {
+        printf("vertex %d\n", i);
+        printf("  faces:");
+        for (int j = 0; j < poly->vertex_list[i].num_faces; j++) {
+            printf(" %d", poly->vertex_list[i].face_idx[j]);
+        }
+        printf("\n");
+    }
+    for (int i = 0; i < poly->num_edges; i++) {
+        printf("edge %d\n", i);
+        printf("  vertices: %d %d\n",
+               poly->edge_list[i].vertex_idx[0],
+               poly->edge_list[i].vertex_idx[1]);
+        printf("  faces: %d %d\n",
+               poly->edge_list[i].face_idx[0],
+               poly->edge_list[i].face_idx[1]);
+    }
+    for (int i = 0; i < poly->num_faces; i++) {
+        printf("face %d\n", i);
+        printf("  vertices: %d %d %d\n",
+               poly->face_list[i].vertex_idx[0],
+               poly->face_list[i].vertex_idx[1],
+               poly->face_list[i].vertex_idx[2]);
+        printf("  edges: %d %d %d\n",
+               poly->face_list[i].edge_idx[0],
+               poly->face_list[i].edge_idx[1],
+               poly->face_list[i].edge_idx[2]);
+    }
+#endif
+}
+
+void Polyhedron_print_stats(Polyhedron *poly) {
+    double xmin = INFINITY, xmax = -INFINITY;
+    double ymin = INFINITY, ymax = -INFINITY;
+    double zmin = INFINITY, zmax = -INFINITY;
+
+    printf(
+        "Input polyhedron size: %zu faces, %zu edges, %zu vertices\n",
+        poly->num_faces,
+        poly->num_edges,
+        poly->num_vertices
+    );
+    for (int i = 0; i < poly->num_vertices; i++) {
+        const Vector v = poly->vertex_list[i].coord;
+        xmin = min(xmin, v.x);
+        xmax = max(xmax, v.x);
+        ymin = min(ymin, v.y);
+        ymax = max(ymax, v.y);
+        zmin = min(zmin, v.z);
+        zmax = max(zmax, v.z);
+    }
+    printf("  xmin: %10.4lf, xmax: %10.4lf\n", xmin, xmax);
+    printf("  ymin: %10.4lf, ymax: %10.4lf\n", ymin, ymax);
+    printf("  zmin: %10.4lf, zmax: %10.4lf\n", zmin, zmax);
 }
 
 void Polyhedron_cpt(
     const Polyhedron *const poly,
     const int nx, const int ny, const int nz,
-    const double x[const static nx],
-    const double y[const static ny],
-    const double z[const static nz],
-    double f[const static nx][ny][nz]
+    const double x[const restrict static nx],
+    const double y[const restrict static ny],
+    const double z[const restrict static nz],
+    double f[const restrict static nx][ny][nz],
+    const double maxd
 ) {
+    VertexExtrusion ve;
+    EdgeExtrusion ee;
+    FaceExtrusion fe;
 
+    /* Initialize distance function array. */
+    for (int i = 0; i < nx; i++) {
+        for (int j = 0; j < ny; j++) {
+            for (int k = 0; k < nz; k++) {
+                f[i][j][k] = NAN;
+            }
+        }
+    }
+
+    /* Face extrusions. */
+    for (int i = 0; i < poly->num_faces; i++) {
+        /* Outward extrusions. */
+        for (int j = 0; j < 3; j++) {
+            fe.pts[j] = poly->vertex_list[poly->face_list[i].vertex_idx[j]].coord;
+            fe.pts[j+3] = Vector_lincom(1, fe.pts[j], maxd, poly->face_list[i].n);
+        }
+        fe.sgn = 1;
+        FaceExtrusion_cpt(fe, nx, ny, nz, x, y, z, f);
+
+        /* Inward extrusions. */
+        for (int j = 0; j < 3; j++) {
+            fe.pts[j] = poly->vertex_list[poly->face_list[i].vertex_idx[(3-j)%3]].coord;
+            fe.pts[j+3] = Vector_lincom(1, fe.pts[j], -maxd, poly->face_list[i].n);
+        }
+        fe.sgn = -1;
+        FaceExtrusion_cpt(fe, nx, ny, nz, x, y, z, f);
+    }
+
+    /* Edge extrusions. */
+    for (int i = 0; i < poly->num_edges; i++) {
+        ee.pts[0] = poly->vertex_list[poly->edge_list[i].vertex_idx[0]].coord;
+        ee.pts[1] = poly->vertex_list[poly->edge_list[i].vertex_idx[1]].coord;
+
+        const Vector v = Vector_sub(ee.pts[1], ee.pts[0]);
+        const Vector n_left = poly->face_list[poly->edge_list[i].face_idx[0]].n;
+        const Vector n_right = poly->face_list[poly->edge_list[i].face_idx[1]].n;
+        ee.sgn = Vector_dot(Vector_crs(v, n_left), n_right) >= 0 ? 1 : -1;
+
+        double angle = Vector_angle(n_left, n_right);
+        if (angle <= PI/2) {
+            double l = maxd / cos(angle/2);
+            if (ee.sgn == 1) {
+                ee.pts[2] = Vector_lincom(1, ee.pts[0], l, n_left);
+                ee.pts[3] = Vector_lincom(1, ee.pts[1], l, n_left);
+                ee.pts[4] = Vector_lincom(1, ee.pts[0], l, n_right);
+                ee.pts[5] = Vector_lincom(1, ee.pts[1], l, n_right);
+            }
+            else {
+                ee.pts[2] = Vector_lincom(1, ee.pts[0], -l, n_right);
+                ee.pts[3] = Vector_lincom(1, ee.pts[1], -l, n_right);
+                ee.pts[4] = Vector_lincom(1, ee.pts[0], -l, n_left);
+                ee.pts[5] = Vector_lincom(1, ee.pts[1], -l, n_left);
+            }
+            EdgeExtrusion_cpt(ee, nx, ny, nz, x, y, z, f);
+        }
+        else {
+            double l = maxd / cos(angle/4);
+            const Vector n_mid = Vector_normalize(Vector_lincom(1, n_left, 1, n_right));
+            if (ee.sgn == 1) {
+                ee.pts[2] = Vector_lincom(1, ee.pts[0], l, n_left);
+                ee.pts[3] = Vector_lincom(1, ee.pts[1], l, n_left);
+                ee.pts[4] = Vector_lincom(1, ee.pts[0], l, n_mid);
+                ee.pts[5] = Vector_lincom(1, ee.pts[1], l, n_mid);
+                EdgeExtrusion_cpt(ee, nx, ny, nz, x, y, z, f);
+                ee.pts[2] = Vector_lincom(1, ee.pts[0], l, n_mid);
+                ee.pts[3] = Vector_lincom(1, ee.pts[1], l, n_mid);
+                ee.pts[4] = Vector_lincom(1, ee.pts[0], l, n_right);
+                ee.pts[5] = Vector_lincom(1, ee.pts[1], l, n_right);
+                EdgeExtrusion_cpt(ee, nx, ny, nz, x, y, z, f);
+            }
+            else {
+                ee.pts[2] = Vector_lincom(1, ee.pts[0], -l, n_right);
+                ee.pts[3] = Vector_lincom(1, ee.pts[1], -l, n_right);
+                ee.pts[4] = Vector_lincom(1, ee.pts[0], -l, n_mid);
+                ee.pts[5] = Vector_lincom(1, ee.pts[1], -l, n_mid);
+                EdgeExtrusion_cpt(ee, nx, ny, nz, x, y, z, f);
+                ee.pts[2] = Vector_lincom(1, ee.pts[0], -l, n_mid);
+                ee.pts[3] = Vector_lincom(1, ee.pts[1], -l, n_mid);
+                ee.pts[4] = Vector_lincom(1, ee.pts[0], -l, n_left);
+                ee.pts[5] = Vector_lincom(1, ee.pts[1], -l, n_left);
+                EdgeExtrusion_cpt(ee, nx, ny, nz, x, y, z, f);
+            }
+        }
+    }
+
+    /* Vertex extrusions. */
+    for (int i = 0; i < poly->num_vertices; i++) {
+        int adj_vertex_idx[poly->vertex_list[i].num_faces];
+        double adj_angle = 0;
+        bool is_convex = true, is_concave = true;
+
+        ve.vertex = poly->vertex_list[i].coord;
+        ve.radius = maxd;
+
+        /* Calculate axis (pseudonormal). */
+        ve.axis = (Vector){0, 0, 0};
+        for (int j = 0; j < poly->vertex_list[i].num_faces; j++) {
+            const Face adj_face = poly->face_list[poly->vertex_list[i].face_idx[j]];
+            for (int k = 0; k < 3; k++) {
+                if (adj_face.vertex_idx[k] == i) {
+                    adj_angle = Vector_angle(
+                        Vector_sub(
+                            poly->vertex_list[adj_face.vertex_idx[(k+1)%3]].coord,
+                            ve.vertex
+                        ),
+                        Vector_sub(
+                            poly->vertex_list[adj_face.vertex_idx[(k+2)%3]].coord,
+                            ve.vertex
+                        )
+                    );
+                    adj_vertex_idx[j] = adj_face.vertex_idx[(k+2)%3];
+                }
+            }
+            ve.axis = Vector_lincom(1, ve.axis, adj_angle, adj_face.n);
+        }
+        ve.axis = Vector_normalize(ve.axis);
+
+        /* Calculate convexity. */
+        for (int j = 0; j < poly->vertex_list[i].num_faces; j++) {
+            double d = Vector_dot(
+                Vector_sub(
+                    poly->vertex_list[adj_vertex_idx[j]].coord,
+                    ve.vertex
+                ),
+                ve.axis
+            );
+            if (d > 0) {
+                is_convex = false;
+            }
+            if (d < 0) {
+                is_concave = false;
+            }
+        }
+
+        /* Convex or concave vertex. */
+        if ((is_convex && !is_concave) || (!is_convex && is_concave)) {
+            ve.angle = 0;
+            for (int j = 0; j < poly->vertex_list[i].num_faces; j++) {
+                ve.angle = max(
+                    ve.angle,
+                    Vector_angle(
+                        ve.axis,
+                        poly->face_list[poly->vertex_list[i].face_idx[j]].n
+                    )
+                );
+            }
+            if (is_concave) {
+                ve.axis.x *= -1;
+                ve.axis.y *= -1;
+                ve.axis.z *= -1;
+            }
+            ve.sgn = is_convex ? 1 : -1;
+            VertexExtrusion_cpt(ve, nx, ny, nz, x, y, z, f);
+        }
+        /* Saddle vertex. */
+        if (!is_convex && !is_concave) {
+
+        }
+    }
 }
 
-Plane Plane_3pts(Vector a, Vector b, Vector c) {
+static inline Plane Plane_3pts(Vector a, Vector b, Vector c) {
     Vector ab = Vector_sub(b, a);
     Vector ac = Vector_sub(c, a);
     Vector n = Vector_crs(ab, ac);
@@ -272,13 +595,25 @@ Plane Plane_3pts(Vector a, Vector b, Vector c) {
     return res;
 }
 
-Vector Plane_proj(Plane p, Vector v) {
+static inline Vector Plane_proj(Plane p, Vector v) {
     double k = (p.a*v.x+p.b*v.y+p.c*v.z+p.d) / (p.a*p.a+p.b*p.b+p.c*p.c);
     Vector res;
     res.x = v.x - k*p.a;
     res.y = v.y - k*p.b;
     res.z = v.z - k*p.c;
     return res;
+}
+
+static inline double Plane_dist(Plane p, Vector v) {
+    return fabs(p.a*v.x+p.b*v.y+p.c*v.z+p.d) / Vector_norm(p.n);
+}
+
+static inline double Segment_dist(Vector a, Vector b, Vector v) {
+    const Vector ab = Vector_sub(b, a);
+    const Vector av = Vector_sub(v, a);
+    const double t = Vector_dot(ab, av) / Vector_dot(ab, ab);
+    const Vector h = Vector_lincom(1-t, a, t, b);
+    return Vector_dist(v, h);
 }
 
 static int cmp_vertex(const void *_v1, const void *_v2, void *_aux G_GNUC_UNUSED) {
@@ -327,12 +662,169 @@ static int store_edge(void *_key, void *_value, void *_aux) {
 
 static int cmp_pairint(const void *_v1, const void *_v2, void *_aux G_GNUC_UNUSED) {
     const PairInt *v1 = _v1, *v2 = _v2;
-    PairInt u1 = {int_min(v1->first, v1->second), int_max(v1->first, v1->second)};
-    PairInt u2 = {int_min(v2->first, v2->second), int_max(v2->first, v2->second)};
+    PairInt u1 = {min(v1->first, v1->second), max(v1->first, v1->second)};
+    PairInt u2 = {min(v2->first, v2->second), max(v2->first, v2->second)};
 
     if (u1.first != u2.first)
         return u1.first - u2.first;
     return u1.second - u2.second;
+}
+
+static inline void VertexExtrusion_cpt(
+    const VertexExtrusion ve,
+    const int nx, const int ny, const int nz,
+    const double x[const restrict static nx],
+    const double y[const restrict static ny],
+    const double z[const restrict static nz],
+    double f[const restrict static nx][ny][nz]
+) {
+    double xmax, xmin;
+    double ymax, ymin;
+    double zmax, zmin;
+    int xmax_idx, xmin_idx, ymax_idx, ymin_idx, zmax_idx, zmin_idx;
+
+    Vector d;
+    double dist;
+
+    xmax_idx = upper_bound(nx, x, ve.vertex.x + ve.radius);
+    xmin_idx = lower_bound(nx, x, ve.vertex.x - ve.radius);
+    ymax_idx = upper_bound(ny, y, ve.vertex.y + ve.radius);
+    ymin_idx = lower_bound(ny, y, ve.vertex.y - ve.radius);
+    zmax_idx = upper_bound(nz, z, ve.vertex.z + ve.radius);
+    zmin_idx = lower_bound(nz, z, ve.vertex.z - ve.radius);
+
+    for (int i = xmin_idx; i < xmax_idx; i++) {
+        for (int j = ymin_idx; j < ymax_idx; j++) {
+            for (int k = zmin_idx; k < zmax_idx; k++) {
+                d = Vector_sub((Vector){x[i], y[j], z[k]}, ve.vertex);
+                dist = Vector_norm(d);
+                if (Vector_angle(ve.axis, d) <= ve.angle + 1e-9 && dist <= ve.radius + 1e-9) {
+                    dist = Vector_norm(d);
+                    if (isnan(f[i][j][k]) || dist < fabs(f[i][j][k])) {
+                        f[i][j][k] = ve.sgn * dist;
+                    }
+                }
+            }
+        }
+    }
+}
+
+static inline void EdgeExtrusion_cpt(
+    const EdgeExtrusion ee,
+    const int nx, const int ny, const int nz,
+    const double x[const restrict static nx],
+    const double y[const restrict static ny],
+    const double z[const restrict static nz],
+    double f[const restrict static nx][ny][nz]
+) {
+    double xmax = -INFINITY, xmin = INFINITY;
+    double ymax = -INFINITY, ymin = INFINITY;
+    double zmax = -INFINITY, zmin = INFINITY;
+    int xmax_idx, xmin_idx, ymax_idx, ymin_idx, zmax_idx, zmin_idx;
+
+    Plane ee_faces[5];
+    bool is_in;
+    double dist;
+
+    for (int i = 0; i < 6; i++) {
+        xmax = max(xmax, ee.pts[i].x);
+        xmin = min(xmin, ee.pts[i].x);
+        ymax = max(ymax, ee.pts[i].y);
+        ymin = min(ymin, ee.pts[i].y);
+        zmax = max(zmax, ee.pts[i].z);
+        zmin = min(zmin, ee.pts[i].z);
+    }
+
+    xmax_idx = upper_bound(nx, x, xmax);
+    xmin_idx = lower_bound(nx, x, xmin);
+    ymax_idx = upper_bound(ny, y, ymax);
+    ymin_idx = lower_bound(ny, y, ymin);
+    zmax_idx = upper_bound(nz, z, zmax);
+    zmin_idx = lower_bound(nz, z, zmin);
+
+    ee_faces[0] = Plane_3pts(ee.pts[0], ee.pts[4], ee.pts[2]);
+    ee_faces[1] = Plane_3pts(ee.pts[1], ee.pts[3], ee.pts[5]);
+    ee_faces[2] = Plane_3pts(ee.pts[0], ee.pts[2], ee.pts[3]);
+    ee_faces[3] = Plane_3pts(ee.pts[2], ee.pts[4], ee.pts[5]);
+    ee_faces[4] = Plane_3pts(ee.pts[0], ee.pts[1], ee.pts[5]);
+
+    for (int i = xmin_idx; i < xmax_idx; i++) {
+        for (int j = ymin_idx; j < ymax_idx; j++) {
+            for (int k = zmin_idx; k < zmax_idx; k++) {
+                is_in = true;
+                for (int l = 0; l < 5; l++) {
+                    if (ee_faces[l].a*x[i] + ee_faces[l].b*y[j] + ee_faces[l].c*z[k] + ee_faces[l].d > 1e-9) {
+                        is_in = false;
+                    }
+                }
+                if (is_in) {
+                    dist = Segment_dist(ee.pts[0], ee.pts[1], (Vector){x[i], y[j], z[k]});
+                    if (isnan(f[i][j][k]) || dist < fabs(f[i][j][k])) {
+                        f[i][j][k] = ee.sgn * dist;
+                    }
+                }
+            }
+        }
+    }
+}
+
+static inline void FaceExtrusion_cpt(
+    const FaceExtrusion fe,
+    const int nx, const int ny, const int nz,
+    const double x[const restrict static nx],
+    const double y[const restrict static ny],
+    const double z[const restrict static nz],
+    double f[const restrict static nx][ny][nz]
+) {
+    double xmax = -INFINITY, xmin = INFINITY;
+    double ymax = -INFINITY, ymin = INFINITY;
+    double zmax = -INFINITY, zmin = INFINITY;
+    int xmax_idx, xmin_idx, ymax_idx, ymin_idx, zmax_idx, zmin_idx;
+
+    Plane fe_faces[5];
+    bool is_in;
+    double dist;
+
+    for (int i = 0; i < 6; i++) {
+        xmax = max(xmax, fe.pts[i].x);
+        xmin = min(xmin, fe.pts[i].x);
+        ymax = max(ymax, fe.pts[i].y);
+        ymin = min(ymin, fe.pts[i].y);
+        zmax = max(zmax, fe.pts[i].z);
+        zmin = min(zmin, fe.pts[i].z);
+    }
+
+    xmax_idx = upper_bound(nx, x, xmax);
+    xmin_idx = lower_bound(nx, x, xmin);
+    ymax_idx = upper_bound(ny, y, ymax);
+    ymin_idx = lower_bound(ny, y, ymin);
+    zmax_idx = upper_bound(nz, z, zmax);
+    zmin_idx = lower_bound(nz, z, zmin);
+
+    fe_faces[0] = Plane_3pts(fe.pts[0], fe.pts[2], fe.pts[1]);
+    fe_faces[1] = Plane_3pts(fe.pts[3], fe.pts[4], fe.pts[5]);
+    fe_faces[2] = Plane_3pts(fe.pts[0], fe.pts[1], fe.pts[4]);
+    fe_faces[3] = Plane_3pts(fe.pts[1], fe.pts[2], fe.pts[5]);
+    fe_faces[4] = Plane_3pts(fe.pts[0], fe.pts[3], fe.pts[5]);
+
+    for (int i = xmin_idx; i < xmax_idx; i++) {
+        for (int j = ymin_idx; j < ymax_idx; j++) {
+            for (int k = zmin_idx; k < zmax_idx; k++) {
+                is_in = true;
+                for (int l = 0; l < 5; l++) {
+                    if (fe_faces[l].a*x[i] + fe_faces[l].b*y[j] + fe_faces[l].c*z[k] + fe_faces[l].d > 1e-9) {
+                        is_in = false;
+                    }
+                }
+                if (is_in) {
+                    dist = Plane_dist(fe_faces[0], (Vector){x[i], y[j], z[k]});
+                    if (isnan(f[i][j][k]) || dist < fabs(f[i][j][k])) {
+                        f[i][j][k] = fe.sgn * dist;
+                    }
+                }
+            }
+        }
+    }
 }
 
 static double vecang(Vector a, Vector b, Vector axis) {
@@ -354,10 +846,31 @@ static double vecang(Vector a, Vector b, Vector axis) {
     return theta;
 }
 
-static int int_min(int a, int b) {
-    return a < b ? a : b;
+int lower_bound(const int len, const double arr[const static len], const double val) {
+    int l = 0;
+    int h = len;
+    while (l < h) {
+        int mid =  l + (h - l) / 2;
+        if (val <= arr[mid]) {
+            h = mid;
+        } else {
+            l = mid + 1;
+        }
+    }
+    return l;
 }
 
-static int int_max(int a, int b) {
-    return a > b ? a : b;
+int upper_bound(const int len, const double arr[const static len], const double val) {
+    int l = 0;
+    int h = len;
+    while (l < h) {
+        int mid =  l + (h - l) / 2;
+        if (val >= arr[mid]) {
+            l = mid + 1;
+        }
+        else {
+            h = mid;
+        }
+    }
+    return l;
 }
