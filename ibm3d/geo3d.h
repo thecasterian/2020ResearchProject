@@ -22,9 +22,10 @@ double Vector_angle(const Vector, const Vector);
 
 Vector Vector_normalize(const Vector);
 Vector Vector_lincom(const double, const Vector, const double, const Vector);
-Vector Vector_rotate(const Vector, const Vector, const double);
+Vector Vector_rot(const Vector, const Vector, const double);
 
 Polyhedron *Polyhedron_new(void);
+void Polyhedron_destroy(Polyhedron *);
 void Polyhedron_read_stl(Polyhedron *, FILE *);
 void Polyhedron_print_stats(Polyhedron *);
 
@@ -37,5 +38,8 @@ void Polyhedron_cpt(
     double f[const static nx][ny][nz],
     const double maxd
 );
+
+int lower_bound(const int, const double [], const double);
+int upper_bound(const int, const double [], const double);
 
 #endif
