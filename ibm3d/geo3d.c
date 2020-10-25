@@ -727,9 +727,6 @@ static inline void VertexExtrusion_cpt(
     const double z[const restrict static nz],
     double f[const restrict static nx][ny][nz]
 ) {
-    double xmax, xmin;
-    double ymax, ymin;
-    double zmax, zmin;
     int xmax_idx, xmin_idx, ymax_idx, ymin_idx, zmax_idx, zmin_idx;
 
     Vector d;

@@ -9,8 +9,9 @@
 # ignore vscode folder
 .vscode
 
-# ignore txt file
+# ignore txt and output file
 *.txt
+*.out
 
 # ignore latex files
 *.aux

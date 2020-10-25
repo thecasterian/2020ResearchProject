@@ -45,13 +45,13 @@ for v0, v1, v2 in zip(m.v0, m.v1, m.v2):
 verts = np.array(verts)
 tris = np.array(tris)
 
-# read lvset
-lvset = np.loadtxt("lvset.txt").reshape(Nx, Ny, Nz)
+# read p
+p = np.fromfile('u1.out').reshape((Nx+2, Ny+2, Nz+2))
 
 # plot
 mlab.triangular_mesh(verts[:, 0], verts[:, 1], verts[:, 2], tris, color=(0.7, 0.7, 0.7), opacity=0.5)
 
-vc = mlab.volume_slice(X, Y, Z, lvset, plane_orientation='x_axes')
+vc = mlab.volume_slice(X, Y, Z, p[1:-1, 1:-1, 1:-1], plane_orientation='y_axes')
 vc.module_manager.scalar_lut_manager.lut.nan_color = 0, 0, 0, 0
 vc.update_pipeline()
 

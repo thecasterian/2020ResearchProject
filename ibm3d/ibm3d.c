@@ -128,6 +128,9 @@ int main(int argc, char **argv) {
     /****** Read input file. **************************************************/
     /*===== Define input parameters. =========================================*/
 
+    /* Files. */
+    FILE *fp_in, *fp_poly;
+
     /* Name of stl file containing polyhedron info. */
     char stl_file[100];
     /* Polyhedron read from stl file. */
@@ -160,12 +163,12 @@ int main(int argc, char **argv) {
 
     /* Open input file */
     printf("Read input file\n");
-    FILE *fp_in = fopen_check("ibm3d.in", "r");
+    fp_in = fopen_check("ibm3d.in", "r");
 
     /* Read stl file */
     fscanf(fp_in, "%*s %s", stl_file);
     printf("Read polyhedron file: %s\n", stl_file);
-    FILE *fp_poly = fopen_check(stl_file, "rb");
+    fp_poly = fopen_check(stl_file, "rb");
 
     poly = Polyhedron_new();
     Polyhedron_read_stl(poly, fp_poly);
@@ -207,6 +210,7 @@ int main(int argc, char **argv) {
     fscanf(fp_in, "%*s %s", output_file_p);
 
     fclose(fp_in);
+    fclose(fp_poly);
 
     /****** Print input statistics ********************************************/
 
@@ -317,6 +321,7 @@ int main(int argc, char **argv) {
     /*===== Misc. ============================================================*/
 
     struct timespec t_start, t_end;
+    FILE *fp_out;
 
     /****** Calculate grid variables ******************************************/
 
@@ -367,13 +372,9 @@ int main(int argc, char **argv) {
 
     Polyhedron_cpt(poly, Nx+2, Ny+2, Nz+2, xc, yc, zc, lvset, 5);
 
-#ifdef DEBUG
-    FILE *fp_lvset = fopen_check("lvset.txt", "w");
-    FOR_INNER_CELL (i, j, k) {
-        fprintf(fp_lvset, "%.8lf\n", lvset[i][j][k]);
-    }
-    fclose(fp_lvset);
-#endif
+    // FILE *fp_lvset = fopen_check("lvset.out", "w");
+    // fwrite(lvset, sizeof(double), (Nx+2)*(Ny+2)*(Nz+2), fp_lvset);
+    // fclose(fp_lvset);
 
     Polyhedron_destroy(poly);
 
@@ -477,6 +478,7 @@ int main(int argc, char **argv) {
     vector_rows = calloc(Nx*Ny*Nz, sizeof(int));
     vector_values_u1 = calloc(Nx*Ny*Nz, sizeof(double));
     vector_values_u2 = calloc(Nx*Ny*Nz, sizeof(double));
+    vector_values_u3 = calloc(Nx*Ny*Nz, sizeof(double));
     vector_values_p = calloc(Nx*Ny*Nz, sizeof(double));
     vector_zeros = calloc(Nx*Ny*Nz, sizeof(double));
     vector_res = calloc(Nx*Ny*Nz, sizeof(double));
@@ -518,6 +520,7 @@ int main(int argc, char **argv) {
     HYPRE_BoomerAMGSetNumSweeps(precond, 1);
     HYPRE_BoomerAMGSetTol(precond, 0);
     HYPRE_BoomerAMGSetMaxIter(precond, 1);
+    // HYPRE_BoomerAMGSetPrintLevel(precond, 2);
 
     HYPRE_BiCGSTABSetPrecond(
         solver_u1, (HYPRE_PtrToSolverFcn)HYPRE_BoomerAMGSolve,
@@ -536,7 +539,7 @@ int main(int argc, char **argv) {
         (HYPRE_PtrToSolverFcn)HYPRE_BoomerAMGSetup, precond
     );
 
-    printf("HYPRE done\n");
+    printf("\nHYPRE done\n");
 
     /****** Initialize Flow. **************************************************/
 
@@ -599,7 +602,331 @@ int main(int argc, char **argv) {
             u1, u2, u3, U1, U2, U3,
             N1, N2, N3
         );
+
+        /* Calculate u_star. */
+        FOR_ALL_CELL (i, j, k) {
+            if (flag[i][j][k] != 2) {
+                vector_values_u1[IDXFLAT(i, j, k)-1]
+                    = -dt/2 * (3*N1[i][j][k] - N1_prev[i][j][k])
+                    - dt * (p[i+1][j][k] - p[i-1][j][k]) / (xc[i+1] - xc[i-1])
+                    + (1-kx_W[i]-kx_E[i]-ky_S[j]-ky_N[j]-kz_D[k]-kz_U[k]) * u1[i][j][k]
+                    + kx_W[i]*u1[i-1][j][k] + kx_E[i]*u1[i+1][j][k]
+                    + ky_S[j]*u1[i][j-1][k] + ky_N[j]*u1[i][j+1][k]
+                    + kz_D[k]*u1[i][j][k-1] + kz_U[k]*u1[i][j][k+1];
+                vector_values_u2[IDXFLAT(i, j, k)-1]
+                    = -dt/2 * (3*N2[i][j][k] - N2_prev[i][j][k])
+                    - dt * (p[i][j+1][k] - p[i][j-1][k]) / (yc[j+1] - yc[j-1])
+                    + (1-kx_W[i]-kx_E[i]-ky_S[j]-ky_N[j]-kz_D[k]-kz_U[k]) * u2[i][j][k]
+                    + kx_W[i]*u2[i-1][j][k] + kx_E[i]*u2[i+1][j][k]
+                    + ky_S[j]*u2[i][j-1][k] + ky_N[j]*u2[i][j+1][k]
+                    + kz_D[k]*u2[i][j][k-1] + kz_U[k]*u2[i][j][k+1];
+                vector_values_u3[IDXFLAT(i, j, k)-1]
+                    = -dt/2 * (3*N3[i][j][k] - N3_prev[i][j][k])
+                    - dt * (p[i][j][k+1] - p[i][j][k-1]) / (zc[k+1] - zc[k-1])
+                    + (1-kx_W[i]-kx_E[i]-ky_S[j]-ky_N[j]-kz_D[k]-kz_U[k]) * u3[i][j][k]
+                    + kx_W[i]*u3[i-1][j][k] + kx_E[i]*u3[i+1][j][k]
+                    + ky_S[j]*u3[i][j-1][k] + ky_N[j]*u3[i][j+1][k]
+                    + kz_D[k]*u3[i][j][k-1] + kz_U[k]*u3[i][j][k+1];
+
+                if (i == 1) {
+                    vector_values_u1[IDXFLAT(i, j, k)-1] += 2*kx_W[i];
+                }
+            }
+        }
+
+        HYPRE_IJVectorSetValues(b_u1, Nx*Ny*Nz, vector_rows, vector_values_u1);
+        HYPRE_IJVectorSetValues(b_u2, Nx*Ny*Nz, vector_rows, vector_values_u2);
+        HYPRE_IJVectorSetValues(b_u3, Nx*Ny*Nz, vector_rows, vector_values_u3);
+
+        HYPRE_IJVectorSetValues(x_u1, Nx*Ny*Nz, vector_rows, vector_zeros);
+        HYPRE_IJVectorSetValues(x_u2, Nx*Ny*Nz, vector_rows, vector_zeros);
+        HYPRE_IJVectorSetValues(x_u3, Nx*Ny*Nz, vector_rows, vector_zeros);
+
+        HYPRE_IJVectorAssemble(b_u1);
+        HYPRE_IJVectorAssemble(b_u2);
+        HYPRE_IJVectorAssemble(b_u3);
+        HYPRE_IJVectorAssemble(x_u1);
+        HYPRE_IJVectorAssemble(x_u2);
+        HYPRE_IJVectorAssemble(x_u3);
+
+        HYPRE_IJVectorGetObject(b_u1, (void **)&par_b_u1);
+        HYPRE_IJVectorGetObject(b_u2, (void **)&par_b_u2);
+        HYPRE_IJVectorGetObject(b_u3, (void **)&par_b_u3);
+        HYPRE_IJVectorGetObject(x_u1, (void **)&par_x_u1);
+        HYPRE_IJVectorGetObject(x_u2, (void **)&par_x_u2);
+        HYPRE_IJVectorGetObject(x_u3, (void **)&par_x_u3);
+
+        HYPRE_ParCSRBiCGSTABSetup(solver_u1, parcsr_A_u1, par_b_u1, par_x_u1);
+        HYPRE_ParCSRBiCGSTABSetup(solver_u2, parcsr_A_u2, par_b_u2, par_x_u2);
+        HYPRE_ParCSRBiCGSTABSetup(solver_u3, parcsr_A_u3, par_b_u3, par_x_u3);
+
+        HYPRE_ParCSRBiCGSTABSolve(solver_u1, parcsr_A_u1, par_b_u1, par_x_u1);
+        HYPRE_ParCSRBiCGSTABSolve(solver_u2, parcsr_A_u2, par_b_u2, par_x_u2);
+        HYPRE_ParCSRBiCGSTABSolve(solver_u3, parcsr_A_u3, par_b_u3, par_x_u3);
+
+        HYPRE_IJVectorGetValues(x_u1, Nx*Ny*Nz, vector_rows, vector_res);
+        FOR_ALL_CELL (i, j, k) {
+            u1_star[i][j][k] = vector_res[IDXFLAT(i, j, k)-1];
+        }
+        HYPRE_IJVectorGetValues(x_u2, Nx*Ny*Nz, vector_rows, vector_res);
+        FOR_ALL_CELL (i, j, k) {
+            u2_star[i][j][k] = vector_res[IDXFLAT(i, j, k)-1];
+        }
+        HYPRE_IJVectorGetValues(x_u3, Nx*Ny*Nz, vector_rows, vector_res);
+        FOR_ALL_CELL (i, j, k) {
+            u3_star[i][j][k] = vector_res[IDXFLAT(i, j, k)-1];
+        }
+
+        HYPRE_BiCGSTABGetFinalRelativeResidualNorm(solver_u1, &final_res_norm);
+        if (final_res_norm >= 1e-4) {
+            fprintf(stderr, "u1 not converged!\n");
+        }
+        HYPRE_BiCGSTABGetFinalRelativeResidualNorm(solver_u2, &final_res_norm);
+        if (final_res_norm >= 1e-4) {
+            fprintf(stderr, "u2 not converged!\n");
+        }
+        HYPRE_BiCGSTABGetFinalRelativeResidualNorm(solver_u3, &final_res_norm);
+        if (final_res_norm >= 1e-4) {
+            fprintf(stderr, "u3 not converged!\n");
+        }
+
+        /* Calculate u_tilde. */
+        FOR_ALL_CELL (i, j, k) {
+            u1_tilde[i][j][k] = u1_star[i][j][k] + dt * (p[i+1][j][k] - p[i-1][j][k]) / (xc[i+1] - xc[i-1]);
+            u2_tilde[i][j][k] = u2_star[i][j][k] + dt * (p[i][j+1][k] - p[i][j-1][k]) / (yc[j+1] - yc[j-1]);
+            u3_tilde[i][j][k] = u3_star[i][j][k] + dt * (p[i][j][k+1] - p[i][j][k-1]) / (zc[k+1] - zc[k-1]);
+        }
+        for (int j = 1; j <= Ny; j++) {
+            for (int k = 1; k <= Nz; k++) {
+                u1_tilde[Nx+1][j][k] = u1_star[Nx+1][j][k] + dt * (p[Nx+1][j][k] - p[Nx][j][k]) / (xc[Nx+1] - xc[Nx]);
+                u2_tilde[Nx+1][j][k] = u2_star[Nx+1][j][k] + dt * (p[Nx+1][j+1][k] - p[Nx+1][j-1][k]) / (yc[j+1] - yc[j-1]);
+                u3_tilde[Nx+1][j][k] = u3_star[Nx+1][j][k] + dt * (p[Nx+1][j][k+1] - p[Nx+1][j][k-1]) / (zc[k+1] - zc[k-1]);
+            }
+        }
+
+        /* Calculate U_star. */
+        FOR_ALL_XSTAG (i, j, k) {
+            U1_star[i][j][k] = (u1_tilde[i][j][k]*dx[i+1] + u1_tilde[i+1][j][k]*dx[i]) / (dx[i] + dx[i+1])
+                - dt * (p[i+1][j][k] - p[i][j][k]) / (xc[i+1] - xc[i]);
+        }
+        FOR_ALL_YSTAG (i, j, k) {
+            U2_star[i][j][k] = (u2_tilde[i][j][k]*dy[j+1] + u2_tilde[i][j+1][k]*dy[j]) / (dy[j] + dy[j+1])
+                - dt * (p[i][j+1][k] - p[i][j][k]) / (yc[j+1] - yc[j]);
+        }
+        FOR_ALL_ZSTAG (i, j, k) {
+            U3_star[i][j][k] = (u3_tilde[i][j][k]*dz[k+1] + u3_tilde[i][j][k+1]*dz[k]) / (dz[k] + dz[k+1])
+                - dt * (p[i][j][k+1] - p[i][j][k]) / (zc[k+1] - zc[k]);
+        }
+
+        for (int j = 1; j <= Ny; j++) {
+            for (int k = 1; k <= Nz; k++) {
+                U1_star[0][j][k] = 1;
+            }
+        }
+        for (int i = 1; i <= Nx; i++) {
+            for (int k = 1; k <= Nz; k++) {
+                U2_star[i][0][k] = U2_star[i][Ny][k] = 0;
+            }
+        }
+        for (int i = 1; i <= Nx; i++) {
+            for (int j = 1; j <= Ny; j++) {
+                U3_star[i][j][0] = U3_star[i][j][Nz] = 0;
+            }
+        }
+
+        /* Calculate p_prime. */
+        FOR_ALL_CELL (i, j, k) {
+            if (flag[i][j][k] != 2) {
+                double coeffsum = kx_W[i] + kx_E[i] + ky_S[j] + ky_N[j] + kz_D[k] + kz_U[k];
+                if (i == 1) {
+                    coeffsum -= kx_W[i];
+                }
+                if (i == Nx) {
+                    coeffsum += kx_E[i];
+                }
+                if (j == 1) {
+                    coeffsum -= ky_S[j];
+                }
+                if (j == Ny) {
+                    coeffsum -= ky_N[j];
+                }
+                if (k == 1) {
+                    coeffsum -= kz_D[k];
+                }
+                if (k == Nz) {
+                    coeffsum -= kz_U[k];
+                }
+
+                vector_values_p[IDXFLAT(i, j, k)-1]
+                    = -1/(2*Re*coeffsum) * (
+                        (U1_star[i][j][k] - U1_star[i-1][j][k]) / dx[i]
+                        + (U2_star[i][j][k] - U2_star[i][j-1][k]) / dy[j]
+                        + (U3_star[i][j][k] - U3_star[i][j][k-1]) / dz[k]
+                    );
+            }
+        }
+
+        HYPRE_IJVectorSetValues(b_p, Nx*Ny*Nz, vector_rows, vector_values_p);
+        HYPRE_IJVectorSetValues(x_p, Nx*Ny*Nz, vector_rows, vector_zeros);
+
+        HYPRE_IJVectorAssemble(b_p);
+        HYPRE_IJVectorAssemble(x_p);
+
+        HYPRE_IJVectorGetObject(b_p, (void **)&par_b_p);
+        HYPRE_IJVectorGetObject(x_p, (void **)&par_x_p);
+
+        HYPRE_ParCSRBiCGSTABSetup(solver_p, parcsr_A_p, par_b_p, par_x_p);
+
+        HYPRE_ParCSRBiCGSTABSolve(solver_p, parcsr_A_p, par_b_p, par_x_p);
+
+        HYPRE_IJVectorGetValues(x_p, Nx*Ny*Nz, vector_rows, vector_res);
+        FOR_ALL_CELL (i, j, k) {
+            p_prime[i][j][k] = vector_res[IDXFLAT(i, j, k)-1];
+        }
+
+        HYPRE_BiCGSTABGetFinalRelativeResidualNorm(solver_p, &final_res_norm);
+        if (final_res_norm >= 1e-4) {
+            fprintf(stderr, "p not converged!\n");
+        }
+
+        for (int j = 1; j <= Ny; j++) {
+            for (int k = 1; k <= Nz; k++) {
+                p_prime[0][j][k] = p_prime[1][j][k];
+                p_prime[Nx+1][j][k] = -p_prime[Nx][j][k];
+            }
+        }
+        for (int i = 1; i <= Nx; i++) {
+            for (int k = 1; k <= Nz; k++) {
+                p_prime[i][0][k] = p_prime[i][1][k];
+                p_prime[i][Ny+1][k] = p_prime[i][Ny][k];
+            }
+        }
+        for (int i = 1; i <= Nx; i++) {
+            for (int j = 1; j <= Ny; j++) {
+                p_prime[i][j][0] = p_prime[i][j][1];
+                p_prime[i][j][Nz+1] = p_prime[i][j][Nz];
+            }
+        }
+
+        /* Calculate p_next. */
+        FOR_ALL_CELL (i, j, k) {
+            p_next[i][j][k] = p[i][j][k] + p_prime[i][j][k];
+        }
+
+        /* Calculate u_next. */
+        FOR_ALL_CELL (i, j, k) {
+            u1_next[i][j][k] = u1_star[i][j][k] - dt * (p_prime[i+1][j][k] - p_prime[i-1][j][k]) / (xc[i+1] - xc[i-1]);
+            u2_next[i][j][k] = u2_star[i][j][k] - dt * (p_prime[i][j+1][k] - p_prime[i][j-1][k]) / (yc[j+1] - yc[j-1]);
+            u3_next[i][j][k] = u3_star[i][j][k] - dt * (p_prime[i][j][k+1] - p_prime[i][j][k-1]) / (zc[k+1] - zc[k-1]);
+        }
+
+        /* Calculate U_next. */
+        FOR_ALL_XSTAG (i, j, k) {
+            U1_next[i][j][k] = U1_star[i][j][k] - dt * (p_prime[i+1][j][k] - p_prime[i][j][k]) / (xc[i+1] - xc[i]);
+        }
+        FOR_ALL_YSTAG (i, j, k) {
+            U2_next[i][j][k] = U2_star[i][j][k] - dt * (p_prime[i][j+1][k] - p_prime[i][j][k]) / (yc[j+1] - yc[j]);
+        }
+        FOR_ALL_ZSTAG (i, j, k) {
+            U3_next[i][j][k] = U3_star[i][j][k] - dt * (p_prime[i][j][k+1] - p_prime[i][j][k]) / (zc[k+1] - zc[k]);
+        }
+
+        /* Set velocity boundary conditions. */
+        for (int j = 1; j <= Ny; j++) {
+            for (int k = 1; k <= Nz; k++) {
+                u1_next[0][j][k] = 2 - u1_next[1][j][k];
+                u2_next[0][j][k] = -u2_next[1][j][k];
+                u3_next[0][j][k] = -u3_next[1][j][k];
+
+                u1_next[Nx+1][j][k] = ((xc[Nx+1]-xc[Nx-1])*u1_next[Nx][j][k] - (xc[Nx+1]-xc[Nx])*u1_next[Nx-1][j][k]) / (xc[Nx] - xc[Nx-1]);
+                u2_next[Nx+1][j][k] = ((xc[Nx+1]-xc[Nx-1])*u2_next[Nx][j][k] - (xc[Nx+1]-xc[Nx])*u2_next[Nx-1][j][k]) / (xc[Nx] - xc[Nx-1]);
+                u3_next[Nx+1][j][k] = ((xc[Nx+1]-xc[Nx-1])*u3_next[Nx][j][k] - (xc[Nx+1]-xc[Nx])*u3_next[Nx-1][j][k]) / (xc[Nx] - xc[Nx-1]);
+            }
+        }
+        for (int i = 1; i <= Nx; i++) {
+            for (int k = 1; k <= Nz; k++) {
+                u1_next[i][0][k] = u1_next[i][1][k];
+                u2_next[i][0][k] = -u2_next[i][1][k];
+                u3_next[i][0][k] = -u3_next[i][1][k];
+
+                u1_next[i][Ny+1][k] = u1_next[i][Ny][k];
+                u2_next[i][Ny+1][k] = -u2_next[i][Ny][k];
+                u3_next[i][Ny+1][k] = -u3_next[i][Ny][k];
+            }
+        }
+        for (int i = 1; i <= Nx; i++) {
+            for (int j = 1; j <= Ny; j++) {
+                u1_next[i][j][0] = u1_next[i][j][1];
+                u2_next[i][j][0] = -u2_next[i][j][1];
+                u3_next[i][j][0] = -u3_next[i][j][1];
+
+                u1_next[i][j][Nz+1] = u1_next[i][j][Nz];
+                u2_next[i][j][Nz+1] = -u2_next[i][j][Nz];
+                u3_next[i][j][Nz+1] = -u3_next[i][j][Nz];
+            }
+        }
+
+        /* Set pressure boundary conditions. */
+        for (int j = 1; j <= Ny; j++) {
+            for (int k = 1; k <= Nz; k++) {
+                p_next[0][j][k] = p_next[1][j][k];
+                p_next[Nx+1][j][k] = -p_next[Nx][j][k];
+            }
+        }
+        for (int i = 1; i <= Nx; i++) {
+            for (int k = 1; k <= Nz; k++) {
+                p_next[i][0][k] = p_next[i][1][k];
+                p_next[i][Ny+1][k] = p_next[i][Ny][k];
+            }
+        }
+        for (int i = 1; i <= Nx; i++) {
+            for (int j = 1; j <= Ny; j++) {
+                p_next[i][j][0] = p_next[i][j][1];
+                p_next[i][j][Nz+1] = p_next[i][j][Nz];
+            }
+        }
+
+        /* Update for next time step. */
+        SWAP(u1, u1_next);
+        SWAP(u2, u2_next);
+        SWAP(u3, u3_next);
+        SWAP(U1, U1_next);
+        SWAP(U2, U2_next);
+        SWAP(U3, U3_next);
+        SWAP(p, p_next);
+        SWAP(N1_prev, N1);
+        SWAP(N2_prev, N2);
+        SWAP(N3_prev, N3);
     }
+
+    /****** Calculate elapsed time. *******************************************/
+
+    clock_gettime(CLOCK_REALTIME, &t_end);
+    printf(
+        "\nelapsed time: %ld ms\n",
+        (t_end.tv_sec*1000+t_end.tv_nsec/1000000)
+            - (t_start.tv_sec*1000+t_start.tv_nsec/1000000)
+    );
+
+    /****** Export result. ****************************************************/
+
+    fp_out = fopen_check(output_file_u1, "wb");
+    fwrite(u1, sizeof(double), (Nx+2)*(Ny+2)*(Nz+2), fp_out);
+    fclose(fp_out);
+
+    fp_out = fopen_check(output_file_u2, "wb");
+    fwrite(u2, sizeof(double), (Nx+2)*(Ny+2)*(Nz+2), fp_out);
+    fclose(fp_out);
+
+    fp_out = fopen_check(output_file_u3, "wb");
+    fwrite(u3, sizeof(double), (Nx+2)*(Ny+2)*(Nz+2), fp_out);
+    fclose(fp_out);
+
+    fp_out = fopen_check(output_file_p, "wb");
+    fwrite(p, sizeof(double), (Nx+2)*(Ny+2)*(Nz+2), fp_out);
+    fclose(fp_out);
+
+    /****** Free memory. ******************************************************/
 
     HYPRE_Finalize();
     MPI_Finalize();
@@ -645,6 +972,10 @@ static inline HYPRE_IJMatrix create_matrix(
             values[4] = -kx_W[i];
             values[5] = -kz_D[k];
             values[6] = -kz_U[k];
+
+            if (type == 4) {
+                values[0] -= 1;
+            }
 
             /* West (i = 1) => velocity inlet.
                 * u1[0][j][k] + u1[1][j][k] = 2
@@ -736,13 +1067,20 @@ static inline HYPRE_IJMatrix create_matrix(
                 values[6] = 0;
             }
 
-            ncols = 0;
-            for (int l = 0; l < 7; l++) {
+            ncols = 1;
+            for (int l = 1; l < 7; l++) {
                 if (values[l] != 0) {
                     cols[ncols] = cols[l];
-                    values[ncols] = cols[l];
+                    values[ncols] = values[l];
                     ncols++;
                 }
+            }
+
+            if (type == 4) {
+                for (int l = 1; l < ncols; l++) {
+                    values[l] /= values[0];
+                }
+                values[0] = 1;
             }
         }
 
