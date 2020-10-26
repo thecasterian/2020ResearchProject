@@ -33,7 +33,7 @@
             for (int k = 0; k <= Nz; k++)
 
 /* Index of cell (i, j, k), ranging from 1 to Nx * Ny * Nz. */
-#define IDXFLAT(i, j, k) (Ny*Nz*(i-1) + Nz*(j-1) + (k))
+#define IDXFLAT(i, j, k) (Ny*Nz*((i)-1) + Nz*((j)-1) + (k))
 #define SWAP(a, b) do {typeof(a) tmp = a; a = b; b = tmp;} while (0)
 
 /* Index of adjacent cells in 3-d cartesian coordinate */
@@ -370,7 +370,7 @@ int main(int argc, char **argv) {
 
     /****** Calculate level set function **************************************/
 
-    Polyhedron_cpt(poly, Nx+2, Ny+2, Nz+2, xc, yc, zc, lvset, 5);
+    Polyhedron_cpt(poly, Nx+2, Ny+2, Nz+2, xc, yc, zc, lvset, .5);
 
     // FILE *fp_lvset = fopen_check("lvset.out", "w");
     // fwrite(lvset, sizeof(double), (Nx+2)*(Ny+2)*(Nz+2), fp_lvset);
@@ -690,6 +690,14 @@ int main(int argc, char **argv) {
             fprintf(stderr, "u3 not converged!\n");
         }
 
+        for (int j = 1; j <= Ny; j++) {
+            for (int k = 1; k <= Nz; k++) {
+                u1_star[Nx+1][j][k] = (u1_star[Nx][j][k]*(xc[Nx+1]-xc[Nx-1])-u1_star[Nx-1][j][k]*(xc[Nx+1]-xc[Nx])) / (xc[Nx]-xc[Nx-1]);
+                u2_star[Nx+1][j][k] = (u2_star[Nx][j][k]*(xc[Nx+1]-xc[Nx-1])-u2_star[Nx-1][j][k]*(xc[Nx+1]-xc[Nx])) / (xc[Nx]-xc[Nx-1]);
+                u3_star[Nx+1][j][k] = (u3_star[Nx][j][k]*(xc[Nx+1]-xc[Nx-1])-u3_star[Nx-1][j][k]*(xc[Nx+1]-xc[Nx])) / (xc[Nx]-xc[Nx-1]);
+            }
+        }
+
         /* Calculate u_tilde. */
         FOR_ALL_CELL (i, j, k) {
             u1_tilde[i][j][k] = u1_star[i][j][k] + dt * (p[i+1][j][k] - p[i-1][j][k]) / (xc[i+1] - xc[i-1]);
@@ -965,17 +973,18 @@ static inline HYPRE_IJMatrix create_matrix(
             for (int l = 0; l < 6; l++) {
                 cols[l+1] = IDXFLAT(i+adj[l][0], j+adj[l][1], k+adj[l][2]);
             }
-            values[0] = 1+ky_N[j]+kx_E[i]+ky_S[j]+kx_W[i]+kz_D[k]+kz_U[k];
+            if (type != 4) {
+                values[0] = 1+ky_N[j]+kx_E[i]+ky_S[j]+kx_W[i]+kz_D[k]+kz_U[k];
+            }
+            else {
+                values[0] = ky_N[j]+kx_E[i]+ky_S[j]+kx_W[i]+kz_D[k]+kz_U[k];
+            }
             values[1] = -ky_N[j];
             values[2] = -kx_E[i];
             values[3] = -ky_S[j];
             values[4] = -kx_W[i];
             values[5] = -kz_D[k];
             values[6] = -kz_U[k];
-
-            if (type == 4) {
-                values[0] -= 1;
-            }
 
             /* West (i = 1) => velocity inlet.
                 * u1[0][j][k] + u1[1][j][k] = 2
@@ -998,7 +1007,7 @@ static inline HYPRE_IJMatrix create_matrix(
                 * p[Nx+1][j][k] + p[Nx][j][k] = 0 */
             if (i == Nx) {
                 if (type == 4) {
-                    values[0] -= kx_E[i];
+                    values[0] += kx_E[i];
                 }
                 else {
                     values[0] -= kx_E[i]*(xc[i+1]-xc[i-1])/(xc[i]-xc[i-1]);
@@ -1090,7 +1099,12 @@ static inline HYPRE_IJMatrix create_matrix(
             int interp_idx[8];
             double interp_coeff[8];
 
-            get_interp_info(Nx, Ny, Nz, xc, yc, zc, lvset, i, j, k, interp_idx, interp_coeff);
+            get_interp_info(
+                Nx, Ny, Nz, xc, yc, zc,
+                lvset,
+                i, j, k,
+                interp_idx, interp_coeff
+            );
 
             for (int l = 0; l < 8; l++) {
                 if (interp_idx[l] == cur_idx) {
@@ -1116,12 +1130,22 @@ static inline HYPRE_IJMatrix create_matrix(
             else {
                 ncols = 8;
                 cols[0] = cur_idx;
-                values[0] = 1 + interp_coeff[idx];
+                if (type != 4) {
+                    values[0] = 1 + interp_coeff[idx];
+                }
+                else {
+                    values[0] = 1 - interp_coeff[idx];
+                }
                 int cnt = 1;
                 for (int l = 0; l < 8; l++) {
                     if (l != idx) {
                         cols[cnt] = interp_idx[l];
-                        values[cnt] = interp_coeff[l];
+                        if (type != 4) {
+                            values[cnt] = interp_coeff[l];
+                        }
+                        else {
+                            values[cnt] = -interp_coeff[l];
+                        }
                         cnt++;
                     }
                 }
@@ -1154,9 +1178,9 @@ static void get_interp_info(
 
     m = Vector_lincom(1, (Vector){xc[i], yc[j], zc[k]}, -2*lvset[i][j][k], n);
 
-    const int im = lower_bound(Nx+2, xc, m.x);
-    const int jm = lower_bound(Ny+2, yc, m.y);
-    const int km = lower_bound(Nz+2, zc, m.z);
+    const int im = upper_bound(Nx+2, xc, m.x) - 1;
+    const int jm = upper_bound(Ny+2, yc, m.y) - 1;
+    const int km = upper_bound(Nz+2, zc, m.z) - 1;
 
     /* Order of cells:
             011          111
@@ -1182,6 +1206,14 @@ static void get_interp_info(
     const double yl = yc[jm], yu = yc[jm+1];
     const double zl = zc[km], zu = zc[km+1];
     const double vol = (xu - xl) * (yu - yl) * (zu - zl);
+
+    if (
+        m.x < xl || m.x > xu
+        || m.y < yl || m.y > yu
+        || m.z < zl || m.z > zu
+    ) {
+        printf("error!\n");
+    }
 
     interp_coeff[0] = (xu-m.x)*(yu-m.y)*(zu-m.z) / vol;
     interp_coeff[1] = (xu-m.x)*(yu-m.y)*(m.z-zl) / vol;
