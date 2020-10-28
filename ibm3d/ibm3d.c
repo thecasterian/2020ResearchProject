@@ -84,7 +84,7 @@ static FILE *fopen_check(
     const char *restrict filename, const char *restrict modes
 );
 
-void calc_flux(
+static inline void calc_flux(
     const int Nx, const int Ny, const int Nz,
     const double dx[const restrict static Nx+2],
     const double dy[const restrict static Ny+2],
@@ -98,6 +98,39 @@ void calc_flux(
     double N1[const restrict static Nx+2][Ny+2][Nz+2],
     double N2[const restrict static Nx+2][Ny+2][Nz+2],
     double N3[const restrict static Nx+2][Ny+2][Nz+2]
+);
+
+static inline void calc_u_tilde(
+    const double dt,
+    const int Nx, const int Ny, const int Nz,
+    const double xc[const restrict static Nx+2],
+    const double yc[const restrict static Ny+2],
+    const double zc[const restrict static Nz+2],
+    const double u1_star[const restrict static Nx+2][Ny+2][Nz+2],
+    const double u2_star[const restrict static Nx+2][Ny+2][Nz+2],
+    const double u3_star[const restrict static Nx+2][Ny+2][Nz+2],
+    const double p[const restrict static Nx+2][Ny+2][Nz+2],
+    double u1_tilde[const restrict static Nx+2][Ny+2][Nz+2],
+    double u2_tilde[const restrict static Nx+2][Ny+2][Nz+2],
+    double u3_tilde[const restrict static Nx+2][Ny+2][Nz+2]
+);
+
+static inline void calc_U_star(
+    const double dt,
+    const int Nx, const int Ny, const int Nz,
+    const double dx[const restrict static Nx+2],
+    const double dy[const restrict static Ny+2],
+    const double dz[const restrict static Nz+2],
+    const double xc[const restrict static Nx+2],
+    const double yc[const restrict static Ny+2],
+    const double zc[const restrict static Nz+2],
+    const double u1_tilde[const restrict static Nx+2][Ny+2][Nz+2],
+    const double u2_tilde[const restrict static Nx+2][Ny+2][Nz+2],
+    const double u3_tilde[const restrict static Nx+2][Ny+2][Nz+2],
+    const double p[const restrict static Nx+2][Ny+2][Nz+2],
+    double U1_star[const restrict static Nx+1][Ny+2][Nz+2],
+    double U2_star[const restrict static Nx+2][Ny+1][Nz+2],
+    double U3_star[const restrict static Nx+2][Ny+2][Nz+1]
 );
 
 int main(int argc, char **argv) {
@@ -233,9 +266,13 @@ int main(int argc, char **argv) {
     /*===== Grid variables ===================================================*/
 
     /* Cell widths */
-    double dx[Nx+2], dy[Ny+2], dz[Nz+2];
+    double *const dx = calloc(Nx+2, sizeof(double));
+    double *const dy = calloc(Ny+2, sizeof(double));
+    double *const dz = calloc(Nz+2, sizeof(double));
     /* Cell centroid coordinates */
-    double xc[Nx+2], yc[Ny+2], zc[Nz+2];
+    double *const xc = calloc(Nx+2, sizeof(double));
+    double *const yc = calloc(Ny+2, sizeof(double));
+    double *const zc = calloc(Nz+2, sizeof(double));
 
     /* Level set function (signed distance function) at cell centroids */
     double (*const lvset)[Ny+2][Nz+2] = calloc(Nx+2, sizeof(double [Ny+2][Nz+2]));
@@ -286,9 +323,12 @@ int main(int argc, char **argv) {
 
     /*===== Derivative coefficients. =========================================*/
 
-    double kx_W[Nx+2], kx_E[Nx+2];
-    double ky_S[Ny+2], ky_N[Ny+2];
-    double kz_D[Nz+2], kz_U[Nz+2];
+    double *const kx_W = calloc(Nx+2, sizeof(double));
+    double *const kx_E = calloc(Nx+2, sizeof(double));
+    double *const ky_S = calloc(Ny+2, sizeof(double));
+    double *const ky_N = calloc(Ny+2, sizeof(double));
+    double *const kz_D = calloc(Nz+2, sizeof(double));
+    double *const kz_U = calloc(Nz+2, sizeof(double));
 
     /*===== HYPRE matrices, vectors, solvers, and arrays. ====================*/
 
@@ -315,7 +355,6 @@ int main(int argc, char **argv) {
     double *vector_values_p;
     double *vector_zeros, *vector_res;
 
-    int num_iters;
     double final_norm_u1, final_norm_u2, final_norm_u3, final_norm_p;
 
     /*===== Misc. ============================================================*/
@@ -689,48 +728,18 @@ int main(int argc, char **argv) {
         }
 
         /* Calculate u_tilde. */
-        FOR_ALL_CELL (i, j, k) {
-            u1_tilde[i][j][k] = u1_star[i][j][k] + dt * (p[i+1][j][k] - p[i-1][j][k]) / (xc[i+1] - xc[i-1]);
-            u2_tilde[i][j][k] = u2_star[i][j][k] + dt * (p[i][j+1][k] - p[i][j-1][k]) / (yc[j+1] - yc[j-1]);
-            u3_tilde[i][j][k] = u3_star[i][j][k] + dt * (p[i][j][k+1] - p[i][j][k-1]) / (zc[k+1] - zc[k-1]);
-        }
-        for (int j = 1; j <= Ny; j++) {
-            for (int k = 1; k <= Nz; k++) {
-                u1_tilde[Nx+1][j][k] = u1_star[Nx+1][j][k] + dt * (p[Nx+1][j][k] - p[Nx][j][k]) / (xc[Nx+1] - xc[Nx]);
-                u2_tilde[Nx+1][j][k] = u2_star[Nx+1][j][k] + dt * (p[Nx+1][j+1][k] - p[Nx+1][j-1][k]) / (yc[j+1] - yc[j-1]);
-                u3_tilde[Nx+1][j][k] = u3_star[Nx+1][j][k] + dt * (p[Nx+1][j][k+1] - p[Nx+1][j][k-1]) / (zc[k+1] - zc[k-1]);
-            }
-        }
+        calc_u_tilde(
+            dt, Nx, Ny, Nz, xc, yc, zc,
+            u1_star, u2_star, u3_star, p,
+            u1_tilde, u2_tilde, u3_tilde
+        );
 
         /* Calculate U_star. */
-        FOR_ALL_XSTAG (i, j, k) {
-            U1_star[i][j][k] = (u1_tilde[i][j][k]*dx[i+1] + u1_tilde[i+1][j][k]*dx[i]) / (dx[i] + dx[i+1])
-                - dt * (p[i+1][j][k] - p[i][j][k]) / (xc[i+1] - xc[i]);
-        }
-        FOR_ALL_YSTAG (i, j, k) {
-            U2_star[i][j][k] = (u2_tilde[i][j][k]*dy[j+1] + u2_tilde[i][j+1][k]*dy[j]) / (dy[j] + dy[j+1])
-                - dt * (p[i][j+1][k] - p[i][j][k]) / (yc[j+1] - yc[j]);
-        }
-        FOR_ALL_ZSTAG (i, j, k) {
-            U3_star[i][j][k] = (u3_tilde[i][j][k]*dz[k+1] + u3_tilde[i][j][k+1]*dz[k]) / (dz[k] + dz[k+1])
-                - dt * (p[i][j][k+1] - p[i][j][k]) / (zc[k+1] - zc[k]);
-        }
-
-        for (int j = 1; j <= Ny; j++) {
-            for (int k = 1; k <= Nz; k++) {
-                U1_star[0][j][k] = 1;
-            }
-        }
-        for (int i = 1; i <= Nx; i++) {
-            for (int k = 1; k <= Nz; k++) {
-                U2_star[i][0][k] = U2_star[i][Ny][k] = 0;
-            }
-        }
-        for (int i = 1; i <= Nx; i++) {
-            for (int j = 1; j <= Ny; j++) {
-                U3_star[i][j][0] = U3_star[i][j][Nz] = 0;
-            }
-        }
+        calc_U_star(
+            dt, Nx, Ny, Nz, dx, dy, dz, xc, yc, zc,
+            u1_tilde, u2_tilde, u3_tilde, p,
+            U1_star, U2_star, U3_star
+        );
 
         /* Calculate p_prime. */
         FOR_ALL_CELL (i, j, k) {
@@ -936,8 +945,57 @@ int main(int argc, char **argv) {
 
     /****** Free memory. ******************************************************/
 
+    free(xf); free(yf); free(zf);
+    free(dx); free(dy); free(dz); free(xc); free(yc); free(zc);
+    free(lvset); free(flag);
+
+    free(u1); free(u1_next); free(u1_star); free(u1_tilde);
+    free(u2); free(u2_next); free(u2_star); free(u2_tilde);
+    free(u3); free(u3_next); free(u3_star); free(u3_tilde);
+
+    free(U1); free(U1_next); free(U1_star);
+    free(U2); free(U2_next); free(U2_star);
+    free(U3); free(U3_next); free(U3_star);
+
+    free(p); free(p_next); free(p_prime);
+
+    free(N1); free(N1_prev); free(N2); free(N2_prev); free(N3); free(N3_prev);
+
+    free(kx_W); free(kx_E); free(ky_S); free(ky_N); free(kz_D); free(kz_U);
+
+    HYPRE_IJMatrixDestroy(A_u1);
+    HYPRE_IJMatrixDestroy(A_u2);
+    HYPRE_IJMatrixDestroy(A_u3);
+    HYPRE_IJVectorDestroy(b_u1);
+    HYPRE_IJVectorDestroy(b_u2);
+    HYPRE_IJVectorDestroy(b_u3);
+    HYPRE_IJVectorDestroy(x_u1);
+    HYPRE_IJVectorDestroy(x_u2);
+    HYPRE_IJVectorDestroy(x_u3);
+
+    HYPRE_IJMatrixDestroy(A_p);
+    HYPRE_IJVectorDestroy(b_p);
+    HYPRE_IJVectorDestroy(x_p);
+
+    free(vector_rows); free(vector_zeros);
+    free(vector_values_u1);
+    free(vector_values_u2);
+    free(vector_values_u3);
+    free(vector_values_p);
+    free(vector_res);
+
+    HYPRE_ParCSRBiCGSTABDestroy(solver_u1);
+    HYPRE_ParCSRBiCGSTABDestroy(solver_u2);
+    HYPRE_ParCSRBiCGSTABDestroy(solver_u3);
+    HYPRE_ParCSRBiCGSTABDestroy(solver_p);
+    HYPRE_BoomerAMGDestroy(precond);
+
+    /****** Finalize. *********************************************************/
+
     HYPRE_Finalize();
     MPI_Finalize();
+
+    return 0;
 }
 
 static inline HYPRE_IJMatrix create_matrix(
@@ -1234,7 +1292,7 @@ static FILE *fopen_check(const char *restrict filename, const char *restrict mod
     return fp;
 }
 
-void calc_flux(
+static inline void calc_flux(
     const int Nx, const int Ny, const int Nz,
     const double dx[const restrict static Nx+2],
     const double dy[const restrict static Ny+2],
@@ -1288,5 +1346,80 @@ void calc_flux(
         N3[i][j][k] = (U1[i][j][k]*u3_e-U1[i-1][j][k]*u3_w) / dx[i]
             + (U2[i][j][k]*u3_n-U2[i][j-1][k]*u3_s) / dy[j]
             + (U3[i][j][k]*u3_u-U3[i][j][k-1]*u3_d) / dz[k];
+    }
+}
+
+static inline void calc_u_tilde(
+    const double dt,
+    const int Nx, const int Ny, const int Nz,
+    const double xc[const restrict static Nx+2],
+    const double yc[const restrict static Ny+2],
+    const double zc[const restrict static Nz+2],
+    const double u1_star[const restrict static Nx+2][Ny+2][Nz+2],
+    const double u2_star[const restrict static Nx+2][Ny+2][Nz+2],
+    const double u3_star[const restrict static Nx+2][Ny+2][Nz+2],
+    const double p[const restrict static Nx+2][Ny+2][Nz+2],
+    double u1_tilde[const restrict static Nx+2][Ny+2][Nz+2],
+    double u2_tilde[const restrict static Nx+2][Ny+2][Nz+2],
+    double u3_tilde[const restrict static Nx+2][Ny+2][Nz+2]
+) {
+    FOR_ALL_CELL (i, j, k) {
+        u1_tilde[i][j][k] = u1_star[i][j][k] + dt * (p[i+1][j][k] - p[i-1][j][k]) / (xc[i+1] - xc[i-1]);
+        u2_tilde[i][j][k] = u2_star[i][j][k] + dt * (p[i][j+1][k] - p[i][j-1][k]) / (yc[j+1] - yc[j-1]);
+        u3_tilde[i][j][k] = u3_star[i][j][k] + dt * (p[i][j][k+1] - p[i][j][k-1]) / (zc[k+1] - zc[k-1]);
+    }
+    for (int j = 1; j <= Ny; j++) {
+        for (int k = 1; k <= Nz; k++) {
+            u1_tilde[Nx+1][j][k] = u1_star[Nx+1][j][k] + dt * (p[Nx+1][j][k] - p[Nx][j][k]) / (xc[Nx+1] - xc[Nx]);
+            u2_tilde[Nx+1][j][k] = u2_star[Nx+1][j][k] + dt * (p[Nx+1][j+1][k] - p[Nx+1][j-1][k]) / (yc[j+1] - yc[j-1]);
+            u3_tilde[Nx+1][j][k] = u3_star[Nx+1][j][k] + dt * (p[Nx+1][j][k+1] - p[Nx+1][j][k-1]) / (zc[k+1] - zc[k-1]);
+        }
+    }
+}
+
+static inline void calc_U_star(
+    const double dt,
+    const int Nx, const int Ny, const int Nz,
+    const double dx[const restrict static Nx+2],
+    const double dy[const restrict static Ny+2],
+    const double dz[const restrict static Nz+2],
+    const double xc[const restrict static Nx+2],
+    const double yc[const restrict static Ny+2],
+    const double zc[const restrict static Nz+2],
+    const double u1_tilde[const restrict static Nx+2][Ny+2][Nz+2],
+    const double u2_tilde[const restrict static Nx+2][Ny+2][Nz+2],
+    const double u3_tilde[const restrict static Nx+2][Ny+2][Nz+2],
+    const double p[const restrict static Nx+2][Ny+2][Nz+2],
+    double U1_star[const restrict static Nx+1][Ny+2][Nz+2],
+    double U2_star[const restrict static Nx+2][Ny+1][Nz+2],
+    double U3_star[const restrict static Nx+2][Ny+2][Nz+1]
+) {
+    FOR_ALL_XSTAG (i, j, k) {
+        U1_star[i][j][k] = (u1_tilde[i][j][k]*dx[i+1] + u1_tilde[i+1][j][k]*dx[i]) / (dx[i] + dx[i+1])
+            - dt * (p[i+1][j][k] - p[i][j][k]) / (xc[i+1] - xc[i]);
+    }
+    FOR_ALL_YSTAG (i, j, k) {
+        U2_star[i][j][k] = (u2_tilde[i][j][k]*dy[j+1] + u2_tilde[i][j+1][k]*dy[j]) / (dy[j] + dy[j+1])
+            - dt * (p[i][j+1][k] - p[i][j][k]) / (yc[j+1] - yc[j]);
+    }
+    FOR_ALL_ZSTAG (i, j, k) {
+        U3_star[i][j][k] = (u3_tilde[i][j][k]*dz[k+1] + u3_tilde[i][j][k+1]*dz[k]) / (dz[k] + dz[k+1])
+            - dt * (p[i][j][k+1] - p[i][j][k]) / (zc[k+1] - zc[k]);
+    }
+
+    for (int j = 1; j <= Ny; j++) {
+        for (int k = 1; k <= Nz; k++) {
+            U1_star[0][j][k] = 1;
+        }
+    }
+    for (int i = 1; i <= Nx; i++) {
+        for (int k = 1; k <= Nz; k++) {
+            U2_star[i][0][k] = U2_star[i][Ny][k] = 0;
+        }
+    }
+    for (int i = 1; i <= Nx; i++) {
+        for (int j = 1; j <= Ny; j++) {
+            U3_star[i][j][0] = U3_star[i][j][Nz] = 0;
+        }
     }
 }
