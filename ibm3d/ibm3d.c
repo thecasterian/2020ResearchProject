@@ -52,7 +52,6 @@ static const int adj[6][3] = {
             4
 */
 
-
 static inline HYPRE_IJMatrix create_matrix(
     const int Nx, const int Ny, const int Nz,
     const double xc[const restrict static Nx+2],
@@ -161,7 +160,7 @@ int main(int argc, char **argv) {
     /****** Read input file. **************************************************/
     /*===== Define input parameters. =========================================*/
 
-    /* Files. */
+    /* Input files. */
     FILE *fp_in, *fp_poly;
 
     /* Name of stl file containing polyhedron info. */
@@ -332,28 +331,15 @@ int main(int argc, char **argv) {
 
     /*===== HYPRE matrices, vectors, solvers, and arrays. ====================*/
 
-    HYPRE_IJMatrix     A_u1, A_u2, A_u3;
-    HYPRE_ParCSRMatrix parcsr_A_u1, parcsr_A_u2, parcsr_A_u3;
-    HYPRE_IJVector     b_u1, b_u2, b_u3;
-    HYPRE_ParVector    par_b_u1, par_b_u2, par_b_u3;
-    HYPRE_IJVector     x_u1, x_u2, x_u3;
-    HYPRE_ParVector    par_x_u1, par_x_u2, par_x_u3;
+    HYPRE_IJMatrix     A_u1, A_u2, A_u3, A_p;
+    HYPRE_ParCSRMatrix parcsr_A_u1, parcsr_A_u2, parcsr_A_u3, parcsr_A_p;
+    HYPRE_IJVector     b, x;
+    HYPRE_ParVector    par_b, par_x;
 
-    HYPRE_IJMatrix     A_p;
-    HYPRE_ParCSRMatrix parcsr_A_p;
-    HYPRE_IJVector     b_p;
-    HYPRE_ParVector    par_b_p;
-    HYPRE_IJVector     x_p;
-    HYPRE_ParVector    par_x_p;
-
-    HYPRE_Solver solver_u1, solver_u2, solver_u3;
-    HYPRE_Solver solver_p;
-    HYPRE_Solver precond;
+    HYPRE_Solver solver, precond;
 
     int *vector_rows;
-    double *vector_values_u1, *vector_values_u2, *vector_values_u3;
-    double *vector_values_p;
-    double *vector_zeros, *vector_res;
+    double *vector_values, *vector_zeros, *vector_res;
 
     double final_norm_u1, final_norm_u2, final_norm_u3, final_norm_p;
 
@@ -483,44 +469,17 @@ int main(int argc, char **argv) {
     /*===== Initialize vectors. ==============================================*/
 
     /* RHS vectors. */
-    HYPRE_IJVectorCreate(MPI_COMM_WORLD, 1, Nx*Ny*Nz, &b_u1);
-    HYPRE_IJVectorSetObjectType(b_u1, HYPRE_PARCSR);
-    HYPRE_IJVectorInitialize(b_u1);
-
-    HYPRE_IJVectorCreate(MPI_COMM_WORLD, 1, Nx*Ny*Nz, &b_u2);
-    HYPRE_IJVectorSetObjectType(b_u2, HYPRE_PARCSR);
-    HYPRE_IJVectorInitialize(b_u2);
-
-    HYPRE_IJVectorCreate(MPI_COMM_WORLD, 1, Nx*Ny*Nz, &b_u3);
-    HYPRE_IJVectorSetObjectType(b_u3, HYPRE_PARCSR);
-    HYPRE_IJVectorInitialize(b_u3);
-
-    HYPRE_IJVectorCreate(MPI_COMM_WORLD, 1, Nx*Ny*Nz, &b_p);
-    HYPRE_IJVectorSetObjectType(b_p, HYPRE_PARCSR);
-    HYPRE_IJVectorInitialize(b_p);
+    HYPRE_IJVectorCreate(MPI_COMM_WORLD, 1, Nx*Ny*Nz, &b);
+    HYPRE_IJVectorSetObjectType(b, HYPRE_PARCSR);
+    HYPRE_IJVectorInitialize(b);
 
     /* Solution vector */
-    HYPRE_IJVectorCreate(MPI_COMM_WORLD, 1, Nx*Ny*Nz, &x_u1);
-    HYPRE_IJVectorSetObjectType(x_u1, HYPRE_PARCSR);
-    HYPRE_IJVectorInitialize(x_u1);
-
-    HYPRE_IJVectorCreate(MPI_COMM_WORLD, 1, Nx*Ny*Nz, &x_u2);
-    HYPRE_IJVectorSetObjectType(x_u2, HYPRE_PARCSR);
-    HYPRE_IJVectorInitialize(x_u2);
-
-    HYPRE_IJVectorCreate(MPI_COMM_WORLD, 1, Nx*Ny*Nz, &x_u3);
-    HYPRE_IJVectorSetObjectType(x_u3, HYPRE_PARCSR);
-    HYPRE_IJVectorInitialize(x_u3);
-
-    HYPRE_IJVectorCreate(MPI_COMM_WORLD, 1, Nx*Ny*Nz, &x_p);
-    HYPRE_IJVectorSetObjectType(x_p, HYPRE_PARCSR);
-    HYPRE_IJVectorInitialize(x_p);
+    HYPRE_IJVectorCreate(MPI_COMM_WORLD, 1, Nx*Ny*Nz, &x);
+    HYPRE_IJVectorSetObjectType(x, HYPRE_PARCSR);
+    HYPRE_IJVectorInitialize(x);
 
     vector_rows = calloc(Nx*Ny*Nz, sizeof(int));
-    vector_values_u1 = calloc(Nx*Ny*Nz, sizeof(double));
-    vector_values_u2 = calloc(Nx*Ny*Nz, sizeof(double));
-    vector_values_u3 = calloc(Nx*Ny*Nz, sizeof(double));
-    vector_values_p = calloc(Nx*Ny*Nz, sizeof(double));
+    vector_values = calloc(Nx*Ny*Nz, sizeof(double));
     vector_zeros = calloc(Nx*Ny*Nz, sizeof(double));
     vector_res = calloc(Nx*Ny*Nz, sizeof(double));
 
@@ -530,29 +489,11 @@ int main(int argc, char **argv) {
 
     /*===== Initialize solvers. ==============================================*/
 
-    HYPRE_ParCSRBiCGSTABCreate(MPI_COMM_WORLD, &solver_u1);
-    HYPRE_ParCSRBiCGSTABSetLogging(solver_u1, 1);
-    HYPRE_BiCGSTABSetMaxIter(solver_u1, 1000);
-    HYPRE_BiCGSTABSetTol(solver_u1, 1e-6);
+    HYPRE_ParCSRBiCGSTABCreate(MPI_COMM_WORLD, &solver);
+    HYPRE_ParCSRBiCGSTABSetLogging(solver, 1);
+    HYPRE_BiCGSTABSetMaxIter(solver, 1000);
+    HYPRE_BiCGSTABSetTol(solver, 1e-6);
     // HYPRE_BiCGSTABSetPrintLevel(solver_u1, 2);
-
-    HYPRE_ParCSRBiCGSTABCreate(MPI_COMM_WORLD, &solver_u2);
-    HYPRE_ParCSRBiCGSTABSetLogging(solver_u2, 1);
-    HYPRE_BiCGSTABSetMaxIter(solver_u2, 1000);
-    HYPRE_BiCGSTABSetTol(solver_u2, 1e-6);
-    // HYPRE_BiCGSTABSetPrintLevel(solver_u2, 2);
-
-    HYPRE_ParCSRBiCGSTABCreate(MPI_COMM_WORLD, &solver_u3);
-    HYPRE_ParCSRBiCGSTABSetLogging(solver_u3, 1);
-    HYPRE_BiCGSTABSetMaxIter(solver_u3, 1000);
-    HYPRE_BiCGSTABSetTol(solver_u3, 1e-6);
-    // HYPRE_BiCGSTABSetPrintLevel(solver_u3, 2);
-
-    HYPRE_ParCSRBiCGSTABCreate(MPI_COMM_WORLD, &solver_p);
-    HYPRE_ParCSRBiCGSTABSetLogging(solver_p, 1);
-    HYPRE_BiCGSTABSetMaxIter(solver_p, 1000);
-    HYPRE_BiCGSTABSetTol(solver_p, 1e-6);
-    // HYPRE_BiCGSTABSetPrintLevel(solver_p, 2);
 
     HYPRE_BoomerAMGCreate(&precond);
     HYPRE_BoomerAMGSetCoarsenType(precond, 6);
@@ -564,19 +505,7 @@ int main(int argc, char **argv) {
     // HYPRE_BoomerAMGSetPrintLevel(precond, 2);
 
     HYPRE_BiCGSTABSetPrecond(
-        solver_u1, (HYPRE_PtrToSolverFcn)HYPRE_BoomerAMGSolve,
-        (HYPRE_PtrToSolverFcn)HYPRE_BoomerAMGSetup, precond
-    );
-    HYPRE_BiCGSTABSetPrecond(
-        solver_u2, (HYPRE_PtrToSolverFcn)HYPRE_BoomerAMGSolve,
-        (HYPRE_PtrToSolverFcn)HYPRE_BoomerAMGSetup, precond
-    );
-    HYPRE_BiCGSTABSetPrecond(
-        solver_u3, (HYPRE_PtrToSolverFcn)HYPRE_BoomerAMGSolve,
-        (HYPRE_PtrToSolverFcn)HYPRE_BoomerAMGSetup, precond
-    );
-    HYPRE_BiCGSTABSetPrecond(
-        solver_p, (HYPRE_PtrToSolverFcn)HYPRE_BoomerAMGSolve,
+        solver, (HYPRE_PtrToSolverFcn)HYPRE_BoomerAMGSolve,
         (HYPRE_PtrToSolverFcn)HYPRE_BoomerAMGSetup, precond
     );
 
@@ -644,80 +573,84 @@ int main(int argc, char **argv) {
         /* Calculate u_star. */
         FOR_ALL_CELL (i, j, k) {
             if (flag[i][j][k] != 2) {
-                vector_values_u1[IDXFLAT(i, j, k)-1]
+                vector_values[IDXFLAT(i, j, k)-1]
                     = -dt/2 * (3*N1[i][j][k] - N1_prev[i][j][k])
                     - dt * (p[i+1][j][k] - p[i-1][j][k]) / (xc[i+1] - xc[i-1])
                     + (1-kx_W[i]-kx_E[i]-ky_S[j]-ky_N[j]-kz_D[k]-kz_U[k]) * u1[i][j][k]
                     + kx_W[i]*u1[i-1][j][k] + kx_E[i]*u1[i+1][j][k]
                     + ky_S[j]*u1[i][j-1][k] + ky_N[j]*u1[i][j+1][k]
                     + kz_D[k]*u1[i][j][k-1] + kz_U[k]*u1[i][j][k+1];
-                vector_values_u2[IDXFLAT(i, j, k)-1]
+                if (i == 1) {
+                    vector_values[IDXFLAT(i, j, k)-1] += 2*kx_W[i];
+                }
+            }
+        }
+        HYPRE_IJVectorSetValues(b, Nx*Ny*Nz, vector_rows, vector_values);
+        HYPRE_IJVectorSetValues(x, Nx*Ny*Nz, vector_rows, vector_zeros);
+        HYPRE_IJVectorAssemble(b);
+        HYPRE_IJVectorAssemble(x);
+        HYPRE_IJVectorGetObject(b, (void **)&par_b);
+        HYPRE_IJVectorGetObject(x, (void **)&par_x);
+
+        HYPRE_ParCSRBiCGSTABSetup(solver, parcsr_A_u1, par_b, par_x);
+        HYPRE_ParCSRBiCGSTABSolve(solver, parcsr_A_u1, par_b, par_x);
+        HYPRE_IJVectorGetValues(x, Nx*Ny*Nz, vector_rows, vector_res);
+        FOR_ALL_CELL (i, j, k) {
+            u1_star[i][j][k] = vector_res[IDXFLAT(i, j, k)-1];
+        }
+        HYPRE_BiCGSTABGetFinalRelativeResidualNorm(solver, &final_norm_u1);
+
+        FOR_ALL_CELL (i, j, k) {
+            if (flag[i][j][k] != 2) {
+                vector_values[IDXFLAT(i, j, k)-1]
                     = -dt/2 * (3*N2[i][j][k] - N2_prev[i][j][k])
                     - dt * (p[i][j+1][k] - p[i][j-1][k]) / (yc[j+1] - yc[j-1])
                     + (1-kx_W[i]-kx_E[i]-ky_S[j]-ky_N[j]-kz_D[k]-kz_U[k]) * u2[i][j][k]
                     + kx_W[i]*u2[i-1][j][k] + kx_E[i]*u2[i+1][j][k]
                     + ky_S[j]*u2[i][j-1][k] + ky_N[j]*u2[i][j+1][k]
                     + kz_D[k]*u2[i][j][k-1] + kz_U[k]*u2[i][j][k+1];
-                vector_values_u3[IDXFLAT(i, j, k)-1]
+            }
+        }
+        HYPRE_IJVectorSetValues(b, Nx*Ny*Nz, vector_rows, vector_values);
+        HYPRE_IJVectorSetValues(x, Nx*Ny*Nz, vector_rows, vector_zeros);
+        HYPRE_IJVectorAssemble(b);
+        HYPRE_IJVectorAssemble(x);
+        HYPRE_IJVectorGetObject(b, (void **)&par_b);
+        HYPRE_IJVectorGetObject(x, (void **)&par_x);
+
+        HYPRE_ParCSRBiCGSTABSetup(solver, parcsr_A_u2, par_b, par_x);
+        HYPRE_ParCSRBiCGSTABSolve(solver, parcsr_A_u2, par_b, par_x);
+        HYPRE_IJVectorGetValues(x, Nx*Ny*Nz, vector_rows, vector_res);
+        FOR_ALL_CELL (i, j, k) {
+            u2_star[i][j][k] = vector_res[IDXFLAT(i, j, k)-1];
+        }
+        HYPRE_BiCGSTABGetFinalRelativeResidualNorm(solver, &final_norm_u2);
+
+        FOR_ALL_CELL (i, j, k) {
+            if (flag[i][j][k] != 2) {
+                vector_values[IDXFLAT(i, j, k)-1]
                     = -dt/2 * (3*N3[i][j][k] - N3_prev[i][j][k])
                     - dt * (p[i][j][k+1] - p[i][j][k-1]) / (zc[k+1] - zc[k-1])
                     + (1-kx_W[i]-kx_E[i]-ky_S[j]-ky_N[j]-kz_D[k]-kz_U[k]) * u3[i][j][k]
                     + kx_W[i]*u3[i-1][j][k] + kx_E[i]*u3[i+1][j][k]
                     + ky_S[j]*u3[i][j-1][k] + ky_N[j]*u3[i][j+1][k]
                     + kz_D[k]*u3[i][j][k-1] + kz_U[k]*u3[i][j][k+1];
-
-                if (i == 1) {
-                    vector_values_u1[IDXFLAT(i, j, k)-1] += 2*kx_W[i];
-                }
             }
         }
+        HYPRE_IJVectorSetValues(b, Nx*Ny*Nz, vector_rows, vector_values);
+        HYPRE_IJVectorSetValues(x, Nx*Ny*Nz, vector_rows, vector_zeros);
+        HYPRE_IJVectorAssemble(b);
+        HYPRE_IJVectorAssemble(x);
+        HYPRE_IJVectorGetObject(b, (void **)&par_b);
+        HYPRE_IJVectorGetObject(x, (void **)&par_x);
 
-        HYPRE_IJVectorSetValues(b_u1, Nx*Ny*Nz, vector_rows, vector_values_u1);
-        HYPRE_IJVectorSetValues(b_u2, Nx*Ny*Nz, vector_rows, vector_values_u2);
-        HYPRE_IJVectorSetValues(b_u3, Nx*Ny*Nz, vector_rows, vector_values_u3);
-
-        HYPRE_IJVectorSetValues(x_u1, Nx*Ny*Nz, vector_rows, vector_zeros);
-        HYPRE_IJVectorSetValues(x_u2, Nx*Ny*Nz, vector_rows, vector_zeros);
-        HYPRE_IJVectorSetValues(x_u3, Nx*Ny*Nz, vector_rows, vector_zeros);
-
-        HYPRE_IJVectorAssemble(b_u1);
-        HYPRE_IJVectorAssemble(b_u2);
-        HYPRE_IJVectorAssemble(b_u3);
-        HYPRE_IJVectorAssemble(x_u1);
-        HYPRE_IJVectorAssemble(x_u2);
-        HYPRE_IJVectorAssemble(x_u3);
-
-        HYPRE_IJVectorGetObject(b_u1, (void **)&par_b_u1);
-        HYPRE_IJVectorGetObject(b_u2, (void **)&par_b_u2);
-        HYPRE_IJVectorGetObject(b_u3, (void **)&par_b_u3);
-        HYPRE_IJVectorGetObject(x_u1, (void **)&par_x_u1);
-        HYPRE_IJVectorGetObject(x_u2, (void **)&par_x_u2);
-        HYPRE_IJVectorGetObject(x_u3, (void **)&par_x_u3);
-
-        HYPRE_ParCSRBiCGSTABSetup(solver_u1, parcsr_A_u1, par_b_u1, par_x_u1);
-        HYPRE_ParCSRBiCGSTABSetup(solver_u2, parcsr_A_u2, par_b_u2, par_x_u2);
-        HYPRE_ParCSRBiCGSTABSetup(solver_u3, parcsr_A_u3, par_b_u3, par_x_u3);
-
-        HYPRE_ParCSRBiCGSTABSolve(solver_u1, parcsr_A_u1, par_b_u1, par_x_u1);
-        HYPRE_ParCSRBiCGSTABSolve(solver_u2, parcsr_A_u2, par_b_u2, par_x_u2);
-        HYPRE_ParCSRBiCGSTABSolve(solver_u3, parcsr_A_u3, par_b_u3, par_x_u3);
-
-        HYPRE_IJVectorGetValues(x_u1, Nx*Ny*Nz, vector_rows, vector_res);
-        FOR_ALL_CELL (i, j, k) {
-            u1_star[i][j][k] = vector_res[IDXFLAT(i, j, k)-1];
-        }
-        HYPRE_IJVectorGetValues(x_u2, Nx*Ny*Nz, vector_rows, vector_res);
-        FOR_ALL_CELL (i, j, k) {
-            u2_star[i][j][k] = vector_res[IDXFLAT(i, j, k)-1];
-        }
-        HYPRE_IJVectorGetValues(x_u3, Nx*Ny*Nz, vector_rows, vector_res);
+        HYPRE_ParCSRBiCGSTABSetup(solver, parcsr_A_u3, par_b, par_x);
+        HYPRE_ParCSRBiCGSTABSolve(solver, parcsr_A_u3, par_b, par_x);
+        HYPRE_IJVectorGetValues(x, Nx*Ny*Nz, vector_rows, vector_res);
         FOR_ALL_CELL (i, j, k) {
             u3_star[i][j][k] = vector_res[IDXFLAT(i, j, k)-1];
         }
-
-        HYPRE_BiCGSTABGetFinalRelativeResidualNorm(solver_u1, &final_norm_u1);
-        HYPRE_BiCGSTABGetFinalRelativeResidualNorm(solver_u2, &final_norm_u2);
-        HYPRE_BiCGSTABGetFinalRelativeResidualNorm(solver_u3, &final_norm_u3);
+        HYPRE_BiCGSTABGetFinalRelativeResidualNorm(solver, &final_norm_u3);
 
         for (int j = 1; j <= Ny; j++) {
             for (int k = 1; k <= Nz; k++) {
@@ -764,7 +697,7 @@ int main(int argc, char **argv) {
                     coeffsum -= kz_U[k];
                 }
 
-                vector_values_p[IDXFLAT(i, j, k)-1]
+                vector_values[IDXFLAT(i, j, k)-1]
                     = -1/(2*Re*coeffsum) * (
                         (U1_star[i][j][k] - U1_star[i-1][j][k]) / dx[i]
                         + (U2_star[i][j][k] - U2_star[i][j-1][k]) / dy[j]
@@ -773,25 +706,25 @@ int main(int argc, char **argv) {
             }
         }
 
-        HYPRE_IJVectorSetValues(b_p, Nx*Ny*Nz, vector_rows, vector_values_p);
-        HYPRE_IJVectorSetValues(x_p, Nx*Ny*Nz, vector_rows, vector_zeros);
+        HYPRE_IJVectorSetValues(b, Nx*Ny*Nz, vector_rows, vector_values);
+        HYPRE_IJVectorSetValues(x, Nx*Ny*Nz, vector_rows, vector_zeros);
 
-        HYPRE_IJVectorAssemble(b_p);
-        HYPRE_IJVectorAssemble(x_p);
+        HYPRE_IJVectorAssemble(b);
+        HYPRE_IJVectorAssemble(x);
 
-        HYPRE_IJVectorGetObject(b_p, (void **)&par_b_p);
-        HYPRE_IJVectorGetObject(x_p, (void **)&par_x_p);
+        HYPRE_IJVectorGetObject(b, (void **)&par_b);
+        HYPRE_IJVectorGetObject(x, (void **)&par_x);
 
-        HYPRE_ParCSRBiCGSTABSetup(solver_p, parcsr_A_p, par_b_p, par_x_p);
+        HYPRE_ParCSRBiCGSTABSetup(solver, parcsr_A_p, par_b, par_x);
 
-        HYPRE_ParCSRBiCGSTABSolve(solver_p, parcsr_A_p, par_b_p, par_x_p);
+        HYPRE_ParCSRBiCGSTABSolve(solver, parcsr_A_p, par_b, par_x);
 
-        HYPRE_IJVectorGetValues(x_p, Nx*Ny*Nz, vector_rows, vector_res);
+        HYPRE_IJVectorGetValues(x, Nx*Ny*Nz, vector_rows, vector_res);
         FOR_ALL_CELL (i, j, k) {
             p_prime[i][j][k] = vector_res[IDXFLAT(i, j, k)-1];
         }
 
-        HYPRE_BiCGSTABGetFinalRelativeResidualNorm(solver_p, &final_norm_p);
+        HYPRE_BiCGSTABGetFinalRelativeResidualNorm(solver, &final_norm_p);
 
         for (int j = 1; j <= Ny; j++) {
             for (int k = 1; k <= Nz; k++) {
@@ -966,28 +899,15 @@ int main(int argc, char **argv) {
     HYPRE_IJMatrixDestroy(A_u1);
     HYPRE_IJMatrixDestroy(A_u2);
     HYPRE_IJMatrixDestroy(A_u3);
-    HYPRE_IJVectorDestroy(b_u1);
-    HYPRE_IJVectorDestroy(b_u2);
-    HYPRE_IJVectorDestroy(b_u3);
-    HYPRE_IJVectorDestroy(x_u1);
-    HYPRE_IJVectorDestroy(x_u2);
-    HYPRE_IJVectorDestroy(x_u3);
-
     HYPRE_IJMatrixDestroy(A_p);
-    HYPRE_IJVectorDestroy(b_p);
-    HYPRE_IJVectorDestroy(x_p);
+    HYPRE_IJVectorDestroy(b);
+    HYPRE_IJVectorDestroy(x);
 
     free(vector_rows); free(vector_zeros);
-    free(vector_values_u1);
-    free(vector_values_u2);
-    free(vector_values_u3);
-    free(vector_values_p);
+    free(vector_values);
     free(vector_res);
 
-    HYPRE_ParCSRBiCGSTABDestroy(solver_u1);
-    HYPRE_ParCSRBiCGSTABDestroy(solver_u2);
-    HYPRE_ParCSRBiCGSTABDestroy(solver_u3);
-    HYPRE_ParCSRBiCGSTABDestroy(solver_p);
+    HYPRE_ParCSRBiCGSTABDestroy(solver);
     HYPRE_BoomerAMGDestroy(precond);
 
     /****** Finalize. *********************************************************/
