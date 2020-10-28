@@ -1,5 +1,6 @@
 import numpy as np
 from stl.mesh import Mesh
+from tvtk.api import tvtk
 from mayavi import mlab
 
 # read input
@@ -46,18 +47,36 @@ verts = np.array(verts)
 tris = np.array(tris)
 
 # read variables
-u1 = np.fromfile('u1.out').reshape((Nx+2, Ny+2, Nz+2))
-u2 = np.fromfile('u2.out').reshape((Nx+2, Ny+2, Nz+2))
-u3 = np.fromfile('u3.out').reshape((Nx+2, Ny+2, Nz+2))
-# p = np.fromfile('u1.out').reshape((Nx+2, Ny+2, Nz+2))
+u1 = np.fromfile('u1a.out').reshape((Nx+2, Ny+2, Nz+2))
+u2 = np.fromfile('u2a.out').reshape((Nx+2, Ny+2, Nz+2))
+u3 = np.fromfile('u3a.out').reshape((Nx+2, Ny+2, Nz+2))
+p = np.fromfile('pa.out').reshape((Nx+2, Ny+2, Nz+2))
 # lvset = np.fromfile('lvset.out').reshape((Nx+2, Ny+2, Nz+2))
-V = np.sqrt(u1**2 + u2**2 + u3**2)
+V = np.sqrt(u1**2 + u2**2 + u3**2)[1:-1, 1:-1, 1:-1]
 
 # plot
-mlab.triangular_mesh(verts[:, 0], verts[:, 1], verts[:, 2], tris, color=(0.7, 0.7, 0.7), opacity=0.5)
+mlab.triangular_mesh(verts[:, 0], verts[:, 1], verts[:, 2], tris, color=(0.7, 0.7, 0.7))
 
-vc = mlab.volume_slice(X, Y, Z, V[1:-1, 1:-1, 1:-1], plane_orientation='y_axes')
-vc.module_manager.scalar_lut_manager.lut.nan_color = 0, 0, 0, 0
-vc.update_pipeline()
+pts = np.empty(Z.shape + (3,), dtype=float)
+pts[..., 0] = X
+pts[..., 1] = Y
+pts[..., 2] = Z
+
+pts = pts.transpose(2, 1, 0, 3).copy()
+pts.shape = pts.size // 3, 3
+V = V.T.copy()
+
+sg = tvtk.StructuredGrid(dimensions=X.shape, points=pts)
+sg.point_data.scalars = V.ravel()
+sg.point_data.scalars.name = 'velocity magnitude'
+
+d = mlab.pipeline.add_dataset(sg)
+
+gz = mlab.pipeline.grid_plane(d)
+gz.grid_plane.axis = 'z'
+
+cut_plane_y = mlab.pipeline.scalar_cut_plane(d, plane_orientation='y_axes')
+cut_plane_y.implicit_plane.origin = (0, 0, 0)
+cut_plane_y.implicit_plane.widget.enabled = False
 
 mlab.show()

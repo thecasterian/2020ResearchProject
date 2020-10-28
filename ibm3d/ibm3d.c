@@ -316,11 +316,13 @@ int main(int argc, char **argv) {
     double *vector_zeros, *vector_res;
 
     int num_iters;
-    double final_res_norm;
+    double final_norm_u1, final_norm_u2, final_norm_u3, final_norm_p;
 
     /*===== Misc. ============================================================*/
 
     struct timespec t_start, t_end;
+    long elapsed_time;
+
     FILE *fp_out;
 
     /****** Calculate grid variables ******************************************/
@@ -589,12 +591,9 @@ int main(int argc, char **argv) {
         N1_prev, N2_prev, N3_prev
     );
 
-    /****** Get current time. *************************************************/
-
-    clock_gettime(CLOCK_REALTIME, &t_start);
-
     /****** Main loop. ********************************************************/
 
+    clock_gettime(CLOCK_REALTIME, &t_start);
     for (int tstep = 1; tstep <= numtstep; tstep++) {
         /* Calculate N. */
         calc_flux(
@@ -677,18 +676,9 @@ int main(int argc, char **argv) {
             u3_star[i][j][k] = vector_res[IDXFLAT(i, j, k)-1];
         }
 
-        HYPRE_BiCGSTABGetFinalRelativeResidualNorm(solver_u1, &final_res_norm);
-        if (final_res_norm >= 1e-4) {
-            fprintf(stderr, "u1 not converged!\n");
-        }
-        HYPRE_BiCGSTABGetFinalRelativeResidualNorm(solver_u2, &final_res_norm);
-        if (final_res_norm >= 1e-4) {
-            fprintf(stderr, "u2 not converged!\n");
-        }
-        HYPRE_BiCGSTABGetFinalRelativeResidualNorm(solver_u3, &final_res_norm);
-        if (final_res_norm >= 1e-4) {
-            fprintf(stderr, "u3 not converged!\n");
-        }
+        HYPRE_BiCGSTABGetFinalRelativeResidualNorm(solver_u1, &final_norm_u1);
+        HYPRE_BiCGSTABGetFinalRelativeResidualNorm(solver_u2, &final_norm_u2);
+        HYPRE_BiCGSTABGetFinalRelativeResidualNorm(solver_u3, &final_norm_u3);
 
         for (int j = 1; j <= Ny; j++) {
             for (int k = 1; k <= Nz; k++) {
@@ -792,10 +782,7 @@ int main(int argc, char **argv) {
             p_prime[i][j][k] = vector_res[IDXFLAT(i, j, k)-1];
         }
 
-        HYPRE_BiCGSTABGetFinalRelativeResidualNorm(solver_p, &final_res_norm);
-        if (final_res_norm >= 1e-4) {
-            fprintf(stderr, "p not converged!\n");
-        }
+        HYPRE_BiCGSTABGetFinalRelativeResidualNorm(solver_p, &final_norm_p);
 
         for (int j = 1; j <= Ny; j++) {
             for (int k = 1; k <= Nz; k++) {
@@ -905,16 +892,29 @@ int main(int argc, char **argv) {
         SWAP(N1_prev, N1);
         SWAP(N2_prev, N2);
         SWAP(N3_prev, N3);
+
+        /* Print iteration results. */
+        clock_gettime(CLOCK_REALTIME, &t_end);
+        elapsed_time = (t_end.tv_sec*1000+t_end.tv_nsec/1000000)
+            - (t_start.tv_sec*1000+t_start.tv_nsec/1000000);
+
+        if (tstep % 10 == 1) {
+            printf("\n  iter       u1 res       u2 res       u3 res        p res       time\n");
+            printf("---------------------------------------------------------------------\n");
+        }
+
+        printf(
+            "%6d   %10.4e   %10.4e   %10.4e   %10.4e   %02ld:%02ld:%02ld\n",
+            tstep,
+            final_norm_u1,
+            final_norm_u2,
+            final_norm_u3,
+            final_norm_p,
+            elapsed_time / 3600000,
+            elapsed_time / 60000 % 60,
+            elapsed_time / 1000 % 60 + (elapsed_time % 1000 > 500)
+        );
     }
-
-    /****** Calculate elapsed time. *******************************************/
-
-    clock_gettime(CLOCK_REALTIME, &t_end);
-    printf(
-        "\nelapsed time: %ld ms\n",
-        (t_end.tv_sec*1000+t_end.tv_nsec/1000000)
-            - (t_start.tv_sec*1000+t_start.tv_nsec/1000000)
-    );
 
     /****** Export result. ****************************************************/
 
