@@ -1,5 +1,5 @@
 #ifndef GEO3D_H
-#define GEO3d_H
+#define GEO3D_H
 
 #include <stdio.h>
 
