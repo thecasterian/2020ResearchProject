@@ -214,11 +214,15 @@ void IBMSolver_init_flow_const(IBMSolver *solver) {
     double (*const u3)[Ny+2][Nz+2] = solver->u3;
     double (*const p)[Ny+2][Nz+2] = solver->p;
 
-    FOR_ALL_CELL (i, j, k) {
-        u1[i][j][k] = 1;
-        u2[i][j][k] = 0;
-        u3[i][j][k] = 0;
-        p[i][j][k] = 0;
+    for (int i = 0; i <= Nx+1; i++) {
+        for (int j = 0; j <= Ny+1; j++) {
+            for (int k = 0; k <= Nz+1; k++) {
+                u1[i][j][k] = 1;
+                u2[i][j][k] = 0;
+                u3[i][j][k] = 0;
+                p[i][j][k] = 0;
+            }
+        }
     }
 
     interp_stag_vel(solver);
@@ -266,7 +270,7 @@ static void alloc_arrays(IBMSolver *solver) {
     solver->yc = calloc(Ny+2, sizeof(double));
     solver->zc = calloc(Nz+2, sizeof(double));
 
-    solver->flag = calloc(Nx+2, sizeof(double [Ny+2][Nz+2]));
+    solver->flag = calloc(Nx+2, sizeof(int [Ny+2][Nz+2]));
 
     solver->u1       = calloc(Nx+2, sizeof(double [Ny+2][Nz+2]));
     solver->u1_next  = calloc(Nx+2, sizeof(double [Ny+2][Nz+2]));
@@ -363,7 +367,7 @@ static void build_hypre(IBMSolver *solver, const double3d _lvset) {
     // HYPRE_BoomerAMGSetPrintLevel(precond, 2);
 
     HYPRE_BiCGSTABSetPrecond(
-        solver,
+        solver->hypre_solver,
         (HYPRE_PtrToSolverFcn)HYPRE_BoomerAMGSolve,
         (HYPRE_PtrToSolverFcn)HYPRE_BoomerAMGSetup,
         solver->precond
