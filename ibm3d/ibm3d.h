@@ -13,18 +13,32 @@
 typedef double (*double3d)[];
 
 typedef struct _ibm_solver {
+    /* Rank of current process. */
+    int rank;
+    /* Number of all processes. */
+    int num_process;
+
     /* Grid dimensions. */
-    int Nx, Ny, Nz;
+    int Nx_global, Ny, Nz;
+
+    /* Min x-index of current process. */
+    int ilower;
+    /* Max x-index of current process. */
+    int iupper;
+    /* Number of x-index of current process. */
+    int Nx;
 
     /* Reynolds number. */
     double Re;
     /* Delta t. */
     double dt;
 
-    /* Cell widths. */
+    /* Cell widths. (local) */
     double *dx, *dy, *dz;
-    /* Cell centeroid coordinates. */
+    /* Cell centeroid coordinates. (local) */
     double *xc, *yc, *zc;
+    /* Global cell width and centroid coordinate. */
+    double *dx_global, *xc_global;
 
     /* Flag of each cell (1: fluid cell, 2: ghost cell, 0: solid cell) */
     int (*flag)[];
@@ -58,24 +72,7 @@ typedef struct _ibm_solver {
     double *vector_values, *vector_zeros, *vector_res;
 } IBMSolver;
 
-IBMSolver *IBMSolver_new(void);
-void IBMSolver_destroy(IBMSolver *);
-
-void IBMSolver_set_grid_params(
-    IBMSolver *,
-    const int, const int, const int,
-    const double *restrict,
-    const double *restrict,
-    const double *restrict,
-    const double, const double
-);
-void IBMSolver_set_obstacle(IBMSolver *, Polyhedron *);
-
-void IBMSolver_init_flow_const(IBMSolver *);
-void IBMSolver_init_flow_file(IBMSolver *, FILE *, FILE *, FILE *, FILE *);
-
-void IBMSolver_iterate(IBMSolver *, int, bool);
-
-void IBMSolver_export_results(IBMSolver *, FILE *, FILE *, FILE *, FILE *);
+#include "ibm3d_setup.h"
+#include "ibm3d_fracstep.h"
 
 #endif

@@ -18,8 +18,18 @@
         for (int j = 0; j <= Ny+1; j++) \
             for (int k = 0; k <= Nz; k++)
 
-/* Index of cell (i, j, k), ranging from 1 to Nx * Ny * Nz. */
-#define IDXFLAT(i, j, k) (Ny*Nz*((i)-1) + Nz*((j)-1) + (k))
+/* Convert local index to global index. */
+#define LOCL_TO_GLOB(i) ((i) + solver->ilower - 1)
+/* Convert global index to local index. */
+#define GLOB_TO_LOCL(i) ((i) - solver->ilower + 1)
+
+/* Global index of cell (i, j, k) where i is local index, ranging from 1 to
+   Nx_global * Ny * Nz. */
+#define GLOB_CELL_IDX(i, j, k) (Ny*Nz*(LOCL_TO_GLOB(i)-1) + Nz*((j)-1) + (k))
+/* Local index of cell (i, j, k) where i is local index, ranging from 1 to
+   Nx * Ny * Nz. */
+#define LOCL_CELL_IDX(i, j, k) (Ny*Nz*((i)-1) + Nz*((j)-1) + (k))
+
 #define SWAP(a, b) do {typeof(a) tmp = a; a = b; b = tmp;} while (0)
 
 #endif

@@ -13,7 +13,7 @@ static inline void update_next(IBMSolver *);
 
 void IBMSolver_iterate(IBMSolver *solver, int num_time_steps, bool verbose) {
     struct timespec t_start, t_end;
-    long elapsed_time;
+    long elapsed_time, hour, min, sec;
     double final_norm_u1, final_norm_u2, final_norm_u3, final_norm_p;
 
     calc_N(solver);
@@ -27,14 +27,14 @@ void IBMSolver_iterate(IBMSolver *solver, int num_time_steps, bool verbose) {
 
     for (int i = 1; i <= num_time_steps; i++) {
         calc_N(solver);
-        calc_u_star(solver, &final_norm_u1, &final_norm_u2, &final_norm_u3);
+        calc_u_star(solver, &final_norm_u1, &final_norm_u2, &final_norm_u3); break;
         calc_u_tilde(solver);
         calc_U_star(solver);
         calc_p_prime(solver, &final_norm_p);
         update_next(solver);
 
         /* Print iteration results. */
-        if (verbose) {
+        if (verbose && solver->rank == 0) {
             clock_gettime(CLOCK_REALTIME, &t_end);
             elapsed_time = (t_end.tv_sec*1000+t_end.tv_nsec/1000000)
                 - (t_start.tv_sec*1000+t_start.tv_nsec/1000000);
@@ -44,12 +44,22 @@ void IBMSolver_iterate(IBMSolver *solver, int num_time_steps, bool verbose) {
                 printf("---------------------------------------------------------------------\n");
             }
 
+            hour = elapsed_time / 3600000;
+            min = elapsed_time / 60000 % 60;
+            sec = elapsed_time / 1000 % 60 + (elapsed_time % 1000 > 500);
+            if (sec >= 60) {
+                sec -= 60;
+                min += 1;
+            }
+            if (min >= 60) {
+                min -= 60;
+                hour += 1;
+            }
+
             printf(
                 "%6d   %10.4e   %10.4e   %10.4e   %10.4e   %02ld:%02ld:%02ld\n",
                 i, final_norm_u1, final_norm_u2, final_norm_u3, final_norm_p,
-                elapsed_time / 3600000,
-                elapsed_time / 60000 % 60,
-                elapsed_time / 1000 % 60 + (elapsed_time % 1000 > 500)
+                hour, min, sec
             );
         }
     }
@@ -125,6 +135,7 @@ static inline void calc_u_star(
     const int Nx = solver->Nx;
     const int Ny = solver->Ny;
     const int Nz = solver->Nz;
+    const int Nx_global = solver->Nx_global;
     const double dt = solver->dt;
 
     const double *const xc = solver->xc;
@@ -160,15 +171,15 @@ static inline void calc_u_star(
     /* u1_star. */
     FOR_ALL_CELL (i, j, k) {
         if (flag[i][j][k] != 2) {
-            solver->vector_values[IDXFLAT(i, j, k)-1]
+            solver->vector_values[LOCL_CELL_IDX(i, j, k)-1]
                 = -dt/2 * (3*N1[i][j][k] - N1_prev[i][j][k])
                 - dt * (p[i+1][j][k] - p[i-1][j][k]) / (xc[i+1] - xc[i-1])
                 + (1-kx_W[i]-kx_E[i]-ky_S[j]-ky_N[j]-kz_D[k]-kz_U[k]) * u1[i][j][k]
                 + kx_W[i]*u1[i-1][j][k] + kx_E[i]*u1[i+1][j][k]
                 + ky_S[j]*u1[i][j-1][k] + ky_N[j]*u1[i][j+1][k]
                 + kz_D[k]*u1[i][j][k-1] + kz_U[k]*u1[i][j][k+1];
-            if (i == 1) {
-                solver->vector_values[IDXFLAT(i, j, k)-1] += 2*kx_W[i];
+            if (LOCL_TO_GLOB(i) == 1) {
+                solver->vector_values[LOCL_CELL_IDX(i, j, k)-1] += 2*kx_W[i];
             }
         }
     }
@@ -183,14 +194,14 @@ static inline void calc_u_star(
     HYPRE_ParCSRBiCGSTABSolve(solver->hypre_solver, solver->parcsr_A_u1, solver->par_b, solver->par_x);
     HYPRE_IJVectorGetValues(solver->x, Nx*Ny*Nz, solver->vector_rows, solver->vector_res);
     FOR_ALL_CELL (i, j, k) {
-        u1_star[i][j][k] = solver->vector_res[IDXFLAT(i, j, k)-1];
+        u1_star[i][j][k] = solver->vector_res[LOCL_CELL_IDX(i, j, k)-1];
     }
     HYPRE_BiCGSTABGetFinalRelativeResidualNorm(solver->hypre_solver, final_norm_u1);
 
     /* u2_star. */
     FOR_ALL_CELL (i, j, k) {
         if (flag[i][j][k] != 2) {
-            solver->vector_values[IDXFLAT(i, j, k)-1]
+            solver->vector_values[LOCL_CELL_IDX(i, j, k)-1]
                 = -dt/2 * (3*N2[i][j][k] - N2_prev[i][j][k])
                 - dt * (p[i][j+1][k] - p[i][j-1][k]) / (yc[j+1] - yc[j-1])
                 + (1-kx_W[i]-kx_E[i]-ky_S[j]-ky_N[j]-kz_D[k]-kz_U[k]) * u2[i][j][k]
@@ -210,14 +221,14 @@ static inline void calc_u_star(
     HYPRE_ParCSRBiCGSTABSolve(solver->hypre_solver, solver->parcsr_A_u2, solver->par_b, solver->par_x);
     HYPRE_IJVectorGetValues(solver->x, Nx*Ny*Nz, solver->vector_rows, solver->vector_res);
     FOR_ALL_CELL (i, j, k) {
-        u2_star[i][j][k] = solver->vector_res[IDXFLAT(i, j, k)-1];
+        u2_star[i][j][k] = solver->vector_res[LOCL_CELL_IDX(i, j, k)-1];
     }
     HYPRE_BiCGSTABGetFinalRelativeResidualNorm(solver->hypre_solver, final_norm_u2);
 
     /* u3_star. */
     FOR_ALL_CELL (i, j, k) {
         if (flag[i][j][k] != 2) {
-            solver->vector_values[IDXFLAT(i, j, k)-1]
+            solver->vector_values[LOCL_CELL_IDX(i, j, k)-1]
                 = -dt/2 * (3*N3[i][j][k] - N3_prev[i][j][k])
                 - dt * (p[i][j][k+1] - p[i][j][k-1]) / (zc[k+1] - zc[k-1])
                 + (1-kx_W[i]-kx_E[i]-ky_S[j]-ky_N[j]-kz_D[k]-kz_U[k]) * u3[i][j][k]
@@ -237,16 +248,18 @@ static inline void calc_u_star(
     HYPRE_ParCSRBiCGSTABSolve(solver->hypre_solver, solver->parcsr_A_u3, solver->par_b, solver->par_x);
     HYPRE_IJVectorGetValues(solver->x, Nx*Ny*Nz, solver->vector_rows, solver->vector_res);
     FOR_ALL_CELL (i, j, k) {
-        u3_star[i][j][k] = solver->vector_res[IDXFLAT(i, j, k)-1];
+        u3_star[i][j][k] = solver->vector_res[LOCL_CELL_IDX(i, j, k)-1];
     }
     HYPRE_BiCGSTABGetFinalRelativeResidualNorm(solver->hypre_solver, final_norm_u3);
 
     /* Boundary condition. */
-    for (int j = 1; j <= Ny; j++) {
-        for (int k = 1; k <= Nz; k++) {
-            u1_star[Nx+1][j][k] = (u1_star[Nx][j][k]*(xc[Nx+1]-xc[Nx-1])-u1_star[Nx-1][j][k]*(xc[Nx+1]-xc[Nx])) / (xc[Nx]-xc[Nx-1]);
-            u2_star[Nx+1][j][k] = (u2_star[Nx][j][k]*(xc[Nx+1]-xc[Nx-1])-u2_star[Nx-1][j][k]*(xc[Nx+1]-xc[Nx])) / (xc[Nx]-xc[Nx-1]);
-            u3_star[Nx+1][j][k] = (u3_star[Nx][j][k]*(xc[Nx+1]-xc[Nx-1])-u3_star[Nx-1][j][k]*(xc[Nx+1]-xc[Nx])) / (xc[Nx]-xc[Nx-1]);
+    if (solver->iupper == Nx_global) {
+        for (int j = 1; j <= Ny; j++) {
+            for (int k = 1; k <= Nz; k++) {
+                u1_star[Nx+1][j][k] = (u1_star[Nx][j][k]*(xc[Nx+1]-xc[Nx-1])-u1_star[Nx-1][j][k]*(xc[Nx+1]-xc[Nx])) / (xc[Nx]-xc[Nx-1]);
+                u2_star[Nx+1][j][k] = (u2_star[Nx][j][k]*(xc[Nx+1]-xc[Nx-1])-u2_star[Nx-1][j][k]*(xc[Nx+1]-xc[Nx])) / (xc[Nx]-xc[Nx-1]);
+                u3_star[Nx+1][j][k] = (u3_star[Nx][j][k]*(xc[Nx+1]-xc[Nx-1])-u3_star[Nx-1][j][k]*(xc[Nx+1]-xc[Nx])) / (xc[Nx]-xc[Nx-1]);
+            }
         }
     }
 }
@@ -255,6 +268,7 @@ static inline void calc_u_tilde(IBMSolver *solver) {
     const int Nx = solver->Nx;
     const int Ny = solver->Ny;
     const int Nz = solver->Nz;
+    const int Nx_global = solver->Nx_global;
 
     const double *const xc = solver->xc;
     const double *const yc = solver->yc;
@@ -275,12 +289,30 @@ static inline void calc_u_tilde(IBMSolver *solver) {
         u2_tilde[i][j][k] = u2_star[i][j][k] + solver->dt * (p[i][j+1][k] - p[i][j-1][k]) / (yc[j+1] - yc[j-1]);
         u3_tilde[i][j][k] = u3_star[i][j][k] + solver->dt * (p[i][j][k+1] - p[i][j][k-1]) / (zc[k+1] - zc[k-1]);
     }
-    for (int j = 1; j <= Ny; j++) {
-        for (int k = 1; k <= Nz; k++) {
-            u1_tilde[Nx+1][j][k] = u1_star[Nx+1][j][k] + solver->dt * (p[Nx+1][j][k] - p[Nx][j][k]) / (xc[Nx+1] - xc[Nx]);
-            u2_tilde[Nx+1][j][k] = u2_star[Nx+1][j][k] + solver->dt * (p[Nx+1][j+1][k] - p[Nx+1][j-1][k]) / (yc[j+1] - yc[j-1]);
-            u3_tilde[Nx+1][j][k] = u3_star[Nx+1][j][k] + solver->dt * (p[Nx+1][j][k+1] - p[Nx+1][j][k-1]) / (zc[k+1] - zc[k-1]);
+    if (solver->iupper == Nx_global) {
+        for (int j = 1; j <= Ny; j++) {
+            for (int k = 1; k <= Nz; k++) {
+                u1_tilde[Nx+1][j][k] = u1_star[Nx+1][j][k] + solver->dt * (p[Nx+1][j][k] - p[Nx][j][k]) / (xc[Nx+1] - xc[Nx]);
+                u2_tilde[Nx+1][j][k] = u2_star[Nx+1][j][k] + solver->dt * (p[Nx+1][j+1][k] - p[Nx+1][j-1][k]) / (yc[j+1] - yc[j-1]);
+                u3_tilde[Nx+1][j][k] = u3_star[Nx+1][j][k] + solver->dt * (p[Nx+1][j][k+1] - p[Nx+1][j][k-1]) / (zc[k+1] - zc[k-1]);
+            }
         }
+    }
+
+    /* Exchange u1_tilde between the adjacent processes. */
+    if (solver->rank != solver->num_process-1) {
+        /* Send to next process. */
+        MPI_Send(u1_tilde[Nx], (Ny+2)*(Nz+2), MPI_DOUBLE, solver->rank+1, 0, MPI_COMM_WORLD);
+    }
+    if (solver->rank != 0) {
+        /* Receive from previous process. */
+        MPI_Recv(u1_tilde[0], (Ny+2)*(Nz+2), MPI_DOUBLE, solver->rank-1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        /* Send to previous process. */
+        MPI_Send(u1_tilde[1], (Ny+2)*(Nz+2), MPI_DOUBLE, solver->rank-1, 0, MPI_COMM_WORLD);
+    }
+    if (solver->rank != solver->num_process-1) {
+        /* Receive from next process. */
+        MPI_Recv(u1_tilde[Nx+1], (Ny+2)*(Nz+2), MPI_DOUBLE, solver->rank+1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
     }
 }
 
@@ -320,9 +352,11 @@ static inline void calc_U_star(IBMSolver *solver) {
             - dt * (p[i][j][k+1] - p[i][j][k]) / (zc[k+1] - zc[k]);
     }
 
-    for (int j = 1; j <= Ny; j++) {
-        for (int k = 1; k <= Nz; k++) {
-            U1_star[0][j][k] = 1;
+    if (solver->ilower == 1) {
+        for (int j = 1; j <= Ny; j++) {
+            for (int k = 1; k <= Nz; k++) {
+                U1_star[0][j][k] = 1;
+            }
         }
     }
     for (int i = 1; i <= Nx; i++) {
@@ -341,6 +375,7 @@ static inline void calc_p_prime(IBMSolver *solver, double *final_norm_p) {
     const int Nx = solver->Nx;
     const int Ny = solver->Ny;
     const int Nz = solver->Nz;
+    const int Nx_global = solver->Nx_global;
     const double Re = solver->Re;
 
     const double *const dx = solver->dx;
@@ -365,10 +400,10 @@ static inline void calc_p_prime(IBMSolver *solver, double *final_norm_p) {
     FOR_ALL_CELL (i, j, k) {
         if (flag[i][j][k] != 2) {
             double coeffsum = kx_W[i] + kx_E[i] + ky_S[j] + ky_N[j] + kz_D[k] + kz_U[k];
-            if (i == 1) {
+            if (LOCL_TO_GLOB(i) == 1) {
                 coeffsum -= kx_W[i];
             }
-            if (i == Nx) {
+            if (LOCL_TO_GLOB(i) == Nx_global) {
                 coeffsum += kx_E[i];
             }
             if (j == 1) {
@@ -384,7 +419,7 @@ static inline void calc_p_prime(IBMSolver *solver, double *final_norm_p) {
                 coeffsum -= kz_U[k];
             }
 
-            solver->vector_values[IDXFLAT(i, j, k)-1]
+            solver->vector_values[LOCL_CELL_IDX(i, j, k)-1]
                 = -1/(2*Re*coeffsum) * (
                     (U1_star[i][j][k] - U1_star[i-1][j][k]) / dx[i]
                     + (U2_star[i][j][k] - U2_star[i][j-1][k]) / dy[j]
@@ -407,15 +442,23 @@ static inline void calc_p_prime(IBMSolver *solver, double *final_norm_p) {
 
     HYPRE_IJVectorGetValues(solver->x, Nx*Ny*Nz, solver->vector_rows, solver->vector_res);
     FOR_ALL_CELL (i, j, k) {
-        p_prime[i][j][k] = solver->vector_res[IDXFLAT(i, j, k)-1];
+        p_prime[i][j][k] = solver->vector_res[LOCL_CELL_IDX(i, j, k)-1];
     }
 
     HYPRE_BiCGSTABGetFinalRelativeResidualNorm(solver->hypre_solver, final_norm_p);
 
-    for (int j = 1; j <= Ny; j++) {
-        for (int k = 1; k <= Nz; k++) {
-            p_prime[0][j][k] = p_prime[1][j][k];
-            p_prime[Nx+1][j][k] = -p_prime[Nx][j][k];
+    if (solver->ilower == 1) {
+        for (int j = 1; j <= Ny; j++) {
+            for (int k = 1; k <= Nz; k++) {
+                p_prime[0][j][k] = p_prime[1][j][k];
+            }
+        }
+    }
+    if (solver->iupper == Nx_global) {
+        for (int j = 1; j <= Ny; j++) {
+            for (int k = 1; k <= Nz; k++) {
+                p_prime[Nx+1][j][k] = -p_prime[Nx][j][k];
+            }
         }
     }
     for (int i = 1; i <= Nx; i++) {
@@ -430,17 +473,39 @@ static inline void calc_p_prime(IBMSolver *solver, double *final_norm_p) {
             p_prime[i][j][Nz+1] = p_prime[i][j][Nz];
         }
     }
+
+    /* Exchange p_prime between the adjacent processes. */
+    if (solver->rank != solver->num_process-1) {
+        /* Send to next process. */
+        MPI_Send(p_prime[Nx], (Ny+2)*(Nz+2), MPI_DOUBLE, solver->rank+1, 0, MPI_COMM_WORLD);
+    }
+    if (solver->rank != 0) {
+        /* Receive from previous process. */
+        MPI_Recv(p_prime[0], (Ny+2)*(Nz+2), MPI_DOUBLE, solver->rank-1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        /* Send to previous process. */
+        MPI_Send(p_prime[1], (Ny+2)*(Nz+2), MPI_DOUBLE, solver->rank-1, 0, MPI_COMM_WORLD);
+    }
+    if (solver->rank != solver->num_process-1) {
+        /* Receive from next process. */
+        MPI_Recv(p_prime[Nx+1], (Ny+2)*(Nz+2), MPI_DOUBLE, solver->rank+1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+    }
 }
 
 static inline void update_next(IBMSolver *solver) {
     const int Nx = solver->Nx;
     const int Ny = solver->Ny;
     const int Nz = solver->Nz;
+    const int Nx_global = solver->Nx_global;
     const double dt = solver->dt;
 
     const double *const xc = solver->xc;
     const double *const yc = solver->yc;
     const double *const zc = solver->zc;
+
+    double (*const u1)[Ny+2][Nz+2] = solver->u1;
+    double (*const u2)[Ny+2][Nz+2] = solver->u2;
+    double (*const u3)[Ny+2][Nz+2] = solver->u3;
+    double (*const p)[Ny+2][Nz+2] = solver->p;
 
     const double (*const u1_star)[Ny+2][Nz+2] = solver->u1_star;
     const double (*const u2_star)[Ny+2][Nz+2] = solver->u2_star;
@@ -450,7 +515,6 @@ static inline void update_next(IBMSolver *solver) {
     const double (*const U2_star)[Ny+1][Nz+2] = solver->U2_star;
     const double (*const U3_star)[Ny+2][Nz+1] = solver->U3_star;
 
-    const double (*const p)[Ny+2][Nz+2] = solver->p;
     const double (*const p_prime)[Ny+2][Nz+2] = solver->p_prime;
 
     double (*const u1_next)[Ny+2][Nz+2] = solver->u1_next;
@@ -485,15 +549,22 @@ static inline void update_next(IBMSolver *solver) {
     }
 
     /* Set velocity boundary conditions. */
-    for (int j = 1; j <= Ny; j++) {
-        for (int k = 1; k <= Nz; k++) {
-            u1_next[0][j][k] = 2 - u1_next[1][j][k];
-            u2_next[0][j][k] = -u2_next[1][j][k];
-            u3_next[0][j][k] = -u3_next[1][j][k];
-
-            u1_next[Nx+1][j][k] = ((xc[Nx+1]-xc[Nx-1])*u1_next[Nx][j][k] - (xc[Nx+1]-xc[Nx])*u1_next[Nx-1][j][k]) / (xc[Nx] - xc[Nx-1]);
-            u2_next[Nx+1][j][k] = ((xc[Nx+1]-xc[Nx-1])*u2_next[Nx][j][k] - (xc[Nx+1]-xc[Nx])*u2_next[Nx-1][j][k]) / (xc[Nx] - xc[Nx-1]);
-            u3_next[Nx+1][j][k] = ((xc[Nx+1]-xc[Nx-1])*u3_next[Nx][j][k] - (xc[Nx+1]-xc[Nx])*u3_next[Nx-1][j][k]) / (xc[Nx] - xc[Nx-1]);
+    if (solver->ilower == 1) {
+        for (int j = 1; j <= Ny; j++) {
+            for (int k = 1; k <= Nz; k++) {
+                u1_next[0][j][k] = 2 - u1_next[1][j][k];
+                u2_next[0][j][k] = -u2_next[1][j][k];
+                u3_next[0][j][k] = -u3_next[1][j][k];
+            }
+        }
+    }
+    if (solver->iupper == Nx_global) {
+        for (int j = 1; j <= Ny; j++) {
+            for (int k = 1; k <= Nz; k++) {
+                u1_next[Nx+1][j][k] = ((xc[Nx+1]-xc[Nx-1])*u1_next[Nx][j][k] - (xc[Nx+1]-xc[Nx])*u1_next[Nx-1][j][k]) / (xc[Nx] - xc[Nx-1]);
+                u2_next[Nx+1][j][k] = ((xc[Nx+1]-xc[Nx-1])*u2_next[Nx][j][k] - (xc[Nx+1]-xc[Nx])*u2_next[Nx-1][j][k]) / (xc[Nx] - xc[Nx-1]);
+                u3_next[Nx+1][j][k] = ((xc[Nx+1]-xc[Nx-1])*u3_next[Nx][j][k] - (xc[Nx+1]-xc[Nx])*u3_next[Nx-1][j][k]) / (xc[Nx] - xc[Nx-1]);
+            }
         }
     }
     for (int i = 1; i <= Nx; i++) {
@@ -520,10 +591,18 @@ static inline void update_next(IBMSolver *solver) {
     }
 
     /* Set pressure boundary conditions. */
-    for (int j = 1; j <= Ny; j++) {
-        for (int k = 1; k <= Nz; k++) {
-            p_next[0][j][k] = p_next[1][j][k];
-            p_next[Nx+1][j][k] = -p_next[Nx][j][k];
+    if (solver->ilower == 1) {
+        for (int j = 1; j <= Ny; j++) {
+            for (int k = 1; k <= Nz; k++) {
+                p_next[0][j][k] = p_next[1][j][k];
+            }
+        }
+    }
+    if (solver->iupper == Nx_global) {
+        for (int j = 1; j <= Ny; j++) {
+            for (int k = 1; k <= Nz; k++) {
+                p_next[Nx+1][j][k] = -p_next[Nx][j][k];
+            }
         }
     }
     for (int i = 1; i <= Nx; i++) {
@@ -550,4 +629,32 @@ static inline void update_next(IBMSolver *solver) {
     SWAP(solver->N1_prev, solver->N1);
     SWAP(solver->N2_prev, solver->N2);
     SWAP(solver->N3_prev, solver->N3);
+
+    /* Exchange u1, u2, u3, and p between the adjacent processes. */
+    if (solver->rank != solver->num_process-1) {
+        /* Send to next process. */
+        MPI_Send(u1[Nx], (Ny+2)*(Nz+2), MPI_DOUBLE, solver->rank+1, 0, MPI_COMM_WORLD);
+        MPI_Send(u2[Nx], (Ny+2)*(Nz+2), MPI_DOUBLE, solver->rank+1, 1, MPI_COMM_WORLD);
+        MPI_Send(u3[Nx], (Ny+2)*(Nz+2), MPI_DOUBLE, solver->rank+1, 2, MPI_COMM_WORLD);
+        MPI_Send(p[Nx], (Ny+2)*(Nz+2), MPI_DOUBLE, solver->rank+1, 3, MPI_COMM_WORLD);
+    }
+    if (solver->rank != 0) {
+        /* Receive from previous process. */
+        MPI_Recv(u1[0], (Ny+2)*(Nz+2), MPI_DOUBLE, solver->rank-1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        MPI_Recv(u2[0], (Ny+2)*(Nz+2), MPI_DOUBLE, solver->rank-1, 1, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        MPI_Recv(u3[0], (Ny+2)*(Nz+2), MPI_DOUBLE, solver->rank-1, 2, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        MPI_Recv(p[0], (Ny+2)*(Nz+2), MPI_DOUBLE, solver->rank-1, 3, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        /* Send to previous process. */
+        MPI_Send(u1[1], (Ny+2)*(Nz+2), MPI_DOUBLE, solver->rank-1, 0, MPI_COMM_WORLD);
+        MPI_Send(u2[1], (Ny+2)*(Nz+2), MPI_DOUBLE, solver->rank-1, 1, MPI_COMM_WORLD);
+        MPI_Send(u3[1], (Ny+2)*(Nz+2), MPI_DOUBLE, solver->rank-1, 2, MPI_COMM_WORLD);
+        MPI_Send(p[1], (Ny+2)*(Nz+2), MPI_DOUBLE, solver->rank-1, 3, MPI_COMM_WORLD);
+    }
+    if (solver->rank != solver->num_process-1) {
+        /* Receive from next process. */
+        MPI_Recv(u1[Nx+1], (Ny+2)*(Nz+2), MPI_DOUBLE, solver->rank+1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        MPI_Recv(u2[Nx+1], (Ny+2)*(Nz+2), MPI_DOUBLE, solver->rank+1, 1, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        MPI_Recv(u3[Nx+1], (Ny+2)*(Nz+2), MPI_DOUBLE, solver->rank+1, 2, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        MPI_Recv(p[Nx+1], (Ny+2)*(Nz+2), MPI_DOUBLE, solver->rank+1, 3, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+    }
 }

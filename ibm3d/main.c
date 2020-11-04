@@ -12,25 +12,23 @@ int main(int argc, char **argv) {
     /*===== Initialize program and parse arguments. ==========================*/
     /*----- Initialize MPI. --------------------------------------------------*/
 
-    /* Id of current process. */
-    int myid;
     /* Number of all processes. */
-    int num_procs;
+    int num_process;
+    /* Rank of current process. */
+    int rank;
 
     MPI_Init(&argc, &argv);
-    MPI_Comm_rank(MPI_COMM_WORLD, &myid);
-    MPI_Comm_size(MPI_COMM_WORLD, &num_procs);
+    MPI_Comm_size(MPI_COMM_WORLD, &num_process);
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 
     /*----- Initialize HYPRE. ------------------------------------------------*/
 
     HYPRE_Init();
 
-    /* For the present, the number of process must be 1. */
-    if (num_procs != 1) {
-        if (myid == 0)
-            printf("Must run with 1 processors!\n");
-        MPI_Finalize();
-        return 0;
+    /*----- Print run infos. -------------------------------------------------*/
+
+    if (rank == 0) {
+        printf("Run with %d processes\n", num_process);
     }
 
     /*===== Define variables. ================================================*/
@@ -51,7 +49,7 @@ int main(int argc, char **argv) {
     double Re;
     /* Delta t. */
     double dt;
-    /* Totla number of time steps. */
+    /* Total number of time steps. */
     int num_time_steps;
 
     /* Initialize velocities and pressure from file? (T/F) */
@@ -72,12 +70,16 @@ int main(int argc, char **argv) {
     /*===== Read input file. =================================================*/
 
     /* Open input file */
-    printf("Read input file\n");
+    if (rank == 0) {
+        printf("\nRead input file\n");
+    }
     fp_in = fopen_check("ibm3d.in", "r");
 
     /* Read stl file */
     fscanf(fp_in, "%*s %s", stl_file);
-    printf("Read polyhedron file: %s\n", stl_file);
+    if (rank == 0) {
+        printf("Read polyhedron file: %s\n", stl_file);
+    }
     fp_poly = fopen_check(stl_file, "rb");
 
     poly = Polyhedron_new();
@@ -124,24 +126,26 @@ int main(int argc, char **argv) {
 
     /*===== Print input statistics ===========================================*/
 
-    /* Mesh statistics */
-    printf("\n");
-    printf("Input mesh size: %d x %d x %d\n", Nx, Ny, Nz);
-    printf("  xmin: %10.4lf, xmax: %10.4lf\n", xf[0], xf[Nx]);
-    printf("  ymin: %10.4lf, ymax: %10.4lf\n", yf[0], yf[Ny]);
-    printf("  zmin: %10.4lf, zmax: %10.4lf\n", zf[0], zf[Ny]);
+    if (rank == 0) {
+        /* Mesh statistics */
+        printf("\n");
+        printf("Input mesh size: %d x %d x %d\n", Nx, Ny, Nz);
+        printf("  xmin: %10.4lf, xmax: %10.4lf\n", xf[0], xf[Nx]);
+        printf("  ymin: %10.4lf, ymax: %10.4lf\n", yf[0], yf[Ny]);
+        printf("  zmin: %10.4lf, zmax: %10.4lf\n", zf[0], zf[Ny]);
 
-    /* Polyhedron statistics */
-    Polyhedron_print_stats(poly);
+        /* Polyhedron statistics */
+        Polyhedron_print_stats(poly);
 
-    /* Reynolds number and delta t */
-    printf("\n");
-    printf("Reynolds no.: %.6lf\n", Re);
-    printf("delta t     : %.6lf\n", dt);
+        /* Reynolds number and delta t */
+        printf("\n");
+        printf("Reynolds no.: %.6lf\n", Re);
+        printf("delta t     : %.6lf\n", dt);
+    }
 
     /*===== Set solver. ======================================================*/
 
-    IBMSolver *solver = IBMSolver_new();
+    IBMSolver *solver = IBMSolver_new(num_process, rank);
     IBMSolver_set_grid_params(solver, Nx, Ny, Nz, xf, yf, zf, Re, dt);
     IBMSolver_set_obstacle(solver, poly);
     Polyhedron_destroy(poly);
@@ -165,6 +169,10 @@ int main(int argc, char **argv) {
         fclose(fp_p);
     }
 
+    if (rank == 0) {
+        printf("\nInitialization done\n");
+    }
+
     /*===== Run. =============================================================*/
 
     IBMSolver_iterate(solver, num_time_steps, true);
@@ -186,6 +194,7 @@ int main(int argc, char **argv) {
     /*===== Free memory and finalize. ========================================*/
 
     free(xf); free(yf); free(zf);
+    IBMSolver_destroy(solver);
 
     HYPRE_Finalize();
     MPI_Finalize();

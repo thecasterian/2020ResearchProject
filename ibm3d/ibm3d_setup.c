@@ -1,7 +1,9 @@
-#include "ibm3d.h"
+#include "ibm3d_setup.h"
 
 #include "geo3d.h"
 #include "utils.h"
+
+#include "math.h"
 
 /* Index of adjacent cells in 3-d cartesian coordinate */
 static const int adj[6][3] = {
@@ -29,8 +31,12 @@ static void get_interp_info(
 );
 static void interp_stag_vel(IBMSolver *);
 
-IBMSolver *IBMSolver_new(void) {
+IBMSolver *IBMSolver_new(const int num_process, const int rank) {
     IBMSolver *solver = calloc(1, sizeof(IBMSolver));
+
+    solver->num_process = num_process;
+    solver->rank = rank;
+
     solver->dx = solver->dy = solver->dz = NULL;
     solver->xc = solver->yc = solver->zc = NULL;
     solver->flag = NULL;
@@ -92,25 +98,29 @@ void IBMSolver_destroy(IBMSolver *solver) {
 
 void IBMSolver_set_grid_params(
     IBMSolver *solver,
-    const int Nx, const int Ny, const int Nz,
+    const int Nx_global, const int Ny, const int Nz,
     const double *restrict xf,
     const double *restrict yf,
     const double *restrict zf,
     const double Re, const double dt
 ) {
-    solver->Nx = Nx;
+    solver->Nx_global = Nx_global;
     solver->Ny = Ny;
     solver->Nz = Nz;
     solver->Re = Re;
     solver->dt = dt;
+
+    const int ilower = solver->ilower = solver->rank * Nx_global / solver->num_process + 1;
+    const int iupper = solver->iupper = (solver->rank+1) * Nx_global / solver->num_process;
+    const int Nx = solver->Nx = solver->iupper - solver->ilower + 1;
 
     /* Allocate arrays. */
     alloc_arrays(solver);
 
     /* Cell widths and centroid coordinates. */
     for (int i = 1; i <= Nx; i++) {
-        solver->dx[i] = xf[i] - xf[i-1];
-        solver->xc[i] = (xf[i] + xf[i-1]) / 2;
+        solver->dx[i] = xf[LOCL_TO_GLOB(i)] - xf[LOCL_TO_GLOB(i)-1];
+        solver->xc[i] = (xf[LOCL_TO_GLOB(i)] + xf[LOCL_TO_GLOB(i)-1]) / 2;
     }
     for (int j = 1; j <= Ny; j++) {
         solver->dy[j] = yf[j] - yf[j-1];
@@ -121,20 +131,43 @@ void IBMSolver_set_grid_params(
         solver->zc[k] = (zf[k] + zf[k-1]) / 2;
     }
 
+    for (int i = 1; i <= Nx; i++) {
+        solver->dx_global[i] = xf[i] - xf[i-1];
+        solver->xc_global[i] = (xf[i] + xf[i-1]) / 2;
+    }
+
     /* Ghost cells */
-    solver->dx[0] = solver->dx[1];
-    solver->dx[Nx+1] = solver->dx[Nx];
+    solver->dx[0]
+        = ilower == 1
+        ? solver->dx[1]
+        : xf[LOCL_TO_GLOB(0)] - xf[LOCL_TO_GLOB(0)-1];
+    solver->dx[Nx+1]
+        = iupper == Nx_global
+        ? solver->dx[Nx]
+        : xf[LOCL_TO_GLOB(Nx+1)] - xf[LOCL_TO_GLOB(Nx+1)-1];
     solver->dy[0] = solver->dy[1];
     solver->dy[Ny+1] = solver->dy[Ny];
     solver->dz[0] = solver->dz[1];
     solver->dz[Nz+1] = solver->dz[Nz];
 
-    solver->xc[0] = 2*xf[0] - solver->xc[1];
-    solver->xc[Nx+1] = 2*xf[Nx] - solver->xc[Nx];
+    solver->dx_global[0] = solver->dx_global[1];
+    solver->dx_global[Nx+1] = solver->dx_global[Nx];
+
+    solver->xc[0]
+        = ilower == 1
+        ? 2*xf[0] - solver->xc[1]
+        : (xf[LOCL_TO_GLOB(0)] + xf[LOCL_TO_GLOB(0)-1]) / 2;
+    solver->xc[Nx+1]
+        = iupper == Nx_global
+        ? 2*xf[Nx_global] - solver->xc[Nx]
+        : (xf[LOCL_TO_GLOB(Nx+1)] + xf[LOCL_TO_GLOB(Nx+1)-1]) / 2;
     solver->yc[0] = 2*yf[0] - solver->yc[1];
     solver->yc[Ny+1] = 2*yf[Ny] - solver->yc[Ny];
     solver->zc[0] = 2*zf[0] - solver->zc[1];
     solver->zc[Nz+1] = 2*zf[Nz] - solver->zc[Nz];
+
+    solver->xc_global[0] = 2*xf[0] - solver->xc_global[1];
+    solver->xc_global[Nx_global+1] = 2*xf[Nx_global] - solver->xc_global[Nx_global];
 
     /* Calculate second order derivative coefficients */
     for (int i = 1; i <= Nx; i++) {
@@ -149,8 +182,6 @@ void IBMSolver_set_grid_params(
         solver->kz_D[k] = dt / (2*Re * (solver->zc[k] - solver->zc[k-1])*solver->dz[k]);
         solver->kz_U[k] = dt / (2*Re * (solver->zc[k+1] - solver->zc[k])*solver->dz[k]);
     }
-
-    printf("set grid done\n");
 }
 
 void IBMSolver_set_obstacle(IBMSolver *solver, Polyhedron *poly) {
@@ -166,7 +197,7 @@ void IBMSolver_set_obstacle(IBMSolver *solver, Polyhedron *poly) {
         poly,
         Nx+2, Ny+2, Nz+2,
         solver->xc, solver->yc, solver->zc,
-        lvset, .5
+        lvset, .2
     );
 
     /* Calculate flag.
@@ -182,26 +213,16 @@ void IBMSolver_set_obstacle(IBMSolver *solver, Polyhedron *poly) {
             bool is_ghost_cell = false;
             for (int l = 0; l < 6; l++) {
                 int ni = i + adj[l][0], nj = j + adj[l][1], nk = k + adj[l][2];
-                if (
-                    1 <= ni && ni <= Nx
-                    && 1 <= nj && nj <= Ny
-                    && 1 <= nk && nk <= Nz
-                ) {
-                    is_ghost_cell = is_ghost_cell || (lvset[ni][nj][nk] > 0);
-                }
+                is_ghost_cell = is_ghost_cell || (lvset[ni][nj][nk] > 0);
             }
             flag[i][j][k] = is_ghost_cell ? 2 : 0;
         }
     }
 
-    printf("set obstacle done\n");
-
     /* Build HYPRE variables. */
     build_hypre(solver, lvset);
 
     free(lvset);
-
-    printf("hypre done\n");
 }
 
 void IBMSolver_init_flow_const(IBMSolver *solver) {
@@ -232,7 +253,7 @@ void IBMSolver_init_flow_file(
     IBMSolver *solver,
     FILE *fp_u1, FILE *fp_u2, FILE *fp_u3, FILE *fp_p
 ) {
-    const int Nx = solver->Nx;
+    const int Nx = solver->Nx_global;
     const int Ny = solver->Ny;
     const int Nz = solver->Nz;
 
@@ -248,7 +269,7 @@ void IBMSolver_export_results(
     IBMSolver *solver,
     FILE *fp_u1, FILE *fp_u2, FILE *fp_u3, FILE *fp_p
 ) {
-    const int Nx = solver->Nx;
+    const int Nx = solver->Nx_global;
     const int Ny = solver->Ny;
     const int Nz = solver->Nz;
 
@@ -262,7 +283,9 @@ static void alloc_arrays(IBMSolver *solver) {
     const int Nx = solver->Nx;
     const int Ny = solver->Ny;
     const int Nz = solver->Nz;
+    const int Nx_global = solver->Nx_global;
 
+    /* dx and xc contains global info. */
     solver->dx = calloc(Nx+2, sizeof(double));
     solver->dy = calloc(Ny+2, sizeof(double));
     solver->dz = calloc(Nz+2, sizeof(double));
@@ -270,7 +293,11 @@ static void alloc_arrays(IBMSolver *solver) {
     solver->yc = calloc(Ny+2, sizeof(double));
     solver->zc = calloc(Nz+2, sizeof(double));
 
-    solver->flag = calloc(Nx+2, sizeof(int [Ny+2][Nz+2]));
+    solver->dx_global = calloc(Nx_global+2, sizeof(double));
+    solver->xc_global = calloc(Nx_global+2, sizeof(double));
+
+    /* Others contain only local info. */
+    solver->flag = calloc(Nx_global+2, sizeof(int [Ny+2][Nz+2]));
 
     solver->u1       = calloc(Nx+2, sizeof(double [Ny+2][Nz+2]));
     solver->u1_next  = calloc(Nx+2, sizeof(double [Ny+2][Nz+2]));
@@ -333,11 +360,21 @@ static void build_hypre(IBMSolver *solver, const double3d _lvset) {
     HYPRE_IJMatrixGetObject(solver->A_p, (void **)&solver->parcsr_A_p);
 
     /* Vectors. */
-    HYPRE_IJVectorCreate(MPI_COMM_WORLD, 1, Nx*Ny*Nz, &solver->b);
+    HYPRE_IJVectorCreate(
+        MPI_COMM_WORLD,
+        GLOB_CELL_IDX(1, 1, 1),
+        GLOB_CELL_IDX(Nx, Ny, Nz),
+        &solver->b
+    );
     HYPRE_IJVectorSetObjectType(solver->b, HYPRE_PARCSR);
     HYPRE_IJVectorInitialize(solver->b);
 
-    HYPRE_IJVectorCreate(MPI_COMM_WORLD, 1, Nx*Ny*Nz, &solver->x);
+    HYPRE_IJVectorCreate(
+        MPI_COMM_WORLD,
+        GLOB_CELL_IDX(1, 1, 1),
+        GLOB_CELL_IDX(Nx, Ny, Nz),
+        &solver->x
+    );
     HYPRE_IJVectorSetObjectType(solver->x, HYPRE_PARCSR);
     HYPRE_IJVectorInitialize(solver->x);
 
@@ -347,7 +384,7 @@ static void build_hypre(IBMSolver *solver, const double3d _lvset) {
     solver->vector_res = calloc(Nx*Ny*Nz, sizeof(double));
 
     for (int i = 0; i < Nx*Ny*Nz; i++) {
-        solver->vector_rows[i] = i+1;
+        solver->vector_rows[i] = GLOB_CELL_IDX(1, 1, 1) + i;
     }
 
     /* Solvers. */
@@ -378,6 +415,7 @@ static HYPRE_IJMatrix create_matrix(IBMSolver *solver, const double3d _lvset, in
     const int Nx = solver->Nx;
     const int Ny = solver->Ny;
     const int Nz = solver->Nz;
+    const int Nx_global = solver->Nx_global;
 
     const double *kx_W = solver->kx_W;
     const double *kx_E = solver->kx_E;
@@ -393,12 +431,16 @@ static HYPRE_IJMatrix create_matrix(IBMSolver *solver, const double3d _lvset, in
 
     HYPRE_IJMatrix A;
 
-    HYPRE_IJMatrixCreate(MPI_COMM_WORLD, 1, Nx*Ny*Nz, 1, Nx*Ny*Nz, &A);
+    HYPRE_IJMatrixCreate(
+        MPI_COMM_WORLD,
+        GLOB_CELL_IDX(1, 1, 1), GLOB_CELL_IDX(Nx, Ny, Nz),
+        1, Nx_global*Ny*Nz,
+        &A);
     HYPRE_IJMatrixSetObjectType(A, HYPRE_PARCSR);
     HYPRE_IJMatrixInitialize(A);
 
     FOR_ALL_CELL (i, j, k) {
-        int cur_idx = IDXFLAT(i, j, k);
+        int cur_idx = GLOB_CELL_IDX(i, j, k);
         int ncols;
         int cols[9];
         double values[9];
@@ -407,7 +449,7 @@ static HYPRE_IJMatrix create_matrix(IBMSolver *solver, const double3d _lvset, in
         if (flag[i][j][k] != 2) {
             cols[0] = cur_idx;
             for (int l = 0; l < 6; l++) {
-                cols[l+1] = IDXFLAT(i+adj[l][0], j+adj[l][1], k+adj[l][2]);
+                cols[l+1] = GLOB_CELL_IDX(i+adj[l][0], j+adj[l][1], k+adj[l][2]);
             }
             if (type != 4) {
                 values[0] = 1+ky_N[j]+kx_E[i]+ky_S[j]+kx_W[i]+kz_D[k]+kz_U[k];
@@ -422,12 +464,27 @@ static HYPRE_IJMatrix create_matrix(IBMSolver *solver, const double3d _lvset, in
             values[5] = -kz_D[k];
             values[6] = -kz_U[k];
 
+            // if (isinf(values[0]) && type == 1 && solver->rank == 0)
+            //     printf("0 %d %d %d\n", i, j, k);
+            // if (isinf(values[1]) && type == 1 && solver->rank == 0)
+            //     printf("1 %d %d %d\n", i, j, k);
+            // if (isinf(values[2]) && type == 1 && solver->rank == 0)
+            //     printf("2 %d %d %d\n", i, j, k);
+            // if (isinf(values[3]) && type == 1 && solver->rank == 0)
+            //     printf("3 %d %d %d\n", i, j, k);
+            // if (isinf(values[4]) && type == 1 && solver->rank == 0)
+            //     printf("4 %d %d %d\n", i, j, k);
+            // if (isinf(values[5]) && type == 1 && solver->rank == 0)
+            //     printf("5 %d %d %d\n", i, j, k);
+            // if (isinf(values[6]) && type == 1 && solver->rank == 0)
+            //     printf("6 %d %d %d\n", i, j, k);
+
             /* West (i = 1) => velocity inlet.
                 * u1[0][j][k] + u1[1][j][k] = 2
                 * u2[0][j][k] + u2[1][j][k] = 0
                 * u3[0][j][k] + u3[1][j][k] = 0
                 * p[0][j][k] = p[1][j][k] */
-            if (i == 1) {
+            if (LOCL_TO_GLOB(i) == 1) {
                 if (type == 4) {
                     values[0] -= kx_W[i];
                 }
@@ -441,7 +498,7 @@ static HYPRE_IJMatrix create_matrix(IBMSolver *solver, const double3d _lvset, in
                 * u1[Nx+1][j][k] is linearly extrapolated using u1[Nx-1][j][k] and
                     u1[Nx][j][k]. Same for u2 and u3.
                 * p[Nx+1][j][k] + p[Nx][j][k] = 0 */
-            if (i == Nx) {
+            if (LOCL_TO_GLOB(i) == Nx_global) {
                 if (type == 4) {
                     values[0] += kx_E[i];
                 }
@@ -596,13 +653,14 @@ static void get_interp_info(
     const int i, const int j, const int k,
     int *restrict interp_idx, double *restrict interp_coeff
 ) {
-    const int Nx = solver->Nx;
     const int Ny = solver->Ny;
     const int Nz = solver->Nz;
+    const int Nx_global = solver->Nx_global;
 
     const double *xc = solver->xc;
     const double *yc = solver->yc;
     const double *zc = solver->zc;
+    const double *xc_global = solver->xc_global;
 
     const double (*lvset)[Ny+2][Nz+2] = _lvset;
 
@@ -612,14 +670,17 @@ static void get_interp_info(
     n.y = (lvset[i][j+1][k] - lvset[i][j-1][k]) / (yc[j+1] - yc[j-1]);
     n.z = (lvset[i][j][k+1] - lvset[i][j][k-1]) / (zc[k+1] - zc[k-1]);
 
-    m = Vector_lincom(1, (Vector){xc[i], yc[j], zc[k]}, -2*lvset[i][j][k], n);
+    m = Vector_lincom(
+        1, (Vector){xc[i], yc[j], zc[k]},
+        -2*lvset[i][j][k], n
+    );
 
-    const int im = upper_bound(Nx+2, xc, m.x) - 1;
+    const int im = GLOB_TO_LOCL(upper_bound(Nx_global+2, xc_global, m.x) - 1);
     const int jm = upper_bound(Ny+2, yc, m.y) - 1;
     const int km = upper_bound(Nz+2, zc, m.z) - 1;
 
     /* Order of cells:
-            011          111
+            011        111
              +----------+
         001 /|     101 /|          z
            +----------+ |          | y
@@ -629,14 +690,14 @@ static void get_interp_info(
            +----------+
           000        100
     */
-    interp_idx[0] = IDXFLAT(im  , jm  , km  );
-    interp_idx[1] = IDXFLAT(im  , jm  , km+1);
-    interp_idx[2] = IDXFLAT(im  , jm+1, km  );
-    interp_idx[3] = IDXFLAT(im  , jm+1, km+1);
-    interp_idx[4] = IDXFLAT(im+1, jm  , km  );
-    interp_idx[5] = IDXFLAT(im+1, jm  , km+1);
-    interp_idx[6] = IDXFLAT(im+1, jm+1, km  );
-    interp_idx[7] = IDXFLAT(im+1, jm+1, km+1);
+    interp_idx[0] = GLOB_CELL_IDX(im  , jm  , km  );
+    interp_idx[1] = GLOB_CELL_IDX(im  , jm  , km+1);
+    interp_idx[2] = GLOB_CELL_IDX(im  , jm+1, km  );
+    interp_idx[3] = GLOB_CELL_IDX(im  , jm+1, km+1);
+    interp_idx[4] = GLOB_CELL_IDX(im+1, jm  , km  );
+    interp_idx[5] = GLOB_CELL_IDX(im+1, jm  , km+1);
+    interp_idx[6] = GLOB_CELL_IDX(im+1, jm+1, km  );
+    interp_idx[7] = GLOB_CELL_IDX(im+1, jm+1, km+1);
 
     const double xl = xc[im], xu = xc[im+1];
     const double yl = yc[jm], yu = yc[jm+1];

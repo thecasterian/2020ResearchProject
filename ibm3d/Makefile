@@ -28,10 +28,10 @@ $(TARGET): main.c ibm3d.a geo3d.o
 ibm3d.a: ibm3d_setup.o ibm3d_fracstep.o
 	ar rcs $@ $^
 
-ibm3d_setup.o: ibm3d_setup.c ibm3d.h
+ibm3d_setup.o: ibm3d_setup.c ibm3d_setup.h
 	$(CC) $(INCLUDE) -c $< $(LDLIBS) $(CFLAGS)
 
-ibm3d_fracstep.o: ibm3d_fracstep.c ibm3d.h
+ibm3d_fracstep.o: ibm3d_fracstep.c ibm3d_fracstep.h
 	$(CC) $(INCLUDE) -c $< $(LDLIBS) $(CFLAGS)
 
 geo3d.o: geo3d.h geo3d.c
