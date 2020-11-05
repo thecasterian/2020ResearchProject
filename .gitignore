@@ -13,6 +13,7 @@
 # ignore txt and output file
 *.txt
 *.out
+*.00*
 
 # ignore latex files
 *.aux
