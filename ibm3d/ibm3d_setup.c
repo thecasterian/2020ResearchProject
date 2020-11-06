@@ -90,6 +90,8 @@ void IBMSolver_destroy(IBMSolver *solver) {
 
     HYPRE_ParCSRBiCGSTABDestroy(solver->hypre_solver);
     HYPRE_BoomerAMGDestroy(solver->precond);
+    HYPRE_ParCSRBiCGSTABDestroy(solver->hypre_solver_p);
+    HYPRE_BoomerAMGDestroy(solver->precond_p);
 
     free(solver);
 }
@@ -452,6 +454,12 @@ static void build_hypre(IBMSolver *solver, const double3d _lvset) {
     HYPRE_BiCGSTABSetLogging(solver->hypre_solver, 1);
     // HYPRE_BiCGSTABSetPrintLevel(solver->hypre_solver, 2);
 
+    HYPRE_ParCSRBiCGSTABCreate(MPI_COMM_WORLD, &solver->hypre_solver_p);
+    HYPRE_BiCGSTABSetMaxIter(solver->hypre_solver_p, 1000);
+    HYPRE_BiCGSTABSetTol(solver->hypre_solver_p, 1e-6);
+    HYPRE_BiCGSTABSetLogging(solver->hypre_solver_p, 1);
+    HYPRE_BiCGSTABSetPrintLevel(solver->hypre_solver_p, 2);
+
     HYPRE_BoomerAMGCreate(&solver->precond);
     HYPRE_BoomerAMGSetCoarsenType(solver->precond, 6);
     HYPRE_BoomerAMGSetOldDefault(solver->precond);
@@ -461,12 +469,41 @@ static void build_hypre(IBMSolver *solver, const double3d _lvset) {
     HYPRE_BoomerAMGSetMaxIter(solver->precond, 1);
     // HYPRE_BoomerAMGSetPrintLevel(solver->precond, 1);
 
+    HYPRE_BoomerAMGCreate(&solver->precond_p);
+    HYPRE_BoomerAMGSetCoarsenType(solver->precond_p, 6);
+    HYPRE_BoomerAMGSetOldDefault(solver->precond_p);
+    HYPRE_BoomerAMGSetRelaxType(solver->precond_p, 6);
+    HYPRE_BoomerAMGSetNumSweeps(solver->precond_p, 1);
+    HYPRE_BoomerAMGSetTol(solver->precond_p, 0);
+    HYPRE_BoomerAMGSetMaxIter(solver->precond_p, 1);
+    // HYPRE_BoomerAMGSetPrintLevel(solver->precond_p, 1);
+
     HYPRE_BiCGSTABSetPrecond(
         solver->hypre_solver,
         (HYPRE_PtrToSolverFcn)HYPRE_BoomerAMGSolve,
         (HYPRE_PtrToSolverFcn)HYPRE_BoomerAMGSetup,
         solver->precond
     );
+
+    HYPRE_BiCGSTABSetPrecond(
+        solver->hypre_solver_p,
+        (HYPRE_PtrToSolverFcn)HYPRE_BoomerAMGSolve,
+        (HYPRE_PtrToSolverFcn)HYPRE_BoomerAMGSetup,
+        solver->precond_p
+    );
+
+    HYPRE_IJVectorSetValues(solver->b, Nx*Ny*Nz, solver->vector_rows, solver->vector_zeros);
+    HYPRE_IJVectorSetValues(solver->x, Nx*Ny*Nz, solver->vector_rows, solver->vector_zeros);
+
+    HYPRE_IJVectorAssemble(solver->b);
+    HYPRE_IJVectorAssemble(solver->x);
+
+    HYPRE_IJVectorGetObject(solver->b, (void **)&solver->par_b);
+    HYPRE_IJVectorGetObject(solver->x, (void **)&solver->par_x);
+
+    HYPRE_ParCSRBiCGSTABSetup(solver->hypre_solver_p, solver->parcsr_A_p, solver->par_b, solver->par_x);
+
+    MPI_Barrier(MPI_COMM_WORLD);
 }
 
 static HYPRE_IJMatrix create_matrix(IBMSolver *solver, const double3d _lvset, int type) {

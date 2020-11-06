@@ -67,6 +67,7 @@ typedef struct _ibm_solver {
     HYPRE_ParVector    par_b, par_x;
 
     HYPRE_Solver hypre_solver, precond;
+    HYPRE_Solver hypre_solver_p, precond_p;
 
     int *vector_rows;
     double *vector_values, *vector_zeros, *vector_res;
