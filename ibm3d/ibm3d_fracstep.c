@@ -27,7 +27,7 @@ void IBMSolver_iterate(IBMSolver *solver, int num_time_steps, bool verbose) {
 
     for (int i = 1; i <= num_time_steps; i++) {
         calc_N(solver);
-        calc_u_star(solver, &final_norm_u1, &final_norm_u2, &final_norm_u3); break;
+        calc_u_star(solver, &final_norm_u1, &final_norm_u2, &final_norm_u3);
         calc_u_tilde(solver);
         calc_U_star(solver);
         calc_p_prime(solver, &final_norm_p);
@@ -502,10 +502,10 @@ static inline void update_next(IBMSolver *solver) {
     const double *const yc = solver->yc;
     const double *const zc = solver->zc;
 
-    double (*const u1)[Ny+2][Nz+2] = solver->u1;
-    double (*const u2)[Ny+2][Nz+2] = solver->u2;
-    double (*const u3)[Ny+2][Nz+2] = solver->u3;
-    double (*const p)[Ny+2][Nz+2] = solver->p;
+    double (*u1)[Ny+2][Nz+2] = solver->u1;
+    double (*u2)[Ny+2][Nz+2] = solver->u2;
+    double (*u3)[Ny+2][Nz+2] = solver->u3;
+    double (*p)[Ny+2][Nz+2] = solver->p;
 
     const double (*const u1_star)[Ny+2][Nz+2] = solver->u1_star;
     const double (*const u2_star)[Ny+2][Nz+2] = solver->u2_star;
@@ -629,6 +629,11 @@ static inline void update_next(IBMSolver *solver) {
     SWAP(solver->N1_prev, solver->N1);
     SWAP(solver->N2_prev, solver->N2);
     SWAP(solver->N3_prev, solver->N3);
+
+    u1 = solver->u1;
+    u2 = solver->u2;
+    u3 = solver->u3;
+    p = solver->p;
 
     /* Exchange u1, u2, u3, and p between the adjacent processes. */
     if (solver->rank != solver->num_process-1) {

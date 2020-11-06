@@ -19,7 +19,9 @@ all: $(TARGET)
 
 clean:
 	rm -f $(TARGET)
-	rm -f ibm3d.o
+	rm -f ibm3d.a
+	rm -f ibm3d_setup.o
+	rm -f ibm3d_fracstep.o
 	rm -f geo3d.o
 
 $(TARGET): main.c ibm3d.a geo3d.o

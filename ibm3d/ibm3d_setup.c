@@ -3,8 +3,6 @@
 #include "geo3d.h"
 #include "utils.h"
 
-#include "math.h"
-
 /* Index of adjacent cells in 3-d cartesian coordinate */
 static const int adj[6][3] = {
     {0, 1, 0}, {1, 0, 0}, {0, -1, 0}, {-1, 0, 0}, {0, 0, -1}, {0, 0, 1}
@@ -118,6 +116,11 @@ void IBMSolver_set_grid_params(
     alloc_arrays(solver);
 
     /* Cell widths and centroid coordinates. */
+    for (int i = 1; i <= Nx_global; i++) {
+        solver->dx_global[i] = xf[i] - xf[i-1];
+        solver->xc_global[i] = (xf[i] + xf[i-1]) / 2;
+    }
+
     for (int i = 1; i <= Nx; i++) {
         solver->dx[i] = xf[LOCL_TO_GLOB(i)] - xf[LOCL_TO_GLOB(i)-1];
         solver->xc[i] = (xf[LOCL_TO_GLOB(i)] + xf[LOCL_TO_GLOB(i)-1]) / 2;
@@ -131,43 +134,25 @@ void IBMSolver_set_grid_params(
         solver->zc[k] = (zf[k] + zf[k-1]) / 2;
     }
 
-    for (int i = 1; i <= Nx; i++) {
-        solver->dx_global[i] = xf[i] - xf[i-1];
-        solver->xc_global[i] = (xf[i] + xf[i-1]) / 2;
-    }
-
     /* Ghost cells */
-    solver->dx[0]
-        = ilower == 1
-        ? solver->dx[1]
-        : xf[LOCL_TO_GLOB(0)] - xf[LOCL_TO_GLOB(0)-1];
-    solver->dx[Nx+1]
-        = iupper == Nx_global
-        ? solver->dx[Nx]
-        : xf[LOCL_TO_GLOB(Nx+1)] - xf[LOCL_TO_GLOB(Nx+1)-1];
+    solver->dx_global[0] = solver->dx_global[1];
+    solver->dx_global[Nx+1] = solver->dx_global[Nx];
+    solver->xc_global[0] = 2*xf[0] - solver->xc_global[1];
+    solver->xc_global[Nx_global+1] = 2*xf[Nx_global] - solver->xc_global[Nx_global];
+
+    solver->dx[0] = solver->dx_global[ilower-1];
+    solver->dx[Nx+1] = solver->dx_global[iupper+1];
     solver->dy[0] = solver->dy[1];
     solver->dy[Ny+1] = solver->dy[Ny];
     solver->dz[0] = solver->dz[1];
     solver->dz[Nz+1] = solver->dz[Nz];
 
-    solver->dx_global[0] = solver->dx_global[1];
-    solver->dx_global[Nx+1] = solver->dx_global[Nx];
-
-    solver->xc[0]
-        = ilower == 1
-        ? 2*xf[0] - solver->xc[1]
-        : (xf[LOCL_TO_GLOB(0)] + xf[LOCL_TO_GLOB(0)-1]) / 2;
-    solver->xc[Nx+1]
-        = iupper == Nx_global
-        ? 2*xf[Nx_global] - solver->xc[Nx]
-        : (xf[LOCL_TO_GLOB(Nx+1)] + xf[LOCL_TO_GLOB(Nx+1)-1]) / 2;
+    solver->xc[0] = solver->xc_global[ilower-1];
+    solver->xc[Nx+1] = solver->xc_global[iupper+1];
     solver->yc[0] = 2*yf[0] - solver->yc[1];
     solver->yc[Ny+1] = 2*yf[Ny] - solver->yc[Ny];
     solver->zc[0] = 2*zf[0] - solver->zc[1];
     solver->zc[Nz+1] = 2*zf[Nz] - solver->zc[Nz];
-
-    solver->xc_global[0] = 2*xf[0] - solver->xc_global[1];
-    solver->xc_global[Nx_global+1] = 2*xf[Nx_global] - solver->xc_global[Nx_global];
 
     /* Calculate second order derivative coefficients */
     for (int i = 1; i <= Nx; i++) {
@@ -251,32 +236,105 @@ void IBMSolver_init_flow_const(IBMSolver *solver) {
 
 void IBMSolver_init_flow_file(
     IBMSolver *solver,
-    FILE *fp_u1, FILE *fp_u2, FILE *fp_u3, FILE *fp_p
+    const char *filename_u1,
+    const char *filename_u2,
+    const char *filename_u3,
+    const char *filename_p
 ) {
-    const int Nx = solver->Nx_global;
+    const int Nx = solver->Nx;
     const int Ny = solver->Ny;
     const int Nz = solver->Nz;
+
+    FILE *fp_u1 = fopen_check(filename_u1, "rb");
+    FILE *fp_u2 = fopen_check(filename_u2, "rb");
+    FILE *fp_u3 = fopen_check(filename_u3, "rb");
+    FILE *fp_p = fopen_check(filename_p, "rb");
+
+    fseek(fp_u1, sizeof(double)*(solver->ilower-1)*(Ny+2)*(Nz+2), SEEK_SET);
+    fseek(fp_u2, sizeof(double)*(solver->ilower-1)*(Ny+2)*(Nz+2), SEEK_SET);
+    fseek(fp_u3, sizeof(double)*(solver->ilower-1)*(Ny+2)*(Nz+2), SEEK_SET);
+    fseek(fp_p, sizeof(double)*(solver->ilower-1)*(Ny+2)*(Nz+2), SEEK_SET);
 
     fread(solver->u1, sizeof(double), (Nx+2)*(Ny+2)*(Nz+2), fp_u1);
     fread(solver->u2, sizeof(double), (Nx+2)*(Ny+2)*(Nz+2), fp_u2);
     fread(solver->u3, sizeof(double), (Nx+2)*(Ny+2)*(Nz+2), fp_u3);
     fread(solver->p, sizeof(double), (Nx+2)*(Ny+2)*(Nz+2), fp_p);
 
+    fclose(fp_u1);
+    fclose(fp_u2);
+    fclose(fp_u3);
+    fclose(fp_p);
+
     interp_stag_vel(solver);
 }
 
 void IBMSolver_export_results(
     IBMSolver *solver,
-    FILE *fp_u1, FILE *fp_u2, FILE *fp_u3, FILE *fp_p
+    const char *filename_u1,
+    const char *filename_u2,
+    const char *filename_u3,
+    const char *filename_p
 ) {
-    const int Nx = solver->Nx_global;
+    const int Nx = solver->Nx;
     const int Ny = solver->Ny;
     const int Nz = solver->Nz;
+    const int Nx_global = solver->Nx_global;
 
-    fwrite(solver->u1, sizeof(double), (Nx+2)*(Ny+2)*(Nz+2), fp_u1);
-    fwrite(solver->u2, sizeof(double), (Nx+2)*(Ny+2)*(Nz+2), fp_u2);
-    fwrite(solver->u3, sizeof(double), (Nx+2)*(Ny+2)*(Nz+2), fp_u3);
-    fwrite(solver->p, sizeof(double), (Nx+2)*(Ny+2)*(Nz+2), fp_p);
+    const double (*const u1)[Ny+2][Nz+2] = solver->u1;
+    const double (*const u2)[Ny+2][Nz+2] = solver->u2;
+    const double (*const u3)[Ny+2][Nz+2] = solver->u3;
+    const double (*const p)[Ny+2][Nz+2] = solver->p;
+
+    if (solver->rank == 0) {
+        double (*const u1_global)[Ny+2][Nz+2] = calloc(Nx_global+2, sizeof(double [Ny+2][Nz+2]));
+        double (*const u2_global)[Ny+2][Nz+2] = calloc(Nx_global+2, sizeof(double [Ny+2][Nz+2]));
+        double (*const u3_global)[Ny+2][Nz+2] = calloc(Nx_global+2, sizeof(double [Ny+2][Nz+2]));
+        double (*const p_global)[Ny+2][Nz+2] = calloc(Nx_global+2, sizeof(double [Ny+2][Nz+2]));
+
+        memcpy(u1_global, u1, sizeof(double)*(Nx+2)*(Ny+2)*(Nz+2));
+        memcpy(u2_global, u2, sizeof(double)*(Nx+2)*(Ny+2)*(Nz+2));
+        memcpy(u3_global, u3, sizeof(double)*(Nx+2)*(Ny+2)*(Nz+2));
+        memcpy(p_global, p, sizeof(double)*(Nx+2)*(Ny+2)*(Nz+2));
+
+        /* Receive from other processes. */
+        for (int r = 1; r < solver->num_process; r++) {
+            const int ilower_r = r * Nx_global / solver->num_process + 1;
+            const int iupper_r = (r+1) * Nx_global / solver->num_process;
+            const int Nx_r = iupper_r - ilower_r + 1;
+
+            MPI_Recv(u1_global[ilower_r], (Nx_r+1)*(Ny+2)*(Nz+2), MPI_DOUBLE, r, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            MPI_Recv(u2_global[ilower_r], (Nx_r+1)*(Ny+2)*(Nz+2), MPI_DOUBLE, r, 1, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            MPI_Recv(u3_global[ilower_r], (Nx_r+1)*(Ny+2)*(Nz+2), MPI_DOUBLE, r, 2, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            MPI_Recv(p_global[ilower_r], (Nx_r+1)*(Ny+2)*(Nz+2), MPI_DOUBLE, r, 3, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        }
+
+        FILE *fp_u1 = fopen(filename_u1, "wb");
+        FILE *fp_u2 = fopen(filename_u2, "wb");
+        FILE *fp_u3 = fopen(filename_u3, "wb");
+        FILE *fp_p = fopen(filename_p, "wb");
+
+        fwrite(u1_global, sizeof(double), (Nx_global+2)*(Ny+2)*(Nz+2), fp_u1);
+        fwrite(u2_global, sizeof(double), (Nx_global+2)*(Ny+2)*(Nz+2), fp_u2);
+        fwrite(u3_global, sizeof(double), (Nx_global+2)*(Ny+2)*(Nz+2), fp_u3);
+        fwrite(p_global, sizeof(double), (Nx_global+2)*(Ny+2)*(Nz+2), fp_p);
+
+        fclose(fp_u1);
+        fclose(fp_u2);
+        fclose(fp_u3);
+        fclose(fp_p);
+
+        free(u1_global);
+        free(u2_global);
+        free(u3_global);
+        free(p_global);
+    }
+    else {
+        /* Send to process 0. */
+        MPI_Send(u1[1], (Nx+1)*(Ny+2)*(Nz+2), MPI_DOUBLE, 0, 0, MPI_COMM_WORLD);
+        MPI_Send(u2[1], (Nx+1)*(Ny+2)*(Nz+2), MPI_DOUBLE, 0, 1, MPI_COMM_WORLD);
+        MPI_Send(u3[1], (Nx+1)*(Ny+2)*(Nz+2), MPI_DOUBLE, 0, 2, MPI_COMM_WORLD);
+        MPI_Send(p[1], (Nx+1)*(Ny+2)*(Nz+2), MPI_DOUBLE, 0, 3, MPI_COMM_WORLD);
+    }
 }
 
 static void alloc_arrays(IBMSolver *solver) {
@@ -389,10 +447,10 @@ static void build_hypre(IBMSolver *solver, const double3d _lvset) {
 
     /* Solvers. */
     HYPRE_ParCSRBiCGSTABCreate(MPI_COMM_WORLD, &solver->hypre_solver);
-    HYPRE_ParCSRBiCGSTABSetLogging(solver->hypre_solver, 1);
     HYPRE_BiCGSTABSetMaxIter(solver->hypre_solver, 1000);
     HYPRE_BiCGSTABSetTol(solver->hypre_solver, 1e-6);
-    // HYPRE_BiCGSTABSetPrintLevel(solver_u1, 2);
+    HYPRE_BiCGSTABSetLogging(solver->hypre_solver, 1);
+    // HYPRE_BiCGSTABSetPrintLevel(solver->hypre_solver, 2);
 
     HYPRE_BoomerAMGCreate(&solver->precond);
     HYPRE_BoomerAMGSetCoarsenType(solver->precond, 6);
@@ -401,7 +459,7 @@ static void build_hypre(IBMSolver *solver, const double3d _lvset) {
     HYPRE_BoomerAMGSetNumSweeps(solver->precond, 1);
     HYPRE_BoomerAMGSetTol(solver->precond, 0);
     HYPRE_BoomerAMGSetMaxIter(solver->precond, 1);
-    // HYPRE_BoomerAMGSetPrintLevel(precond, 2);
+    // HYPRE_BoomerAMGSetPrintLevel(solver->precond, 1);
 
     HYPRE_BiCGSTABSetPrecond(
         solver->hypre_solver,
@@ -434,7 +492,7 @@ static HYPRE_IJMatrix create_matrix(IBMSolver *solver, const double3d _lvset, in
     HYPRE_IJMatrixCreate(
         MPI_COMM_WORLD,
         GLOB_CELL_IDX(1, 1, 1), GLOB_CELL_IDX(Nx, Ny, Nz),
-        1, Nx_global*Ny*Nz,
+        GLOB_CELL_IDX(1, 1, 1), GLOB_CELL_IDX(Nx, Ny, Nz),
         &A);
     HYPRE_IJMatrixSetObjectType(A, HYPRE_PARCSR);
     HYPRE_IJMatrixInitialize(A);
@@ -451,12 +509,7 @@ static HYPRE_IJMatrix create_matrix(IBMSolver *solver, const double3d _lvset, in
             for (int l = 0; l < 6; l++) {
                 cols[l+1] = GLOB_CELL_IDX(i+adj[l][0], j+adj[l][1], k+adj[l][2]);
             }
-            if (type != 4) {
-                values[0] = 1+ky_N[j]+kx_E[i]+ky_S[j]+kx_W[i]+kz_D[k]+kz_U[k];
-            }
-            else {
-                values[0] = ky_N[j]+kx_E[i]+ky_S[j]+kx_W[i]+kz_D[k]+kz_U[k];
-            }
+            values[0] = 1+ky_N[j]+kx_E[i]+ky_S[j]+kx_W[i]+kz_D[k]+kz_U[k];
             values[1] = -ky_N[j];
             values[2] = -kx_E[i];
             values[3] = -ky_S[j];
@@ -464,20 +517,9 @@ static HYPRE_IJMatrix create_matrix(IBMSolver *solver, const double3d _lvset, in
             values[5] = -kz_D[k];
             values[6] = -kz_U[k];
 
-            // if (isinf(values[0]) && type == 1 && solver->rank == 0)
-            //     printf("0 %d %d %d\n", i, j, k);
-            // if (isinf(values[1]) && type == 1 && solver->rank == 0)
-            //     printf("1 %d %d %d\n", i, j, k);
-            // if (isinf(values[2]) && type == 1 && solver->rank == 0)
-            //     printf("2 %d %d %d\n", i, j, k);
-            // if (isinf(values[3]) && type == 1 && solver->rank == 0)
-            //     printf("3 %d %d %d\n", i, j, k);
-            // if (isinf(values[4]) && type == 1 && solver->rank == 0)
-            //     printf("4 %d %d %d\n", i, j, k);
-            // if (isinf(values[5]) && type == 1 && solver->rank == 0)
-            //     printf("5 %d %d %d\n", i, j, k);
-            // if (isinf(values[6]) && type == 1 && solver->rank == 0)
-            //     printf("6 %d %d %d\n", i, j, k);
+            if (type == 4) {
+                values[0] -= 1;
+            }
 
             /* West (i = 1) => velocity inlet.
                 * u1[0][j][k] + u1[1][j][k] = 2
@@ -495,8 +537,8 @@ static HYPRE_IJMatrix create_matrix(IBMSolver *solver, const double3d _lvset, in
             }
 
             /* East (i = Nx) => pressure outlet.
-                * u1[Nx+1][j][k] is linearly extrapolated using u1[Nx-1][j][k] and
-                    u1[Nx][j][k]. Same for u2 and u3.
+                * u[Nx+1][j][k] is linearly extrapolated using u[Nx-1][j][k] and
+                  u[Nx][j][k] where u = u1, u2, or u3.
                 * p[Nx+1][j][k] + p[Nx][j][k] = 0 */
             if (LOCL_TO_GLOB(i) == Nx_global) {
                 if (type == 4) {
@@ -675,7 +717,7 @@ static void get_interp_info(
         -2*lvset[i][j][k], n
     );
 
-    const int im = GLOB_TO_LOCL(upper_bound(Nx_global+2, xc_global, m.x) - 1);
+    const int im = upper_bound(Nx_global+2, xc_global, m.x) - 1;
     const int jm = upper_bound(Ny+2, yc, m.y) - 1;
     const int km = upper_bound(Nz+2, zc, m.z) - 1;
 
@@ -690,16 +732,16 @@ static void get_interp_info(
            +----------+
           000        100
     */
-    interp_idx[0] = GLOB_CELL_IDX(im  , jm  , km  );
-    interp_idx[1] = GLOB_CELL_IDX(im  , jm  , km+1);
-    interp_idx[2] = GLOB_CELL_IDX(im  , jm+1, km  );
-    interp_idx[3] = GLOB_CELL_IDX(im  , jm+1, km+1);
-    interp_idx[4] = GLOB_CELL_IDX(im+1, jm  , km  );
-    interp_idx[5] = GLOB_CELL_IDX(im+1, jm  , km+1);
-    interp_idx[6] = GLOB_CELL_IDX(im+1, jm+1, km  );
-    interp_idx[7] = GLOB_CELL_IDX(im+1, jm+1, km+1);
+    interp_idx[0] = LOCL_CELL_IDX(im  , jm  , km  );
+    interp_idx[1] = LOCL_CELL_IDX(im  , jm  , km+1);
+    interp_idx[2] = LOCL_CELL_IDX(im  , jm+1, km  );
+    interp_idx[3] = LOCL_CELL_IDX(im  , jm+1, km+1);
+    interp_idx[4] = LOCL_CELL_IDX(im+1, jm  , km  );
+    interp_idx[5] = LOCL_CELL_IDX(im+1, jm  , km+1);
+    interp_idx[6] = LOCL_CELL_IDX(im+1, jm+1, km  );
+    interp_idx[7] = LOCL_CELL_IDX(im+1, jm+1, km+1);
 
-    const double xl = xc[im], xu = xc[im+1];
+    const double xl = xc_global[im], xu = xc_global[im+1];
     const double yl = yc[jm], yu = yc[jm+1];
     const double zl = zc[km], zu = zc[km+1];
     const double vol = (xu - xl) * (yu - yl) * (zu - zl);
@@ -731,13 +773,25 @@ static void interp_stag_vel(IBMSolver *solver) {
     double (*const U2)[Ny+1][Nz+2] = solver->U2;
     double (*const U3)[Ny+2][Nz+1] = solver->U3;
 
-    FOR_ALL_XSTAG (i, j, k) {
-        U1[i][j][k] = (u1[i][j][k]*dx[i+1] + u1[i+1][j][k]*dx[i]) / (dx[i]+dx[i+1]);
+    for (int i = 0; i <= Nx; i++) {
+        for (int j = 0; j <= Ny+1; j++) {
+            for (int k = 0; k <= Nz+1; k++) {
+                U1[i][j][k] = (u1[i][j][k]*dx[i+1] + u1[i+1][j][k]*dx[i]) / (dx[i]+dx[i+1]);
+            }
+        }
     }
-    FOR_ALL_YSTAG (i, j, k) {
+    for (int i = 0; i <= Nx+1; i++) {
+        for (int j = 0; j <= Ny; j++) {
+            for (int k = 0; k <= Nz+1; k++) {
         U2[i][j][k] = (u2[i][j][k]*dy[j+1] + u2[i][j+1][k]*dy[j]) / (dy[j]+dy[j+1]);
+            }
+        }
     }
-    FOR_ALL_ZSTAG (i, j, k) {
-        U3[i][j][k] = (u3[i][j][k]*dz[k+1] + u3[i][j][k+1]*dz[k]) / (dz[k]+dz[k+1]);
+    for (int i = 0; i <= Nx+1; i++) {
+        for (int j = 0; j <= Ny+1; j++) {
+            for (int k = 0; k <= Nz; k++) {
+                U3[i][j][k] = (u3[i][j][k]*dz[k+1] + u3[i][j][k+1]*dz[k]) / (dz[k]+dz[k+1]);
+            }
+        }
     }
 }

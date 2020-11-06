@@ -1,8 +1,8 @@
 /* Solve the following linear equation:
    [  1  2  5  1 |  0 ]
-   [  3 -4  0 -2 |  5 ]
+   [ -3  4  0  2 | -5 ]
    [  4  0  2 -1 |  1 ]
-   [  1 -2 -4 -3 | -4 ] */
+   [ -1  2  4  3 |  4 ] */
 
 #include <stdio.h>
 
@@ -72,7 +72,7 @@ int main(int argc, char *argv[]) {
            of non-zero elements in second row.  */
         int cols[7] = {1, 2, 3, 4, 1, 2, 4};
         /* The value of non-zero elements in the first row and second row. */
-        double values[7] = {1, 2, 5, 1, 3, -4, -2};
+        double values[7] = {1, 2, 5, 1, -3, 4, 2};
 
         HYPRE_IJMatrixSetValues(A, nrows, ncols, rows, cols, values);
     }
@@ -81,7 +81,7 @@ int main(int argc, char *argv[]) {
         int rows[2] = {3, 4};
         int ncols[2] = {3, 4};
         int cols[7] = {1, 3, 4, 1, 2, 3, 4};
-        double values[7] = {4, 2, -1, 1, -2, -4, -3};
+        double values[7] = {4, 2, -1, -1, 2, 4, 3};
         HYPRE_IJMatrixSetValues(A, nrows, ncols, rows, cols, values);
     }
 
@@ -108,7 +108,7 @@ int main(int argc, char *argv[]) {
         /* Process 0 has the first and second row. */
         int rows[2] = {1, 2};
         /* Value of elements in the first and second row. */
-        double b_values[2] = {0, 5};
+        double b_values[2] = {0, -5};
         double x_values[2] = {0, 0};
 
         HYPRE_IJVectorSetValues(b, nrows, rows, b_values);
@@ -117,7 +117,7 @@ int main(int argc, char *argv[]) {
     else {
         int nrows = 2;
         int rows[2] = {3, 4};
-        double b_values[2] = {1, -4};
+        double b_values[2] = {1, 4};
         double x_values[2] = {0, 0};
 
         HYPRE_IJVectorSetValues(b, nrows, rows, b_values);
@@ -130,22 +130,24 @@ int main(int argc, char *argv[]) {
     HYPRE_IJVectorGetObject(b, (void **)&par_b);
     HYPRE_IJVectorGetObject(x, (void **)&par_x);
 
-    /* Create solver. We will use BiCGSTAB solver here. */
-    HYPRE_ParCSRBiCGSTABCreate(MPI_COMM_WORLD, &solver);
+    /* Create solver. We will use PCG solver here. Note that PCG solver
+       requires that all diagonal elements of the matrix must be positive. */
+    HYPRE_ParCSRPCGCreate(MPI_COMM_WORLD, &solver);
 
     /* Set some solver parameters. */
-    HYPRE_BiCGSTABSetMaxIter(solver, 100);      /* Maximum iterations. */
-    HYPRE_BiCGSTABSetTol(solver, 1e-6);         /* Convergence criteria. */
-    HYPRE_ParCSRBiCGSTABSetLogging(solver, 1);  /* Log run info. */
-    HYPRE_BiCGSTABSetPrintLevel(solver, 2);     /* Print info every iteraion. */
+    HYPRE_PCGSetMaxIter(solver, 100);       /* Maximum iterations. */
+    HYPRE_PCGSetTol(solver, 1e-6);          /* Convergence criteria. */
+    HYPRE_PCGSetTwoNorm(solver, 1);         /* Use 2-norm. */
+    HYPRE_PCGSetLogging(solver, 1);         /* Log run info. */
+    HYPRE_PCGSetPrintLevel(solver, 2);      /* Print info every iteraion. */
 
     /* Setup and solve. */
-    HYPRE_ParCSRBiCGSTABSetup(solver, parcsr_A, par_b, par_x);
-    HYPRE_ParCSRBiCGSTABSolve(solver, parcsr_A, par_b, par_x);
+    HYPRE_ParCSRPCGSetup(solver, parcsr_A, par_b, par_x);
+    HYPRE_ParCSRPCGSolve(solver, parcsr_A, par_b, par_x);
 
     /* Get run info. */
-    HYPRE_BiCGSTABGetNumIterations(solver, &num_iteration);
-    HYPRE_BiCGSTABGetFinalRelativeResidualNorm(solver, &final_res);
+    HYPRE_PCGGetNumIterations(solver, &num_iteration);
+    HYPRE_PCGGetFinalRelativeResidualNorm(solver, &final_res);
     if (rank == 0) {
         printf("Iterations = %d\n", num_iteration);
         printf("Final Relative Residual Norm = %e\n", final_res);
@@ -155,7 +157,7 @@ int main(int argc, char *argv[]) {
     HYPRE_IJMatrixDestroy(A);
     HYPRE_IJVectorDestroy(b);
     HYPRE_IJVectorDestroy(x);
-    HYPRE_ParCSRBiCGSTABDestroy(solver);
+    HYPRE_ParCSRPCGDestroy(solver);
 
     /* Finalize. */
     HYPRE_Finalize();

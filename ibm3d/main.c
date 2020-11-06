@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdbool.h>
 
+#include "utils.h"
 #include "geo3d.h"
 #include "ibm3d.h"
 
@@ -63,9 +64,6 @@ int main(int argc, char **argv) {
     char output_file_u1[100], output_file_u2[100], output_file_u3[100];
     /* Name of pressure output file for result export */
     char output_file_p[100];
-
-    /* Import and export files. */
-    FILE *fp_u1, *fp_u2, *fp_u3, *fp_p;
 
     /*===== Read input file. =================================================*/
 
@@ -156,17 +154,10 @@ int main(int argc, char **argv) {
         IBMSolver_init_flow_const(solver);
     }
     else {
-        fp_u1 = fopen_check(init_file_u1, "rb");
-        fp_u2 = fopen_check(init_file_u2, "rb");
-        fp_u3 = fopen_check(init_file_u3, "rb");
-        fp_p = fopen_check(init_file_p, "rb");
-
-        IBMSolver_init_flow_file(solver, fp_u1, fp_u2, fp_u3, fp_p);
-
-        fclose(fp_u1);
-        fclose(fp_u2);
-        fclose(fp_u3);
-        fclose(fp_p);
+        IBMSolver_init_flow_file(
+            solver,
+            init_file_u1, init_file_u2, init_file_u3, init_file_p
+        );
     }
 
     if (rank == 0) {
@@ -179,17 +170,10 @@ int main(int argc, char **argv) {
 
     /*===== Export results. ==================================================*/
 
-    fp_u1 = fopen_check(output_file_u1, "wb");
-    fp_u2 = fopen_check(output_file_u2, "wb");
-    fp_u3 = fopen_check(output_file_u3, "wb");
-    fp_p = fopen_check(output_file_p, "wb");
-
-    IBMSolver_export_results(solver, fp_u1, fp_u2, fp_u3, fp_p);
-
-    fclose(fp_u1);
-    fclose(fp_u2);
-    fclose(fp_u3);
-    fclose(fp_p);
+    IBMSolver_export_results(
+        solver,
+        output_file_u1, output_file_u2, output_file_u3, output_file_p
+    );
 
     /*===== Free memory and finalize. ========================================*/
 
@@ -200,13 +184,4 @@ int main(int argc, char **argv) {
     MPI_Finalize();
 
     return 0;
-}
-
-static FILE *fopen_check(const char *restrict filename, const char *restrict modes) {
-    FILE *fp = fopen(filename, modes);
-    if (!fp) {
-        fprintf(stderr, "error: cannot open file \"%s\"\n", filename);
-        MPI_Abort(MPI_COMM_WORLD, -1);
-    }
-    return fp;
 }
