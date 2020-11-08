@@ -437,14 +437,14 @@ static inline void calc_p_prime(IBMSolver *solver, double *final_norm_p) {
     HYPRE_IJVectorGetObject(solver->b, (void **)&solver->par_b);
     HYPRE_IJVectorGetObject(solver->x, (void **)&solver->par_x);
 
-    HYPRE_ParCSRBiCGSTABSolve(solver->hypre_solver_p, solver->parcsr_A_p, solver->par_b, solver->par_x);
+    HYPRE_ParCSRGMRESSolve(solver->hypre_solver_p, solver->parcsr_A_p, solver->par_b, solver->par_x);
 
     HYPRE_IJVectorGetValues(solver->x, Nx*Ny*Nz, solver->vector_rows, solver->vector_res);
     FOR_ALL_CELL (i, j, k) {
         p_prime[i][j][k] = solver->vector_res[LOCL_CELL_IDX(i, j, k)-1];
     }
 
-    HYPRE_BiCGSTABGetFinalRelativeResidualNorm(solver->hypre_solver_p, final_norm_p);
+    HYPRE_ParCSRGMRESGetFinalRelativeResidualNorm(solver->hypre_solver_p, final_norm_p);
 
     if (solver->ilower == 1) {
         for (int j = 1; j <= Ny; j++) {
