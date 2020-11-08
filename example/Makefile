@@ -7,3 +7,14 @@ HYPRE = /usr/local/lib/libHYPRE.a
 
 IJsolver: IJsolver.c
 	$(CC) $(INCLUDE) $^ $(HYPRE) -o $@ $(LDLIBS) $(CFLAGS)
+
+ex5: ex5.c
+	$(CC) $(INCLUDE) $^ $(HYPRE) -o $@ $(LDLIBS) $(CFLAGS)
+
+ex3: ex3.c
+	$(CC) $(INCLUDE) $^ $(HYPRE) -o $@ $(LDLIBS) $(CFLAGS)
+
+clean:
+	rm -rf IJsolver
+	rm -rf ex5
+	rm -rf ex3
