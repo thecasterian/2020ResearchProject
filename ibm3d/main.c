@@ -140,8 +140,15 @@ int main(int argc, char **argv) {
     /*===== Set solver. ======================================================*/
 
     IBMSolver *solver = IBMSolver_new(num_process, rank);
+
     IBMSolver_set_grid_params(solver, Nx, Ny, Nz, xf, yf, zf, Re, dt);
+
+    IBMSolver_set_bc(solver, DIR_WEST, BC_VELOCITY_INLET, 1);
+    IBMSolver_set_bc(solver, DIR_EAST, BC_PRESSURE_OUTLET, 0);
+    IBMSolver_set_bc(solver, DIR_NORTH | DIR_SOUTH | DIR_DOWN | DIR_UP, BC_NO_SLIP_WALL, 0);
+
     IBMSolver_set_obstacle(solver, poly);
+
     IBMSolver_set_linear_solver(solver, SOLVER_BiCGSTAB, PRECOND_AMG);
 
     Polyhedron_destroy(poly);

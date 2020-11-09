@@ -21,7 +21,7 @@ static const int adj[6][3] = {
 
 static void alloc_arrays(IBMSolver *);
 static void build_hypre(IBMSolver *, const double3d);
-static HYPRE_IJMatrix create_matrix(IBMSolver *, const double3d, int type);
+static HYPRE_IJMatrix create_matrix(IBMSolver *, const double3d, int);
 static void get_interp_info(
     IBMSolver *, const double3d,
     const int, const int, const int,
@@ -193,13 +193,36 @@ void IBMSolver_set_grid_params(
     }
 }
 
+void IBMSolver_set_bc(
+    IBMSolver *solver,
+    IBMSolverDirection direction,
+    IBMSolverBCType bc_type,
+    double bc_val
+) {
+    for (int i = 0; i < 6; i++) {
+        if (bc_type & (1 << i)) {
+            solver->bc_type[i] = bc_type;
+            solver->bc_val[i] = bc_val;
+        }
+    }
+}
+
 void IBMSolver_set_obstacle(IBMSolver *solver, Polyhedron *poly) {
     const int Nx = solver->Nx;
     const int Ny = solver->Ny;
     const int Nz = solver->Nz;
 
-    double (*const lvset)[Ny+2][Nz+2] = calloc(Nx+2, sizeof(double [Ny+2][Nz+2]));
     int (*flag)[Ny+2][Nz+2] = solver->flag;
+
+    /* No obstacle: every cell is fluid cell. */
+    if (poly == NULL) {
+        FOR_ALL_CELL (i, j, k) {
+            flag[i][j][k] = 1;
+        }
+        return;
+    }
+
+    double (*const lvset)[Ny+2][Nz+2] = calloc(Nx+2, sizeof(double [Ny+2][Nz+2]));
 
     /* Calculate level set function. */
     Polyhedron_cpt(
@@ -689,19 +712,31 @@ static HYPRE_IJMatrix create_matrix(IBMSolver *solver, const double3d _lvset, in
                 values[0] -= 1;
             }
 
-            /* West (i = 1) => velocity inlet.
-                * u1[0][j][k] + u1[1][j][k] = 2
-                * u2[0][j][k] + u2[1][j][k] = 0
-                * u3[0][j][k] + u3[1][j][k] = 0
-                * p[0][j][k] = p[1][j][k] */
+            /* Boundary cells: a coefficient is added to values[0] for dirichlet
+               boundary condition and is subtracted from for neumann boundary
+               condition. Extrapolation is somewhat more complex. */
+
+            /* West (i = 1) */
             if (LOCL_TO_GLOB(i) == 1) {
-                if (type == 4) {
-                    values[0] -= kx_W[i];
-                }
-                else {
-                    values[0] += kx_W[i];
-                }
                 values[4] = 0;
+                switch (solver->bc_type[3]) {
+                case BC_VELOCITY_INLET:
+                case BC_STATIONARY_WALL:
+                    if (type != 4) {
+                        values[0] += kx_W[i];
+                    }
+                    else {
+                        values[0] -= kx_W[i];
+                    }
+                    break;
+                case BC_PRESSURE_OUTLET:
+                    // TODO:
+                    break;
+                case BC_NO_SLIP_WALL:
+                    if (type == 1) {
+                        values[0] += kx_W[i];
+                    }
+                }
             }
 
             /* East (i = Nx) => pressure outlet.

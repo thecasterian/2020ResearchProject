@@ -51,7 +51,7 @@ u1 = np.fromfile('u1.out').reshape((Nx+2, Ny+2, Nz+2))
 u2 = np.fromfile('u2.out').reshape((Nx+2, Ny+2, Nz+2))
 u3 = np.fromfile('u3.out').reshape((Nx+2, Ny+2, Nz+2))
 p = np.fromfile('p.out').reshape((Nx+2, Ny+2, Nz+2))
-# lvset = np.fromfile('lvset.out').reshape((Nx+2, Ny+2, Nz+2))
+# V = np.fromfile('lvset.out').reshape((Nx+2, Ny+2, Nz+2))[1:-1, 1:-1, 1:-1]
 V = np.sqrt(u1**2 + u2**2 + u3**2)[1:-1, 1:-1, 1:-1]
 
 # plot

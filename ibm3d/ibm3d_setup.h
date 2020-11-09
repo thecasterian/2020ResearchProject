@@ -14,6 +14,7 @@ void IBMSolver_set_grid_params(
     const double *restrict,
     const double, const double
 );
+void IBMSolver_set_bc(IBMSolver *, IBMSolverDirection, IBMSolverBCType, double);
 void IBMSolver_set_obstacle(IBMSolver *, Polyhedron *);
 void IBMSolver_set_linear_solver(IBMSolver *, IBMSolverLinearSolverType, IBMSolverPrecondType);
 

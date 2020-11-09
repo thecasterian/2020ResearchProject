@@ -16,13 +16,31 @@ typedef enum _linear_solver_type {
     SOLVER_AMG,
     SOLVER_PCG,
     SOLVER_BiCGSTAB,
-    SOLVER_GMRES
+    SOLVER_GMRES,
 } IBMSolverLinearSolverType;
 
 typedef enum _precond_type {
-    PRECOND_NONE = 10000,
-    PRECOND_AMG
+    PRECOND_NONE,
+    PRECOND_AMG,
 } IBMSolverPrecondType;
+
+typedef enum _direction {
+    DIR_NORTH = 1 << 0,
+    DIR_EAST  = 1 << 1,
+    DIR_SOUTH = 1 << 2,
+    DIR_WEST  = 1 << 3,
+    DIR_DOWN  = 1 << 4,
+    DIR_UP    = 1 << 5
+} IBMSolverDirection;
+
+typedef enum _bc_type {
+    BC_VELOCITY_INLET,          /* Normal velocity specified. */
+    BC_PRESSURE_OUTLET,         /* Pressure specified. */
+    BC_STATIONARY_WALL,         /* Stationary wall. */
+    BC_NO_SLIP_WALL,            /* No slip wall. */
+    BC_ALL_PERIODIC,            /* All periodic. */
+    BC_VELOCITY_PERIODIC,       /* Velocity periodic, pressure specified. */
+} IBMSolverBCType;
 
 typedef struct _ibm_solver {
     /* Rank of current process. */
@@ -52,6 +70,14 @@ typedef struct _ibm_solver {
     /* Global cell width and centroid coordinate. */
     double *dx_global, *xc_global;
 
+    /* Derivative coefficients. */
+    double *kx_W, *kx_E, *ky_S, *ky_N, *kz_D, *kz_U;
+
+    /* Boundary conditions of 6 outer boundaries: north, east, south, west, up,
+       and down. */
+    IBMSolverBCType bc_type[6];
+    double bc_val[6];
+
     /* Flag of each cell (1: fluid cell, 2: ghost cell, 0: solid cell) */
     int (*flag)[];
 
@@ -68,9 +94,6 @@ typedef struct _ibm_solver {
 
     /* Fluxes. */
     double3d N1, N1_prev, N2, N2_prev, N3, N3_prev;
-
-    /* Derivative coefficients. */
-    double *kx_W, *kx_E, *ky_S, *ky_N, *kz_D, *kz_U;
 
     /* HYPRE matrices, vectors, solvers, and arrays. */
     HYPRE_IJMatrix     A_u1, A_u2, A_u3, A_p;
