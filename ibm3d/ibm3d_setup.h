@@ -15,6 +15,7 @@ void IBMSolver_set_grid_params(
     const double, const double
 );
 void IBMSolver_set_obstacle(IBMSolver *, Polyhedron *);
+void IBMSolver_set_linear_solver(IBMSolver *, IBMSolverLinearSolverType, IBMSolverPrecondType);
 
 void IBMSolver_init_flow_const(IBMSolver *);
 void IBMSolver_init_flow_file(IBMSolver *, const char *, const char *, const char *, const char *);

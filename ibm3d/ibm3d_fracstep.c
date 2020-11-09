@@ -190,13 +190,13 @@ static inline void calc_u_star(
     HYPRE_IJVectorGetObject(solver->b, (void **)&solver->par_b);
     HYPRE_IJVectorGetObject(solver->x, (void **)&solver->par_x);
 
-    HYPRE_ParCSRBiCGSTABSetup(solver->hypre_solver, solver->parcsr_A_u1, solver->par_b, solver->par_x);
-    HYPRE_ParCSRBiCGSTABSolve(solver->hypre_solver, solver->parcsr_A_u1, solver->par_b, solver->par_x);
+    HYPRE_ParCSRBiCGSTABSetup(solver->linear_solver, solver->parcsr_A_u1, solver->par_b, solver->par_x);
+    HYPRE_ParCSRBiCGSTABSolve(solver->linear_solver, solver->parcsr_A_u1, solver->par_b, solver->par_x);
     HYPRE_IJVectorGetValues(solver->x, Nx*Ny*Nz, solver->vector_rows, solver->vector_res);
     FOR_ALL_CELL (i, j, k) {
         u1_star[i][j][k] = solver->vector_res[LOCL_CELL_IDX(i, j, k)-1];
     }
-    HYPRE_BiCGSTABGetFinalRelativeResidualNorm(solver->hypre_solver, final_norm_u1);
+    HYPRE_BiCGSTABGetFinalRelativeResidualNorm(solver->linear_solver, final_norm_u1);
 
     /* u2_star. */
     FOR_ALL_CELL (i, j, k) {
@@ -217,13 +217,13 @@ static inline void calc_u_star(
     HYPRE_IJVectorGetObject(solver->b, (void **)&solver->par_b);
     HYPRE_IJVectorGetObject(solver->x, (void **)&solver->par_x);
 
-    HYPRE_ParCSRBiCGSTABSetup(solver->hypre_solver, solver->parcsr_A_u2, solver->par_b, solver->par_x);
-    HYPRE_ParCSRBiCGSTABSolve(solver->hypre_solver, solver->parcsr_A_u2, solver->par_b, solver->par_x);
+    HYPRE_ParCSRBiCGSTABSetup(solver->linear_solver, solver->parcsr_A_u2, solver->par_b, solver->par_x);
+    HYPRE_ParCSRBiCGSTABSolve(solver->linear_solver, solver->parcsr_A_u2, solver->par_b, solver->par_x);
     HYPRE_IJVectorGetValues(solver->x, Nx*Ny*Nz, solver->vector_rows, solver->vector_res);
     FOR_ALL_CELL (i, j, k) {
         u2_star[i][j][k] = solver->vector_res[LOCL_CELL_IDX(i, j, k)-1];
     }
-    HYPRE_BiCGSTABGetFinalRelativeResidualNorm(solver->hypre_solver, final_norm_u2);
+    HYPRE_BiCGSTABGetFinalRelativeResidualNorm(solver->linear_solver, final_norm_u2);
 
     /* u3_star. */
     FOR_ALL_CELL (i, j, k) {
@@ -244,13 +244,13 @@ static inline void calc_u_star(
     HYPRE_IJVectorGetObject(solver->b, (void **)&solver->par_b);
     HYPRE_IJVectorGetObject(solver->x, (void **)&solver->par_x);
 
-    HYPRE_ParCSRBiCGSTABSetup(solver->hypre_solver, solver->parcsr_A_u3, solver->par_b, solver->par_x);
-    HYPRE_ParCSRBiCGSTABSolve(solver->hypre_solver, solver->parcsr_A_u3, solver->par_b, solver->par_x);
+    HYPRE_ParCSRBiCGSTABSetup(solver->linear_solver, solver->parcsr_A_u3, solver->par_b, solver->par_x);
+    HYPRE_ParCSRBiCGSTABSolve(solver->linear_solver, solver->parcsr_A_u3, solver->par_b, solver->par_x);
     HYPRE_IJVectorGetValues(solver->x, Nx*Ny*Nz, solver->vector_rows, solver->vector_res);
     FOR_ALL_CELL (i, j, k) {
         u3_star[i][j][k] = solver->vector_res[LOCL_CELL_IDX(i, j, k)-1];
     }
-    HYPRE_BiCGSTABGetFinalRelativeResidualNorm(solver->hypre_solver, final_norm_u3);
+    HYPRE_BiCGSTABGetFinalRelativeResidualNorm(solver->linear_solver, final_norm_u3);
 
     /* Boundary condition. */
     if (solver->iupper == Nx_global) {
@@ -437,14 +437,42 @@ static inline void calc_p_prime(IBMSolver *solver, double *final_norm_p) {
     HYPRE_IJVectorGetObject(solver->b, (void **)&solver->par_b);
     HYPRE_IJVectorGetObject(solver->x, (void **)&solver->par_x);
 
-    HYPRE_ParCSRGMRESSolve(solver->hypre_solver_p, solver->parcsr_A_p, solver->par_b, solver->par_x);
+    switch (solver->linear_solver_type) {
+    case SOLVER_AMG:
+        HYPRE_BoomerAMGSolve(solver->linear_solver_p, solver->parcsr_A_p, solver->par_b, solver->par_x);
+        break;
+    case SOLVER_PCG:
+        HYPRE_ParCSRPCGSolve(solver->linear_solver_p, solver->parcsr_A_p, solver->par_b, solver->par_x);
+        break;
+    case SOLVER_BiCGSTAB:
+        HYPRE_ParCSRBiCGSTABSolve(solver->linear_solver_p, solver->parcsr_A_p, solver->par_b, solver->par_x);
+        break;
+    case SOLVER_GMRES:
+        HYPRE_ParCSRGMRESSolve(solver->linear_solver_p, solver->parcsr_A_p, solver->par_b, solver->par_x);
+        break;
+    default:;
+    }
 
     HYPRE_IJVectorGetValues(solver->x, Nx*Ny*Nz, solver->vector_rows, solver->vector_res);
     FOR_ALL_CELL (i, j, k) {
         p_prime[i][j][k] = solver->vector_res[LOCL_CELL_IDX(i, j, k)-1];
     }
 
-    HYPRE_ParCSRGMRESGetFinalRelativeResidualNorm(solver->hypre_solver_p, final_norm_p);
+    switch (solver->linear_solver_type) {
+    case SOLVER_AMG:
+        HYPRE_BoomerAMGGetFinalRelativeResidualNorm(solver->linear_solver_p, final_norm_p);
+        break;
+    case SOLVER_PCG:
+        HYPRE_ParCSRPCGGetFinalRelativeResidualNorm(solver->linear_solver_p, final_norm_p);
+        break;
+    case SOLVER_BiCGSTAB:
+        HYPRE_ParCSRBiCGSTABGetFinalRelativeResidualNorm(solver->linear_solver_p, final_norm_p);
+        break;
+    case SOLVER_GMRES:
+        HYPRE_ParCSRGMRESGetFinalRelativeResidualNorm(solver->linear_solver_p, final_norm_p);
+        break;
+    default:;
+    }
 
     if (solver->ilower == 1) {
         for (int j = 1; j <= Ny; j++) {

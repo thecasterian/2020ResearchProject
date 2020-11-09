@@ -12,6 +12,18 @@
 
 typedef double (*double3d)[];
 
+typedef enum _linear_solver_type {
+    SOLVER_AMG,
+    SOLVER_PCG,
+    SOLVER_BiCGSTAB,
+    SOLVER_GMRES
+} IBMSolverLinearSolverType;
+
+typedef enum _precond_type {
+    PRECOND_NONE = 10000,
+    PRECOND_AMG
+} IBMSolverPrecondType;
+
 typedef struct _ibm_solver {
     /* Rank of current process. */
     int rank;
@@ -66,8 +78,11 @@ typedef struct _ibm_solver {
     HYPRE_IJVector     b, x;
     HYPRE_ParVector    par_b, par_x;
 
-    HYPRE_Solver hypre_solver, precond;
-    HYPRE_Solver hypre_solver_p, precond_p;
+    IBMSolverLinearSolverType linear_solver_type;
+    IBMSolverPrecondType precond_type;
+
+    HYPRE_Solver linear_solver, precond;
+    HYPRE_Solver linear_solver_p, precond_p;
 
     int *vector_rows;
     double *vector_values, *vector_zeros, *vector_res;

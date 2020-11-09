@@ -88,10 +88,32 @@ void IBMSolver_destroy(IBMSolver *solver) {
     free(solver->vector_values);
     free(solver->vector_res);
 
-    HYPRE_ParCSRBiCGSTABDestroy(solver->hypre_solver);
+    HYPRE_ParCSRBiCGSTABDestroy(solver->linear_solver);
     HYPRE_BoomerAMGDestroy(solver->precond);
-    HYPRE_ParCSRGMRESDestroy(solver->hypre_solver_p);
-    HYPRE_BoomerAMGDestroy(solver->precond_p);
+
+    switch (solver->linear_solver_type) {
+    case SOLVER_AMG:
+        HYPRE_BoomerAMGDestroy(solver->linear_solver_p);
+        break;
+    case SOLVER_PCG:
+        HYPRE_ParCSRPCGDestroy(solver->linear_solver_p);
+        break;
+    case SOLVER_BiCGSTAB:
+        HYPRE_ParCSRBiCGSTABDestroy(solver->linear_solver_p);
+        break;
+    case SOLVER_GMRES:
+        HYPRE_ParCSRGMRESDestroy(solver->linear_solver_p);
+        break;
+    default:;
+    }
+    switch (solver->precond_type) {
+    case PRECOND_NONE:
+        break;
+    case PRECOND_AMG:
+        HYPRE_BoomerAMGDestroy(solver->precond_p);
+        break;
+    default:;
+    }
 
     free(solver);
 }
@@ -210,6 +232,173 @@ void IBMSolver_set_obstacle(IBMSolver *solver, Polyhedron *poly) {
     build_hypre(solver, lvset);
 
     free(lvset);
+}
+
+void IBMSolver_set_linear_solver(
+    IBMSolver *solver,
+    IBMSolverLinearSolverType linear_solver_type,
+    IBMSolverPrecondType precond_type
+) {
+    const int Nx = solver->Nx;
+    const int Ny = solver->Ny;
+    const int Nz = solver->Nz;
+
+    solver->linear_solver_type = linear_solver_type;
+    solver->precond_type = precond_type;
+
+    /* Set velocity solver. */
+    HYPRE_ParCSRBiCGSTABCreate(MPI_COMM_WORLD, &solver->linear_solver);
+    HYPRE_BiCGSTABSetMaxIter(solver->linear_solver, 1000);
+    HYPRE_BiCGSTABSetTol(solver->linear_solver, 1e-6);
+    HYPRE_BiCGSTABSetLogging(solver->linear_solver, 1);
+    // HYPRE_BiCGSTABSetPrintLevel(solver->hypre_solver, 2);
+
+    HYPRE_BoomerAMGCreate(&solver->precond);
+    HYPRE_BoomerAMGSetCoarsenType(solver->precond, 6);
+    HYPRE_BoomerAMGSetOldDefault(solver->precond);
+    HYPRE_BoomerAMGSetRelaxType(solver->precond, 6);
+    HYPRE_BoomerAMGSetNumSweeps(solver->precond, 1);
+    HYPRE_BoomerAMGSetTol(solver->precond, 0);
+    HYPRE_BoomerAMGSetMaxIter(solver->precond, 1);
+    // HYPRE_BoomerAMGSetPrintLevel(solver->precond, 1);
+
+    HYPRE_BiCGSTABSetPrecond(
+        solver->linear_solver,
+        (HYPRE_PtrToSolverFcn)HYPRE_BoomerAMGSolve,
+        (HYPRE_PtrToSolverFcn)HYPRE_BoomerAMGSetup,
+        solver->precond
+    );
+
+    /* Set pressure solver. */
+    switch (linear_solver_type) {
+    case SOLVER_AMG:
+        if (precond_type != PRECOND_NONE && solver->rank == 0) {
+            printf("\nCannot use preconditioner with BoomerAMG solver\n");
+            MPI_Abort(MPI_COMM_WORLD, -1);
+        }
+
+        HYPRE_BoomerAMGCreate(&solver->linear_solver_p);
+        HYPRE_BoomerAMGSetOldDefault(solver->linear_solver_p);
+        HYPRE_BoomerAMGSetTol(solver->linear_solver_p, 1e-6);
+        HYPRE_BoomerAMGSetMaxIter(solver->linear_solver_p, 1000);
+        HYPRE_BoomerAMGSetMaxRowSum(solver->linear_solver_p, 1);
+        HYPRE_BoomerAMGSetCoarsenType(solver->linear_solver_p, 6);
+        HYPRE_BoomerAMGSetNonGalerkinTol(solver->linear_solver_p, 0.05);
+        HYPRE_BoomerAMGSetLevelNonGalerkinTol(solver->linear_solver_p, 0.00, 0);
+        HYPRE_BoomerAMGSetLevelNonGalerkinTol(solver->linear_solver_p, 0.01, 1);
+        HYPRE_BoomerAMGSetAggNumLevels(solver->linear_solver_p, 1);
+        HYPRE_BoomerAMGSetNumSweeps(solver->linear_solver_p, 1);
+        HYPRE_BoomerAMGSetRelaxType(solver->linear_solver_p, 6);
+        HYPRE_BoomerAMGSetLogging(solver->linear_solver_p, 1);
+        // HYPRE_BoomerAMGSetPrintLevel(solver->linear_solver_p, 3);
+        break;
+    case SOLVER_PCG:
+        HYPRE_ParCSRPCGCreate(MPI_COMM_WORLD, &solver->linear_solver_p);
+        HYPRE_ParCSRPCGSetTol(solver->linear_solver_p, 1e-6);
+        HYPRE_ParCSRPCGSetMaxIter(solver->linear_solver_p, 1000);
+        HYPRE_ParCSRPCGSetLogging(solver->linear_solver_p, 1);
+        // HYPRE_ParCSRPCGSetPrintLevel(solver->linear_solver_p, 2);
+        break;
+    case SOLVER_BiCGSTAB:
+        HYPRE_ParCSRBiCGSTABCreate(MPI_COMM_WORLD, &solver->linear_solver_p);
+        HYPRE_ParCSRBiCGSTABSetTol(solver->linear_solver_p, 1e-6);
+        HYPRE_ParCSRBiCGSTABSetMaxIter(solver->linear_solver_p, 1000);
+        HYPRE_ParCSRBiCGSTABSetLogging(solver->linear_solver_p, 1);
+        // HYPRE_ParCSRBiCGSTABSetPrintLevel(solver->linear_solver_p, 2);
+        break;
+    case SOLVER_GMRES:
+        HYPRE_ParCSRGMRESCreate(MPI_COMM_WORLD, &solver->linear_solver_p);
+        HYPRE_ParCSRGMRESSetMaxIter(solver->linear_solver_p, 1000);
+        HYPRE_ParCSRGMRESSetKDim(solver->linear_solver_p, 10);
+        HYPRE_ParCSRGMRESSetTol(solver->linear_solver_p, 1e-6);
+        HYPRE_ParCSRGMRESSetLogging(solver->linear_solver_p, 1);
+        // HYPRE_ParCSRGMRESSetPrintLevel(solver->hypre_solver_p, 2);
+        break;
+    default:
+        if (solver->rank == 0) {
+            printf("\nUnknown linear solver type\n");
+            MPI_Abort(MPI_COMM_WORLD, -1);
+        }
+    }
+
+    switch (precond_type) {
+    case PRECOND_NONE:
+        solver->precond_p = NULL;
+        break;
+    case PRECOND_AMG:
+        HYPRE_BoomerAMGCreate(&solver->precond_p);
+        HYPRE_BoomerAMGSetOldDefault(solver->precond_p);
+        HYPRE_BoomerAMGSetTol(solver->precond_p, 0);
+        HYPRE_BoomerAMGSetMaxIter(solver->precond_p, 1);
+        HYPRE_BoomerAMGSetMaxRowSum(solver->precond_p, 1);
+        HYPRE_BoomerAMGSetCoarsenType(solver->precond_p, 6);
+        HYPRE_BoomerAMGSetNonGalerkinTol(solver->precond_p, 0.05);
+        HYPRE_BoomerAMGSetLevelNonGalerkinTol(solver->precond_p, 0.00, 0);
+        HYPRE_BoomerAMGSetLevelNonGalerkinTol(solver->precond_p, 0.01, 1);
+        HYPRE_BoomerAMGSetAggNumLevels(solver->precond_p, 1);
+        HYPRE_BoomerAMGSetNumSweeps(solver->precond_p, 1);
+        HYPRE_BoomerAMGSetRelaxType(solver->precond_p, 6);
+        HYPRE_BoomerAMGSetPrintLevel(solver->precond_p, 1);
+
+        switch (linear_solver_type) {
+        case SOLVER_PCG:
+            HYPRE_ParCSRPCGSetPrecond(
+                solver->linear_solver_p,
+                (HYPRE_PtrToSolverFcn)HYPRE_BoomerAMGSolve,
+                (HYPRE_PtrToSolverFcn)HYPRE_BoomerAMGSetup,
+                solver->precond_p
+            );
+            break;
+        case SOLVER_BiCGSTAB:
+            HYPRE_ParCSRBiCGSTABSetPrecond(
+                solver->linear_solver_p,
+                (HYPRE_PtrToSolverFcn)HYPRE_BoomerAMGSolve,
+                (HYPRE_PtrToSolverFcn)HYPRE_BoomerAMGSetup,
+                solver->precond_p
+            );
+            break;
+        case SOLVER_GMRES:
+            HYPRE_ParCSRGMRESSetPrecond(
+                solver->linear_solver_p,
+                (HYPRE_PtrToSolverFcn)HYPRE_BoomerAMGSolve,
+                (HYPRE_PtrToSolverFcn)HYPRE_BoomerAMGSetup,
+                solver->precond_p
+            );
+            break;
+        default:;
+        }
+        break;
+    default:
+        if (solver->rank == 0) {
+            printf("\nUnknown preconditioner type\n");
+            MPI_Abort(MPI_COMM_WORLD, -1);
+        }
+    }
+
+    HYPRE_IJVectorSetValues(solver->b, Nx*Ny*Nz, solver->vector_rows, solver->vector_zeros);
+    HYPRE_IJVectorSetValues(solver->x, Nx*Ny*Nz, solver->vector_rows, solver->vector_zeros);
+
+    HYPRE_IJVectorAssemble(solver->b);
+    HYPRE_IJVectorAssemble(solver->x);
+
+    HYPRE_IJVectorGetObject(solver->b, (void **)&solver->par_b);
+    HYPRE_IJVectorGetObject(solver->x, (void **)&solver->par_x);
+
+    switch (linear_solver_type) {
+    case SOLVER_AMG:
+        HYPRE_BoomerAMGSetup(solver->linear_solver_p, solver->parcsr_A_p, solver->par_b, solver->par_x);
+        break;
+    case SOLVER_PCG:
+        HYPRE_ParCSRPCGSetup(solver->linear_solver_p, solver->parcsr_A_p, solver->par_b, solver->par_x);
+        break;
+    case SOLVER_BiCGSTAB:
+        HYPRE_ParCSRBiCGSTABSetup(solver->linear_solver_p, solver->parcsr_A_p, solver->par_b, solver->par_x);
+        break;
+    case SOLVER_GMRES:
+        HYPRE_ParCSRGMRESSetup(solver->linear_solver_p, solver->parcsr_A_p, solver->par_b, solver->par_x);
+        break;
+    default:;
+    }
 }
 
 void IBMSolver_init_flow_const(IBMSolver *solver) {
@@ -446,71 +635,6 @@ static void build_hypre(IBMSolver *solver, const double3d _lvset) {
     for (int i = 0; i < Nx*Ny*Nz; i++) {
         solver->vector_rows[i] = GLOB_CELL_IDX(1, 1, 1) + i;
     }
-
-    /* Solvers. */
-    HYPRE_ParCSRBiCGSTABCreate(MPI_COMM_WORLD, &solver->hypre_solver);
-    HYPRE_BiCGSTABSetMaxIter(solver->hypre_solver, 1000);
-    HYPRE_BiCGSTABSetTol(solver->hypre_solver, 1e-6);
-    HYPRE_BiCGSTABSetLogging(solver->hypre_solver, 1);
-    // HYPRE_BiCGSTABSetPrintLevel(solver->hypre_solver, 2);
-
-    HYPRE_ParCSRGMRESCreate(MPI_COMM_WORLD, &solver->hypre_solver_p);
-    HYPRE_ParCSRGMRESSetMaxIter(solver->hypre_solver_p, 1000);
-    HYPRE_ParCSRGMRESSetKDim(solver->hypre_solver_p, 10);
-    HYPRE_ParCSRGMRESSetTol(solver->hypre_solver_p, 1e-6);
-    HYPRE_ParCSRGMRESSetLogging(solver->hypre_solver_p, 1);
-    // HYPRE_ParCSRGMRESSetPrintLevel(solver->hypre_solver_p, 2);
-
-    HYPRE_BoomerAMGCreate(&solver->precond);
-    HYPRE_BoomerAMGSetCoarsenType(solver->precond, 6);
-    HYPRE_BoomerAMGSetOldDefault(solver->precond);
-    HYPRE_BoomerAMGSetRelaxType(solver->precond, 6);
-    HYPRE_BoomerAMGSetNumSweeps(solver->precond, 1);
-    HYPRE_BoomerAMGSetTol(solver->precond, 0);
-    HYPRE_BoomerAMGSetMaxIter(solver->precond, 1);
-    // HYPRE_BoomerAMGSetPrintLevel(solver->precond, 1);
-
-    HYPRE_BoomerAMGCreate(&solver->precond_p);
-    HYPRE_BoomerAMGSetOldDefault(solver->precond_p);
-    HYPRE_BoomerAMGSetTol(solver->precond_p, 0);
-    HYPRE_BoomerAMGSetMaxIter(solver->precond_p, 1);
-    HYPRE_BoomerAMGSetStrongThreshold(solver->precond_p, 0.5);
-    HYPRE_BoomerAMGSetMaxRowSum(solver->precond_p, 1);
-    HYPRE_BoomerAMGSetCoarsenType(solver->precond_p, 6);
-    HYPRE_BoomerAMGSetNonGalerkinTol(solver->precond_p, 0.05);
-    HYPRE_BoomerAMGSetLevelNonGalerkinTol(solver->precond_p, 0.00, 0);
-    HYPRE_BoomerAMGSetLevelNonGalerkinTol(solver->precond_p, 0.01, 1);
-    HYPRE_BoomerAMGSetAggNumLevels(solver->precond_p, 4);
-    HYPRE_BoomerAMGSetNumSweeps(solver->precond_p, 1);
-    HYPRE_BoomerAMGSetRelaxType(solver->precond_p, 6);
-    HYPRE_BoomerAMGSetPrintLevel(solver->precond_p, 1);
-
-    HYPRE_BiCGSTABSetPrecond(
-        solver->hypre_solver,
-        (HYPRE_PtrToSolverFcn)HYPRE_BoomerAMGSolve,
-        (HYPRE_PtrToSolverFcn)HYPRE_BoomerAMGSetup,
-        solver->precond
-    );
-
-    HYPRE_ParCSRGMRESSetPrecond(
-        solver->hypre_solver_p,
-        (HYPRE_PtrToSolverFcn)HYPRE_BoomerAMGSolve,
-        (HYPRE_PtrToSolverFcn)HYPRE_BoomerAMGSetup,
-        solver->precond_p
-    );
-
-    HYPRE_IJVectorSetValues(solver->b, Nx*Ny*Nz, solver->vector_rows, solver->vector_zeros);
-    HYPRE_IJVectorSetValues(solver->x, Nx*Ny*Nz, solver->vector_rows, solver->vector_zeros);
-
-    HYPRE_IJVectorAssemble(solver->b);
-    HYPRE_IJVectorAssemble(solver->x);
-
-    HYPRE_IJVectorGetObject(solver->b, (void **)&solver->par_b);
-    HYPRE_IJVectorGetObject(solver->x, (void **)&solver->par_x);
-
-    HYPRE_ParCSRGMRESSetup(solver->hypre_solver_p, solver->parcsr_A_p, solver->par_b, solver->par_x);
-
-    MPI_Barrier(MPI_COMM_WORLD);
 }
 
 static HYPRE_IJMatrix create_matrix(IBMSolver *solver, const double3d _lvset, int type) {

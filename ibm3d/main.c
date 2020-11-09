@@ -5,10 +5,6 @@
 #include "geo3d.h"
 #include "ibm3d.h"
 
-static FILE *fopen_check(
-    const char *restrict filename, const char *restrict modes
-);
-
 int main(int argc, char **argv) {
     /*===== Initialize program and parse arguments. ==========================*/
     /*----- Initialize MPI. --------------------------------------------------*/
@@ -146,6 +142,8 @@ int main(int argc, char **argv) {
     IBMSolver *solver = IBMSolver_new(num_process, rank);
     IBMSolver_set_grid_params(solver, Nx, Ny, Nz, xf, yf, zf, Re, dt);
     IBMSolver_set_obstacle(solver, poly);
+    IBMSolver_set_linear_solver(solver, SOLVER_BiCGSTAB, PRECOND_AMG);
+
     Polyhedron_destroy(poly);
 
     /*===== Initialize flow. =================================================*/
