@@ -10,7 +10,7 @@
 
 #include "geo3d.h"
 
-typedef double (*double3d)[];
+typedef void *arr3d;
 
 typedef enum _linear_solver_type {
     SOLVER_AMG,
@@ -37,7 +37,7 @@ typedef enum _bc_type {
     BC_VELOCITY_INLET,          /* Normal velocity specified. */
     BC_PRESSURE_OUTLET,         /* Pressure specified. */
     BC_STATIONARY_WALL,         /* Stationary wall. */
-    BC_NO_SLIP_WALL,            /* No slip wall. */
+    BC_FREE_SLIP_WALL,          /* Free-slip wall. */
     BC_ALL_PERIODIC,            /* All periodic. */
     BC_VELOCITY_PERIODIC,       /* Velocity periodic, pressure specified. */
 } IBMSolverBCType;
@@ -79,21 +79,23 @@ typedef struct _ibm_solver {
     double bc_val[6];
 
     /* Flag of each cell (1: fluid cell, 2: ghost cell, 0: solid cell) */
-    int (*flag)[];
+    arr3d flag;
+    /* Level set function. */
+    arr3d lvset;
 
     /* Velocities and pressure. */
-    double3d u1, u1_next, u1_star, u1_tilde;
-    double3d u2, u2_next, u2_star, u2_tilde;
-    double3d u3, u3_next, u3_star, u3_tilde;
+    arr3d u1, u1_next, u1_star, u1_tilde;
+    arr3d u2, u2_next, u2_star, u2_tilde;
+    arr3d u3, u3_next, u3_star, u3_tilde;
 
-    double3d U1, U1_next, U1_star;
-    double3d U2, U2_next, U2_star;
-    double3d U3, U3_next, U3_star;
+    arr3d U1, U1_next, U1_star;
+    arr3d U2, U2_next, U2_star;
+    arr3d U3, U3_next, U3_star;
 
-    double3d p, p_next, p_prime;
+    arr3d p, p_next, p_prime;
 
     /* Fluxes. */
-    double3d N1, N1_prev, N2, N2_prev, N3, N3_prev;
+    arr3d N1, N1_prev, N2, N2_prev, N3, N3_prev;
 
     /* HYPRE matrices, vectors, solvers, and arrays. */
     HYPRE_IJMatrix     A_u1, A_u2, A_u3, A_p;
@@ -106,6 +108,9 @@ typedef struct _ibm_solver {
 
     HYPRE_Solver linear_solver, precond;
     HYPRE_Solver linear_solver_p, precond_p;
+    double tol;
+
+    arr3d p_coeffsum;
 
     int *vector_rows;
     double *vector_values, *vector_zeros, *vector_res;

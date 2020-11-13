@@ -2,6 +2,7 @@ import numpy as np
 from stl.mesh import Mesh
 from tvtk.api import tvtk
 from mayavi import mlab
+import matplotlib.pyplot as plt
 
 # read input
 f = open("ibm3d.in", "r")
@@ -80,3 +81,12 @@ cut_plane_y.implicit_plane.origin = (0, 0, 0)
 cut_plane_y.implicit_plane.widget.enabled = False
 
 mlab.show()
+
+C = plt.contourf(xc, zc, V[:, Ny//2, :], 100, zorder=-1)
+plt.colorbar(C)
+
+plt.plot(X, Y, 'k')
+plt.plot(X.T, Y.T, 'k')
+
+plt.axis('equal')
+plt.show()

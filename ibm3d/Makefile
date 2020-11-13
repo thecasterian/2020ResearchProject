@@ -41,3 +41,6 @@ geo3d.o: geo3d.h geo3d.c
 
 test: test.c geo3d.o
 	$(CC) $(INCLUDE) geo3d.o test.c -o test $(LDLIBS) $(CFLAGS)
+
+channel: channel.c ibm3d.a geo3d.o
+	$(CC) $(INCLUDE) $^ $(HYPRE) -o $@ $(LDLIBS) $(CFLAGS)

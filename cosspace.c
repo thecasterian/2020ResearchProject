@@ -8,10 +8,12 @@ int main(int argc, char **argv) {
         return 0;
     }
 
-    int n = atoi(argv[1]);
-    for (int i = 0; i < n; i++) {
-        double x = acos(-1) * i / (n-1);
-        printf("%.8lf ", 0.5*(1-cos(x)));
+    double a = atof(argv[1]);
+    int n = atoi(argv[2]);
+    double b = atof(argv[3]);
+    for (int i = 0; i <= n; i++) {
+        double x = acos(-1) * i / n;
+        printf("%.8lf ", (b-a)*(1-cos(x))/2+a);
     }
     printf("\n");
 

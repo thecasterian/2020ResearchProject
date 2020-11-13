@@ -9,9 +9,9 @@ Nz          194
 
 Re          100
 dt          0.005
-numtstep    10
+numtstep    5
 
-InitUsingFile       0
+InitUsingFile       1
 InitFileu1          u1.out
 InitFileu2          u2.out
 InitFileu3          u3.out

@@ -25,16 +25,15 @@
 /* Convert global index to local index. */
 #define GLOB_TO_LOCL(i) ((i) - solver->ilower + 1)
 
-/* Global index of cell (i, j, k) where i is local index, ranging from 1 to
-   Nx_global * Ny * Nz. */
+/* Global index of cell (i, j, k) where i is local index, starting from
+   (ilower - 1) * Ny * Nz + 1. */
 #define GLOB_CELL_IDX(i, j, k) (Ny*Nz*(LOCL_TO_GLOB(i)-1) + Nz*((j)-1) + (k))
-/* Local index of cell (i, j, k) where i is local index, ranging from 1 to
-   Nx * Ny * Nz. */
+/* Local index of cell (i, j, k) where i is local index, starting from 1. */
 #define LOCL_CELL_IDX(i, j, k) (Ny*Nz*((i)-1) + Nz*((j)-1) + (k))
 
 #define SWAP(a, b) do {typeof(a) tmp = a; a = b; b = tmp;} while (0)
 
-FILE *fopen_check(const char *restrict filename, const char *restrict modes) {
+static FILE *fopen_check(const char *restrict filename, const char *restrict modes) {
     FILE *fp = fopen(filename, modes);
     if (!fp) {
         fprintf(stderr, "error: cannot open file \"%s\"\n", filename);

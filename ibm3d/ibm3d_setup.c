@@ -2,6 +2,7 @@
 
 #include "geo3d.h"
 #include "utils.h"
+#include "math.h"
 
 /* Index of adjacent cells in 3-d cartesian coordinate */
 static const int adj[6][3] = {
@@ -20,14 +21,15 @@ static const int adj[6][3] = {
 */
 
 static void alloc_arrays(IBMSolver *);
-static void build_hypre(IBMSolver *, const double3d);
-static HYPRE_IJMatrix create_matrix(IBMSolver *, const double3d, int);
+static void build_hypre(IBMSolver *);
+static HYPRE_IJMatrix create_matrix(IBMSolver *, int);
 static void get_interp_info(
-    IBMSolver *, const double3d,
+    IBMSolver *,
     const int, const int, const int,
     int *restrict, double *restrict
 );
 static void interp_stag_vel(IBMSolver *);
+static bool isperiodic(IBMSolverBCType);
 
 IBMSolver *IBMSolver_new(const int num_process, const int rank) {
     IBMSolver *solver = calloc(1, sizeof(IBMSolver));
@@ -38,6 +40,7 @@ IBMSolver *IBMSolver_new(const int num_process, const int rank) {
     solver->dx = solver->dy = solver->dz = NULL;
     solver->xc = solver->yc = solver->zc = NULL;
     solver->flag = NULL;
+    solver->lvset = NULL;
     solver->u1 = solver->u1_next = solver->u1_star = solver->u1_tilde = NULL;
     solver->u2 = solver->u2_next = solver->u2_star = solver->u2_tilde = NULL;
     solver->u3 = solver->u3_next = solver->u3_star = solver->u3_tilde = NULL;
@@ -51,13 +54,20 @@ IBMSolver *IBMSolver_new(const int num_process, const int rank) {
     solver->kx_W = solver->kx_E = NULL;
     solver->ky_S = solver->ky_N = NULL;
     solver->kz_D = solver->kz_U = NULL;
+
+    for (int i = 0; i < 6; i++) {
+        solver->bc_val[i] = NAN;
+    }
+
     return solver;
 }
 
 void IBMSolver_destroy(IBMSolver *solver) {
     free(solver->dx); free(solver->dy); free(solver->dz);
     free(solver->xc); free(solver->yc); free(solver->zc);
-    free(solver->flag);
+    free(solver->dx_global); free(solver->xc_global);
+
+    free(solver->flag); free(solver->lvset);
 
     free(solver->u1); free(solver->u1_next); free(solver->u1_star); free(solver->u1_tilde);
     free(solver->u2); free(solver->u2_next); free(solver->u2_star); free(solver->u2_tilde);
@@ -118,22 +128,19 @@ void IBMSolver_destroy(IBMSolver *solver) {
     free(solver);
 }
 
-void IBMSolver_set_grid_params(
+void IBMSolver_set_grid(
     IBMSolver *solver,
     const int Nx_global, const int Ny, const int Nz,
     const double *restrict xf,
     const double *restrict yf,
-    const double *restrict zf,
-    const double Re, const double dt
+    const double *restrict zf
 ) {
     solver->Nx_global = Nx_global;
     solver->Ny = Ny;
     solver->Nz = Nz;
-    solver->Re = Re;
-    solver->dt = dt;
 
-    const int ilower = solver->ilower = solver->rank * Nx_global / solver->num_process + 1;
-    const int iupper = solver->iupper = (solver->rank+1) * Nx_global / solver->num_process;
+    solver->ilower = solver->rank * Nx_global / solver->num_process + 1;
+    solver->iupper = (solver->rank+1) * Nx_global / solver->num_process;
     const int Nx = solver->Nx = solver->iupper - solver->ilower + 1;
 
     /* Allocate arrays. */
@@ -157,40 +164,11 @@ void IBMSolver_set_grid_params(
         solver->dz[k] = zf[k] - zf[k-1];
         solver->zc[k] = (zf[k] + zf[k-1]) / 2;
     }
+}
 
-    /* Ghost cells */
-    solver->dx_global[0] = solver->dx_global[1];
-    solver->dx_global[Nx+1] = solver->dx_global[Nx];
-    solver->xc_global[0] = 2*xf[0] - solver->xc_global[1];
-    solver->xc_global[Nx_global+1] = 2*xf[Nx_global] - solver->xc_global[Nx_global];
-
-    solver->dx[0] = solver->dx_global[ilower-1];
-    solver->dx[Nx+1] = solver->dx_global[iupper+1];
-    solver->dy[0] = solver->dy[1];
-    solver->dy[Ny+1] = solver->dy[Ny];
-    solver->dz[0] = solver->dz[1];
-    solver->dz[Nz+1] = solver->dz[Nz];
-
-    solver->xc[0] = solver->xc_global[ilower-1];
-    solver->xc[Nx+1] = solver->xc_global[iupper+1];
-    solver->yc[0] = 2*yf[0] - solver->yc[1];
-    solver->yc[Ny+1] = 2*yf[Ny] - solver->yc[Ny];
-    solver->zc[0] = 2*zf[0] - solver->zc[1];
-    solver->zc[Nz+1] = 2*zf[Nz] - solver->zc[Nz];
-
-    /* Calculate second order derivative coefficients */
-    for (int i = 1; i <= Nx; i++) {
-        solver->kx_W[i] = dt / (2*Re * (solver->xc[i] - solver->xc[i-1])*solver->dx[i]);
-        solver->kx_E[i] = dt / (2*Re * (solver->xc[i+1] - solver->xc[i])*solver->dx[i]);
-    }
-    for (int j = 1; j <= Ny; j++) {
-        solver->ky_S[j] = dt / (2*Re * (solver->yc[j] - solver->yc[j-1])*solver->dy[j]);
-        solver->ky_N[j] = dt / (2*Re * (solver->yc[j+1] - solver->yc[j])*solver->dy[j]);
-    }
-    for (int k = 1; k <= Nz; k++) {
-        solver->kz_D[k] = dt / (2*Re * (solver->zc[k] - solver->zc[k-1])*solver->dz[k]);
-        solver->kz_U[k] = dt / (2*Re * (solver->zc[k+1] - solver->zc[k])*solver->dz[k]);
-    }
+void IBMSolver_set_params(IBMSolver *solver, const double Re, const double dt) {
+    solver->Re = Re;
+    solver->dt = dt;
 }
 
 void IBMSolver_set_bc(
@@ -200,7 +178,7 @@ void IBMSolver_set_bc(
     double bc_val
 ) {
     for (int i = 0; i < 6; i++) {
-        if (bc_type & (1 << i)) {
+        if (direction & (1 << i)) {
             solver->bc_type[i] = bc_type;
             solver->bc_val[i] = bc_val;
         }
@@ -213,6 +191,7 @@ void IBMSolver_set_obstacle(IBMSolver *solver, Polyhedron *poly) {
     const int Nz = solver->Nz;
 
     int (*flag)[Ny+2][Nz+2] = solver->flag;
+    double (*const lvset)[Ny+2][Nz+2] = solver->lvset;
 
     /* No obstacle: every cell is fluid cell. */
     if (poly == NULL) {
@@ -221,8 +200,6 @@ void IBMSolver_set_obstacle(IBMSolver *solver, Polyhedron *poly) {
         }
         return;
     }
-
-    double (*const lvset)[Ny+2][Nz+2] = calloc(Nx+2, sizeof(double [Ny+2][Nz+2]));
 
     /* Calculate level set function. */
     Polyhedron_cpt(
@@ -250,178 +227,92 @@ void IBMSolver_set_obstacle(IBMSolver *solver, Polyhedron *poly) {
             flag[i][j][k] = is_ghost_cell ? 2 : 0;
         }
     }
-
-    /* Build HYPRE variables. */
-    build_hypre(solver, lvset);
-
-    free(lvset);
 }
 
 void IBMSolver_set_linear_solver(
     IBMSolver *solver,
     IBMSolverLinearSolverType linear_solver_type,
-    IBMSolverPrecondType precond_type
+    IBMSolverPrecondType precond_type,
+    const double tol
 ) {
+    solver->linear_solver_type = linear_solver_type;
+    solver->precond_type = precond_type;
+    solver->tol = tol;
+}
+
+void IBMSolver_assemble(IBMSolver *solver) {
     const int Nx = solver->Nx;
     const int Ny = solver->Ny;
     const int Nz = solver->Nz;
+    const int Nx_global = solver->Nx_global;
 
-    solver->linear_solver_type = linear_solver_type;
-    solver->precond_type = precond_type;
+    const int ilower = solver->ilower;
+    const int iupper = solver->iupper;
 
-    /* Set velocity solver. */
-    HYPRE_ParCSRBiCGSTABCreate(MPI_COMM_WORLD, &solver->linear_solver);
-    HYPRE_BiCGSTABSetMaxIter(solver->linear_solver, 1000);
-    HYPRE_BiCGSTABSetTol(solver->linear_solver, 1e-6);
-    HYPRE_BiCGSTABSetLogging(solver->linear_solver, 1);
-    // HYPRE_BiCGSTABSetPrintLevel(solver->hypre_solver, 2);
+    const double Re = solver->Re;
+    const double dt = solver->dt;
 
-    HYPRE_BoomerAMGCreate(&solver->precond);
-    HYPRE_BoomerAMGSetCoarsenType(solver->precond, 6);
-    HYPRE_BoomerAMGSetOldDefault(solver->precond);
-    HYPRE_BoomerAMGSetRelaxType(solver->precond, 6);
-    HYPRE_BoomerAMGSetNumSweeps(solver->precond, 1);
-    HYPRE_BoomerAMGSetTol(solver->precond, 0);
-    HYPRE_BoomerAMGSetMaxIter(solver->precond, 1);
-    // HYPRE_BoomerAMGSetPrintLevel(solver->precond, 1);
+    double *const dx_global = solver->dx_global;
+    double *const xc_global = solver->xc_global;
 
-    HYPRE_BiCGSTABSetPrecond(
-        solver->linear_solver,
-        (HYPRE_PtrToSolverFcn)HYPRE_BoomerAMGSolve,
-        (HYPRE_PtrToSolverFcn)HYPRE_BoomerAMGSetup,
-        solver->precond
-    );
+    double *const dx = solver->dx;
+    double *const dy = solver->dy;
+    double *const dz = solver->dz;
 
-    /* Set pressure solver. */
-    switch (linear_solver_type) {
-    case SOLVER_AMG:
-        if (precond_type != PRECOND_NONE && solver->rank == 0) {
-            printf("\nCannot use preconditioner with BoomerAMG solver\n");
-            MPI_Abort(MPI_COMM_WORLD, -1);
-        }
+    double *const xc = solver->xc;
+    double *const yc = solver->yc;
+    double *const zc = solver->zc;
 
-        HYPRE_BoomerAMGCreate(&solver->linear_solver_p);
-        HYPRE_BoomerAMGSetOldDefault(solver->linear_solver_p);
-        HYPRE_BoomerAMGSetTol(solver->linear_solver_p, 1e-6);
-        HYPRE_BoomerAMGSetMaxIter(solver->linear_solver_p, 1000);
-        HYPRE_BoomerAMGSetMaxRowSum(solver->linear_solver_p, 1);
-        HYPRE_BoomerAMGSetCoarsenType(solver->linear_solver_p, 6);
-        HYPRE_BoomerAMGSetNonGalerkinTol(solver->linear_solver_p, 0.05);
-        HYPRE_BoomerAMGSetLevelNonGalerkinTol(solver->linear_solver_p, 0.00, 0);
-        HYPRE_BoomerAMGSetLevelNonGalerkinTol(solver->linear_solver_p, 0.01, 1);
-        HYPRE_BoomerAMGSetAggNumLevels(solver->linear_solver_p, 1);
-        HYPRE_BoomerAMGSetNumSweeps(solver->linear_solver_p, 1);
-        HYPRE_BoomerAMGSetRelaxType(solver->linear_solver_p, 6);
-        HYPRE_BoomerAMGSetLogging(solver->linear_solver_p, 1);
-        // HYPRE_BoomerAMGSetPrintLevel(solver->linear_solver_p, 3);
-        break;
-    case SOLVER_PCG:
-        HYPRE_ParCSRPCGCreate(MPI_COMM_WORLD, &solver->linear_solver_p);
-        HYPRE_ParCSRPCGSetTol(solver->linear_solver_p, 1e-6);
-        HYPRE_ParCSRPCGSetMaxIter(solver->linear_solver_p, 1000);
-        HYPRE_ParCSRPCGSetLogging(solver->linear_solver_p, 1);
-        // HYPRE_ParCSRPCGSetPrintLevel(solver->linear_solver_p, 2);
-        break;
-    case SOLVER_BiCGSTAB:
-        HYPRE_ParCSRBiCGSTABCreate(MPI_COMM_WORLD, &solver->linear_solver_p);
-        HYPRE_ParCSRBiCGSTABSetTol(solver->linear_solver_p, 1e-6);
-        HYPRE_ParCSRBiCGSTABSetMaxIter(solver->linear_solver_p, 1000);
-        HYPRE_ParCSRBiCGSTABSetLogging(solver->linear_solver_p, 1);
-        // HYPRE_ParCSRBiCGSTABSetPrintLevel(solver->linear_solver_p, 2);
-        break;
-    case SOLVER_GMRES:
-        HYPRE_ParCSRGMRESCreate(MPI_COMM_WORLD, &solver->linear_solver_p);
-        HYPRE_ParCSRGMRESSetMaxIter(solver->linear_solver_p, 1000);
-        HYPRE_ParCSRGMRESSetKDim(solver->linear_solver_p, 10);
-        HYPRE_ParCSRGMRESSetTol(solver->linear_solver_p, 1e-6);
-        HYPRE_ParCSRGMRESSetLogging(solver->linear_solver_p, 1);
-        // HYPRE_ParCSRGMRESSetPrintLevel(solver->hypre_solver_p, 2);
-        break;
-    default:
-        if (solver->rank == 0) {
-            printf("\nUnknown linear solver type\n");
-            MPI_Abort(MPI_COMM_WORLD, -1);
-        }
+    if (
+        solver->rank == 0
+        && (
+            isperiodic(solver->bc_type[0]) != isperiodic(solver->bc_type[2])
+            || isperiodic(solver->bc_type[1]) != isperiodic(solver->bc_type[3])
+            || isperiodic(solver->bc_type[4]) != isperiodic(solver->bc_type[5])
+        )
+    ) {
+        printf("Inconsistent periodic boundary condition\n");
+        MPI_Abort(MPI_COMM_WORLD, -1);
     }
 
-    switch (precond_type) {
-    case PRECOND_NONE:
-        solver->precond_p = NULL;
-        break;
-    case PRECOND_AMG:
-        HYPRE_BoomerAMGCreate(&solver->precond_p);
-        HYPRE_BoomerAMGSetOldDefault(solver->precond_p);
-        HYPRE_BoomerAMGSetTol(solver->precond_p, 0);
-        HYPRE_BoomerAMGSetMaxIter(solver->precond_p, 1);
-        HYPRE_BoomerAMGSetMaxRowSum(solver->precond_p, 1);
-        HYPRE_BoomerAMGSetCoarsenType(solver->precond_p, 6);
-        HYPRE_BoomerAMGSetNonGalerkinTol(solver->precond_p, 0.05);
-        HYPRE_BoomerAMGSetLevelNonGalerkinTol(solver->precond_p, 0.00, 0);
-        HYPRE_BoomerAMGSetLevelNonGalerkinTol(solver->precond_p, 0.01, 1);
-        HYPRE_BoomerAMGSetAggNumLevels(solver->precond_p, 1);
-        HYPRE_BoomerAMGSetNumSweeps(solver->precond_p, 1);
-        HYPRE_BoomerAMGSetRelaxType(solver->precond_p, 6);
-        HYPRE_BoomerAMGSetPrintLevel(solver->precond_p, 1);
+    /* Ghost cells */
+    dx_global[0]
+        = isperiodic(solver->bc_type[3]) ? dx_global[Nx_global] : dx_global[1];
+    dx_global[Nx+1]
+        = isperiodic(solver->bc_type[1]) ? dx_global[1] : dx_global[Nx];
+    xc_global[0] = xc_global[1] - (dx_global[0] + dx_global[1]) / 2;
+    xc_global[Nx_global+1] = xc_global[Nx_global] + (dx_global[Nx_global] + dx_global[Nx_global+1]) / 2;
 
-        switch (linear_solver_type) {
-        case SOLVER_PCG:
-            HYPRE_ParCSRPCGSetPrecond(
-                solver->linear_solver_p,
-                (HYPRE_PtrToSolverFcn)HYPRE_BoomerAMGSolve,
-                (HYPRE_PtrToSolverFcn)HYPRE_BoomerAMGSetup,
-                solver->precond_p
-            );
-            break;
-        case SOLVER_BiCGSTAB:
-            HYPRE_ParCSRBiCGSTABSetPrecond(
-                solver->linear_solver_p,
-                (HYPRE_PtrToSolverFcn)HYPRE_BoomerAMGSolve,
-                (HYPRE_PtrToSolverFcn)HYPRE_BoomerAMGSetup,
-                solver->precond_p
-            );
-            break;
-        case SOLVER_GMRES:
-            HYPRE_ParCSRGMRESSetPrecond(
-                solver->linear_solver_p,
-                (HYPRE_PtrToSolverFcn)HYPRE_BoomerAMGSolve,
-                (HYPRE_PtrToSolverFcn)HYPRE_BoomerAMGSetup,
-                solver->precond_p
-            );
-            break;
-        default:;
-        }
-        break;
-    default:
-        if (solver->rank == 0) {
-            printf("\nUnknown preconditioner type\n");
-            MPI_Abort(MPI_COMM_WORLD, -1);
-        }
+    dx[0] = dx_global[ilower-1];
+    dx[Nx+1] = dx_global[iupper+1];
+    dy[0] = isperiodic(solver->bc_type[2]) ? dy[Ny] : dy[1];
+    dy[Ny+1] = isperiodic(solver->bc_type[0]) ? dy[1] : dy[Ny];
+    dz[0] = isperiodic(solver->bc_type[4]) ? dz[Nz] : dz[1];
+    dz[Nz+1] = isperiodic(solver->bc_type[5]) ? dz[1] : dz[Nz];
+
+    xc[0] = xc_global[ilower-1];
+    xc[Nx+1] = xc_global[iupper+1];
+    yc[0] = yc[1] - (dy[0] + dy[1]) / 2;
+    yc[Ny+1] = yc[Ny] + (dy[Ny] + dy[Ny+1]) / 2;
+    zc[0] = zc[1] - (dz[0] + dz[1]) / 2;
+    zc[Nz+1] = zc[Nz] + (dz[Nz] + dz[Nz+1]) / 2;
+
+    /* Calculate second order derivative coefficients */
+    for (int i = 1; i <= Nx; i++) {
+        solver->kx_W[i] = dt / (2*Re * (xc[i] - xc[i-1])*dx[i]);
+        solver->kx_E[i] = dt / (2*Re * (xc[i+1] - xc[i])*dx[i]);
+    }
+    for (int j = 1; j <= Ny; j++) {
+        solver->ky_S[j] = dt / (2*Re * (yc[j] - yc[j-1])*dy[j]);
+        solver->ky_N[j] = dt / (2*Re * (yc[j+1] - yc[j])*dy[j]);
+    }
+    for (int k = 1; k <= Nz; k++) {
+        solver->kz_D[k] = dt / (2*Re * (zc[k] - zc[k-1])*dz[k]);
+        solver->kz_U[k] = dt / (2*Re * (zc[k+1] - zc[k])*dz[k]);
     }
 
-    HYPRE_IJVectorSetValues(solver->b, Nx*Ny*Nz, solver->vector_rows, solver->vector_zeros);
-    HYPRE_IJVectorSetValues(solver->x, Nx*Ny*Nz, solver->vector_rows, solver->vector_zeros);
-
-    HYPRE_IJVectorAssemble(solver->b);
-    HYPRE_IJVectorAssemble(solver->x);
-
-    HYPRE_IJVectorGetObject(solver->b, (void **)&solver->par_b);
-    HYPRE_IJVectorGetObject(solver->x, (void **)&solver->par_x);
-
-    switch (linear_solver_type) {
-    case SOLVER_AMG:
-        HYPRE_BoomerAMGSetup(solver->linear_solver_p, solver->parcsr_A_p, solver->par_b, solver->par_x);
-        break;
-    case SOLVER_PCG:
-        HYPRE_ParCSRPCGSetup(solver->linear_solver_p, solver->parcsr_A_p, solver->par_b, solver->par_x);
-        break;
-    case SOLVER_BiCGSTAB:
-        HYPRE_ParCSRBiCGSTABSetup(solver->linear_solver_p, solver->parcsr_A_p, solver->par_b, solver->par_x);
-        break;
-    case SOLVER_GMRES:
-        HYPRE_ParCSRGMRESSetup(solver->linear_solver_p, solver->parcsr_A_p, solver->par_b, solver->par_x);
-        break;
-    default:;
-    }
+    /* Build HYPRE variables. */
+    build_hypre(solver);
 }
 
 void IBMSolver_init_flow_const(IBMSolver *solver) {
@@ -557,7 +448,9 @@ static void alloc_arrays(IBMSolver *solver) {
     const int Nz = solver->Nz;
     const int Nx_global = solver->Nx_global;
 
-    /* dx and xc contains global info. */
+    /* dx_global and xc_global contain global info. Others contain only local
+       info. */
+
     solver->dx = calloc(Nx+2, sizeof(double));
     solver->dy = calloc(Ny+2, sizeof(double));
     solver->dz = calloc(Nz+2, sizeof(double));
@@ -568,8 +461,8 @@ static void alloc_arrays(IBMSolver *solver) {
     solver->dx_global = calloc(Nx_global+2, sizeof(double));
     solver->xc_global = calloc(Nx_global+2, sizeof(double));
 
-    /* Others contain only local info. */
-    solver->flag = calloc(Nx_global+2, sizeof(int [Ny+2][Nz+2]));
+    solver->flag = calloc(Nx+2, sizeof(int [Ny+2][Nz+2]));
+    solver->lvset = calloc(Nx+2, sizeof(double [Ny+2][Nz+2]));
 
     solver->u1       = calloc(Nx+2, sizeof(double [Ny+2][Nz+2]));
     solver->u1_next  = calloc(Nx+2, sizeof(double [Ny+2][Nz+2]));
@@ -611,20 +504,20 @@ static void alloc_arrays(IBMSolver *solver) {
     solver->ky_N = calloc(Ny+2, sizeof(double));
     solver->kz_D = calloc(Nz+2, sizeof(double));
     solver->kz_U = calloc(Nz+2, sizeof(double));
+
+    solver->p_coeffsum = calloc(Nx+2, sizeof(double [Ny+2][Nz+2]));
 }
 
-static void build_hypre(IBMSolver *solver, const double3d _lvset) {
+static void build_hypre(IBMSolver *solver) {
     const int Nx = solver->Nx;
     const int Ny = solver->Ny;
     const int Nz = solver->Nz;
 
-    const double (*lvset)[Ny+2][Nz+2] = _lvset;
-
     /* Matrices. */
-    solver->A_u1 = create_matrix(solver, lvset, 1);
-    solver->A_u2 = create_matrix(solver, lvset, 2);
-    solver->A_u3 = create_matrix(solver, lvset, 3);
-    solver->A_p = create_matrix(solver, lvset, 4);
+    solver->A_u1 = create_matrix(solver, 1);
+    solver->A_u2 = create_matrix(solver, 2);
+    solver->A_u3 = create_matrix(solver, 3);
+    solver->A_p = create_matrix(solver, 4);
 
     HYPRE_IJMatrixGetObject(solver->A_u1, (void **)&solver->parcsr_A_u1);
     HYPRE_IJMatrixGetObject(solver->A_u2, (void **)&solver->parcsr_A_u2);
@@ -658,9 +551,163 @@ static void build_hypre(IBMSolver *solver, const double3d _lvset) {
     for (int i = 0; i < Nx*Ny*Nz; i++) {
         solver->vector_rows[i] = GLOB_CELL_IDX(1, 1, 1) + i;
     }
+
+    /* Set velocity solver. */
+    HYPRE_ParCSRBiCGSTABCreate(MPI_COMM_WORLD, &solver->linear_solver);
+    HYPRE_BiCGSTABSetMaxIter(solver->linear_solver, 1000);
+    HYPRE_BiCGSTABSetTol(solver->linear_solver, 1e-6);
+    HYPRE_BiCGSTABSetLogging(solver->linear_solver, 1);
+    // HYPRE_BiCGSTABSetPrintLevel(solver->hypre_solver, 2);
+
+    HYPRE_BoomerAMGCreate(&solver->precond);
+    HYPRE_BoomerAMGSetCoarsenType(solver->precond, 6);
+    HYPRE_BoomerAMGSetOldDefault(solver->precond);
+    HYPRE_BoomerAMGSetRelaxType(solver->precond, 6);
+    HYPRE_BoomerAMGSetNumSweeps(solver->precond, 1);
+    HYPRE_BoomerAMGSetTol(solver->precond, 0);
+    HYPRE_BoomerAMGSetMaxIter(solver->precond, 1);
+    // HYPRE_BoomerAMGSetPrintLevel(solver->precond, 1);
+
+    HYPRE_BiCGSTABSetPrecond(
+        solver->linear_solver,
+        (HYPRE_PtrToSolverFcn)HYPRE_BoomerAMGSolve,
+        (HYPRE_PtrToSolverFcn)HYPRE_BoomerAMGSetup,
+        solver->precond
+    );
+
+    /* Set pressure solver. */
+    switch (solver->linear_solver_type) {
+    case SOLVER_AMG:
+        if (solver->precond_type != PRECOND_NONE && solver->rank == 0) {
+            printf("\nCannot use preconditioner with BoomerAMG solver\n");
+            MPI_Abort(MPI_COMM_WORLD, -1);
+        }
+
+        HYPRE_BoomerAMGCreate(&solver->linear_solver_p);
+        HYPRE_BoomerAMGSetOldDefault(solver->linear_solver_p);
+        HYPRE_BoomerAMGSetTol(solver->linear_solver_p, solver->tol);
+        HYPRE_BoomerAMGSetMaxIter(solver->linear_solver_p, 1000);
+        HYPRE_BoomerAMGSetMaxRowSum(solver->linear_solver_p, 1);
+        HYPRE_BoomerAMGSetCoarsenType(solver->linear_solver_p, 6);
+        HYPRE_BoomerAMGSetNonGalerkinTol(solver->linear_solver_p, 0.05);
+        HYPRE_BoomerAMGSetLevelNonGalerkinTol(solver->linear_solver_p, 0.00, 0);
+        HYPRE_BoomerAMGSetLevelNonGalerkinTol(solver->linear_solver_p, 0.01, 1);
+        HYPRE_BoomerAMGSetAggNumLevels(solver->linear_solver_p, 1);
+        HYPRE_BoomerAMGSetNumSweeps(solver->linear_solver_p, 1);
+        HYPRE_BoomerAMGSetRelaxType(solver->linear_solver_p, 6);
+        HYPRE_BoomerAMGSetLogging(solver->linear_solver_p, 1);
+        // HYPRE_BoomerAMGSetPrintLevel(solver->linear_solver_p, 3);
+        break;
+    case SOLVER_PCG:
+        HYPRE_ParCSRPCGCreate(MPI_COMM_WORLD, &solver->linear_solver_p);
+        HYPRE_ParCSRPCGSetTol(solver->linear_solver_p, solver->tol);
+        HYPRE_ParCSRPCGSetMaxIter(solver->linear_solver_p, 1000);
+        HYPRE_ParCSRPCGSetLogging(solver->linear_solver_p, 1);
+        // HYPRE_ParCSRPCGSetPrintLevel(solver->linear_solver_p, 2);
+        break;
+    case SOLVER_BiCGSTAB:
+        HYPRE_ParCSRBiCGSTABCreate(MPI_COMM_WORLD, &solver->linear_solver_p);
+        HYPRE_ParCSRBiCGSTABSetTol(solver->linear_solver_p, solver->tol);
+        HYPRE_ParCSRBiCGSTABSetMaxIter(solver->linear_solver_p, 1000);
+        HYPRE_ParCSRBiCGSTABSetLogging(solver->linear_solver_p, 1);
+        // HYPRE_ParCSRBiCGSTABSetPrintLevel(solver->linear_solver_p, 2);
+        break;
+    case SOLVER_GMRES:
+        HYPRE_ParCSRGMRESCreate(MPI_COMM_WORLD, &solver->linear_solver_p);
+        HYPRE_ParCSRGMRESSetMaxIter(solver->linear_solver_p, 1000);
+        HYPRE_ParCSRGMRESSetKDim(solver->linear_solver_p, 10);
+        HYPRE_ParCSRGMRESSetTol(solver->linear_solver_p, solver->tol);
+        HYPRE_ParCSRGMRESSetLogging(solver->linear_solver_p, 1);
+        // HYPRE_ParCSRGMRESSetPrintLevel(solver->hypre_solver_p, 2);
+        break;
+    default:
+        if (solver->rank == 0) {
+            printf("\nUnknown linear solver type\n");
+            MPI_Abort(MPI_COMM_WORLD, -1);
+        }
+    }
+
+    switch (solver->precond_type) {
+    case PRECOND_NONE:
+        solver->precond_p = NULL;
+        break;
+    case PRECOND_AMG:
+        HYPRE_BoomerAMGCreate(&solver->precond_p);
+        HYPRE_BoomerAMGSetOldDefault(solver->precond_p);
+        HYPRE_BoomerAMGSetTol(solver->precond_p, 0);
+        HYPRE_BoomerAMGSetMaxIter(solver->precond_p, 1);
+        HYPRE_BoomerAMGSetMaxRowSum(solver->precond_p, 1);
+        HYPRE_BoomerAMGSetCoarsenType(solver->precond_p, 6);
+        HYPRE_BoomerAMGSetNonGalerkinTol(solver->precond_p, 0.05);
+        HYPRE_BoomerAMGSetLevelNonGalerkinTol(solver->precond_p, 0.00, 0);
+        HYPRE_BoomerAMGSetLevelNonGalerkinTol(solver->precond_p, 0.01, 1);
+        HYPRE_BoomerAMGSetAggNumLevels(solver->precond_p, 1);
+        HYPRE_BoomerAMGSetNumSweeps(solver->precond_p, 1);
+        HYPRE_BoomerAMGSetRelaxType(solver->precond_p, 6);
+        HYPRE_BoomerAMGSetPrintLevel(solver->precond_p, 1);
+
+        switch (solver->linear_solver_type) {
+        case SOLVER_PCG:
+            HYPRE_ParCSRPCGSetPrecond(
+                solver->linear_solver_p,
+                (HYPRE_PtrToSolverFcn)HYPRE_BoomerAMGSolve,
+                (HYPRE_PtrToSolverFcn)HYPRE_BoomerAMGSetup,
+                solver->precond_p
+            );
+            break;
+        case SOLVER_BiCGSTAB:
+            HYPRE_ParCSRBiCGSTABSetPrecond(
+                solver->linear_solver_p,
+                (HYPRE_PtrToSolverFcn)HYPRE_BoomerAMGSolve,
+                (HYPRE_PtrToSolverFcn)HYPRE_BoomerAMGSetup,
+                solver->precond_p
+            );
+            break;
+        case SOLVER_GMRES:
+            HYPRE_ParCSRGMRESSetPrecond(
+                solver->linear_solver_p,
+                (HYPRE_PtrToSolverFcn)HYPRE_BoomerAMGSolve,
+                (HYPRE_PtrToSolverFcn)HYPRE_BoomerAMGSetup,
+                solver->precond_p
+            );
+            break;
+        default:;
+        }
+        break;
+    default:
+        if (solver->rank == 0) {
+            printf("\nUnknown preconditioner type\n");
+            MPI_Abort(MPI_COMM_WORLD, -1);
+        }
+    }
+
+    HYPRE_IJVectorSetValues(solver->b, Nx*Ny*Nz, solver->vector_rows, solver->vector_zeros);
+    HYPRE_IJVectorSetValues(solver->x, Nx*Ny*Nz, solver->vector_rows, solver->vector_zeros);
+
+    HYPRE_IJVectorAssemble(solver->b);
+    HYPRE_IJVectorAssemble(solver->x);
+
+    HYPRE_IJVectorGetObject(solver->b, (void **)&solver->par_b);
+    HYPRE_IJVectorGetObject(solver->x, (void **)&solver->par_x);
+
+    switch (solver->linear_solver_type) {
+    case SOLVER_AMG:
+        HYPRE_BoomerAMGSetup(solver->linear_solver_p, solver->parcsr_A_p, solver->par_b, solver->par_x);
+        break;
+    case SOLVER_PCG:
+        HYPRE_ParCSRPCGSetup(solver->linear_solver_p, solver->parcsr_A_p, solver->par_b, solver->par_x);
+        break;
+    case SOLVER_BiCGSTAB:
+        HYPRE_ParCSRBiCGSTABSetup(solver->linear_solver_p, solver->parcsr_A_p, solver->par_b, solver->par_x);
+        break;
+    case SOLVER_GMRES:
+        HYPRE_ParCSRGMRESSetup(solver->linear_solver_p, solver->parcsr_A_p, solver->par_b, solver->par_x);
+        break;
+    default:;
+    }
 }
 
-static HYPRE_IJMatrix create_matrix(IBMSolver *solver, const double3d _lvset, int type) {
+static HYPRE_IJMatrix create_matrix(IBMSolver *solver, int type) {
     const int Nx = solver->Nx;
     const int Ny = solver->Ny;
     const int Nz = solver->Nz;
@@ -674,9 +721,12 @@ static HYPRE_IJMatrix create_matrix(IBMSolver *solver, const double3d _lvset, in
     const double *kz_U = solver->kz_U;
 
     const double *xc = solver->xc;
+    const double *yc = solver->yc;
+    const double *zc = solver->zc;
 
     const int (*flag)[Ny+2][Nz+2] = solver->flag;
-    const double (*lvset)[Ny+2][Nz+2] = _lvset;
+
+    double (*p_coeffsum)[Ny+2][Nz+2] = solver->p_coeffsum;
 
     HYPRE_IJMatrix A;
 
@@ -718,102 +768,215 @@ static HYPRE_IJMatrix create_matrix(IBMSolver *solver, const double3d _lvset, in
 
             /* West (i = 1) */
             if (LOCL_TO_GLOB(i) == 1) {
-                values[4] = 0;
                 switch (solver->bc_type[3]) {
                 case BC_VELOCITY_INLET:
                 case BC_STATIONARY_WALL:
-                    if (type != 4) {
-                        values[0] += kx_W[i];
-                    }
-                    else {
-                        values[0] -= kx_W[i];
-                    }
+                    values[4] = 0;
+                    if (type != 4) values[0] += kx_W[i];
+                    else           values[0] -= kx_W[i];
                     break;
                 case BC_PRESSURE_OUTLET:
-                    // TODO:
+                    values[4] = 0;
+                    if (type == 4) values[0] += kx_W[i];
+                    else {
+                        values[0] -= kx_W[i]*(xc[i+1]-xc[i-1])/(xc[i+1]-xc[i]);
+                        values[2] += kx_W[i]*(xc[i]-xc[i-1])/(xc[i+1]-xc[i]);
+                    }
                     break;
-                case BC_NO_SLIP_WALL:
-                    if (type == 1) {
+                case BC_FREE_SLIP_WALL:
+                    values[4] = 0;
+                    if (type == 1) values[0] += kx_W[i];
+                    else           values[0] -= kx_W[i];
+                    break;
+                case BC_ALL_PERIODIC:
+                    cols[4] = LOCL_CELL_IDX(Nx_global, j, k);
+                    break;
+                case BC_VELOCITY_PERIODIC:
+                    if (type != 4) cols[4] = LOCL_CELL_IDX(Nx_global, j, k);
+                    else {
+                        values[4] = 0;
                         values[0] += kx_W[i];
                     }
+                    break;
                 }
             }
 
-            /* East (i = Nx) => pressure outlet.
-                * u[Nx+1][j][k] is linearly extrapolated using u[Nx-1][j][k] and
-                  u[Nx][j][k] where u = u1, u2, or u3.
-                * p[Nx+1][j][k] + p[Nx][j][k] = 0 */
+            /* East (i = Nx_global) */
             if (LOCL_TO_GLOB(i) == Nx_global) {
-                if (type == 4) {
-                    values[0] += kx_E[i];
+                switch (solver->bc_type[1]) {
+                case BC_VELOCITY_INLET:
+                case BC_STATIONARY_WALL:
+                    values[2] = 0;
+                    if (type != 4) values[0] += kx_E[i];
+                    else           values[0] -= kx_E[i];
+                    break;
+                case BC_PRESSURE_OUTLET:
+                    values[2] = 0;
+                    if (type == 4) values[0] += kx_E[i];
+                    else {
+                        values[0] -= kx_E[i]*(xc[i+1]-xc[i-1])/(xc[i]-xc[i-1]);
+                        values[4] += kx_E[i]*(xc[i+1]-xc[i])/(xc[i]-xc[i-1]);
+                    }
+                    break;
+                case BC_FREE_SLIP_WALL:
+                    values[2] = 0;
+                    if (type == 1) values[0] += kx_E[i];
+                    else           values[0] -= kx_E[i];
+                    break;
+                case BC_ALL_PERIODIC:
+                    cols[2] = LOCL_CELL_IDX(1, j, k);
+                    break;
+                case BC_VELOCITY_PERIODIC:
+                    if (type != 4) cols[2] = LOCL_CELL_IDX(1, j, k);
+                    else {
+                        values[2] = 0;
+                        values[0] += kx_E[i];
+                    }
+                    break;
                 }
-                else {
-                    values[0] -= kx_E[i]*(xc[i+1]-xc[i-1])/(xc[i]-xc[i-1]);
-                    values[4] += kx_E[i]*(xc[i+1]-xc[i])/(xc[i]-xc[i-1]);
-                }
-                values[2] = 0;
             }
 
-            /* South (j = 1) => free-slip wall.
-                * u1[i][0][k] = u1[i][1][k]
-                * u2[i][0][k] + u2[i][1][k] = 0
-                * u3[i][0][k] = u3[i][1][k]
-                * p[i][0][k] = p[i][1][k] */
+            /* South (j = 1) */
             if (j == 1) {
-                if (type == 2) {
-                    values[0] += ky_S[j];
+                switch (solver->bc_type[2]) {
+                case BC_VELOCITY_INLET:
+                case BC_STATIONARY_WALL:
+                    values[3] = 0;
+                    if (type != 4) values[0] += ky_S[j];
+                    else           values[0] -= ky_S[j];
+                    break;
+                case BC_PRESSURE_OUTLET:
+                    values[3] = 0;
+                    if (type == 4) values[0] += ky_S[j];
+                    else {
+                        values[0] -= ky_S[j]*(yc[j+1]-yc[j-1])/(yc[j+1]-yc[j]);
+                        values[1] += ky_S[j]*(yc[j]-yc[j-1])/(yc[j+1]-yc[j]);
+                    }
+                    break;
+                case BC_FREE_SLIP_WALL:
+                    values[3] = 0;
+                    if (type == 2) values[0] += ky_S[j];
+                    else           values[0] -= ky_S[j];
+                    break;
+                case BC_ALL_PERIODIC:
+                    cols[3] = GLOB_CELL_IDX(i, Ny, k);
+                    break;
+                case BC_VELOCITY_PERIODIC:
+                    if (type != 4) cols[3] = GLOB_CELL_IDX(i, Ny, k);
+                    else {
+                        values[3] = 0;
+                        values[0] += ky_S[j];
+                    }
+                    break;
                 }
-                else {
-                    values[0] -= ky_S[j];
-                }
-                values[3] = 0;
             }
 
-            /* North (j = Ny) => free-slip wall.
-                * u1[i][Ny+1][k] = u1[i][Ny][k]
-                * u2[i][Ny+1][k] + u2[i][Ny][k] = 0
-                * u3[i][Ny+1][k] = u3[i][Ny][k]
-                * p[i][Ny+1][k] = p[i][Ny][k] */
+            /* North (j = Ny) */
             if (j == Ny) {
-                if (type == 2) {
-                    values[0] += ky_N[j];
+                switch (solver->bc_type[0]) {
+                case BC_VELOCITY_INLET:
+                case BC_STATIONARY_WALL:
+                    values[1] = 0;
+                    if (type != 4) values[0] += ky_N[j];
+                    else           values[0] -= ky_N[j];
+                    break;
+                case BC_PRESSURE_OUTLET:
+                    values[1] = 0;
+                    if (type == 4) values[0] += ky_N[j];
+                    else {
+                        values[0] -= ky_N[j]*(yc[j+1]-yc[j-1])/(yc[j]-yc[j-1]);
+                        values[3] += ky_N[j]*(yc[j+1]-yc[j])/(yc[j]-yc[j-1]);
+                    }
+                    break;
+                case BC_FREE_SLIP_WALL:
+                    values[1] = 0;
+                    if (type == 2) values[0] += ky_N[j];
+                    else           values[0] -= ky_N[j];
+                    break;
+                case BC_ALL_PERIODIC:
+                    cols[1] = GLOB_CELL_IDX(i, 1, k);
+                    break;
+                case BC_VELOCITY_PERIODIC:
+                    if (type != 4) cols[1] = GLOB_CELL_IDX(i, 1, k);
+                    else {
+                        values[1] = 0;
+                        values[0] += ky_N[j];
+                    }
+                    break;
                 }
-                else {
-                    values[0] -= ky_N[j];
-                }
-                values[1] = 0;
             }
 
-            /* Upper (k = 1) => free-slip wall.
-                * u1[i][j][0] = u1[i][j][1]
-                * u2[i][j][0] = u2[i][j][1]
-                * u3[i][j][0] + u3[i][j][1] = 0
-                * p[i][j][0] = p[i][j][1] */
+            /* Down (k = 1) */
             if (k == 1) {
-                if (type == 3) {
-                    values[0] += kz_D[k];
+                switch (solver->bc_type[4]) {
+                case BC_VELOCITY_INLET:
+                case BC_STATIONARY_WALL:
+                    values[5] = 0;
+                    if (type != 4) values[0] += kz_D[k];
+                    else           values[0] -= kz_D[k];
+                    break;
+                case BC_PRESSURE_OUTLET:
+                    values[5] = 0;
+                    if (type == 4) values[0] += kz_D[k];
+                    else {
+                        values[0] -= kz_D[j]*(zc[k+1]-zc[k-1])/(zc[k+1]-zc[k]);
+                        values[6] += kz_D[j]*(zc[k]-zc[k-1])/(zc[k+1]-zc[k]);
+                    }
+                    break;
+                case BC_FREE_SLIP_WALL:
+                    values[5] = 0;
+                    if (type == 3) values[0] += kz_D[k];
+                    else           values[0] -= kz_D[k];
+                    break;
+                case BC_ALL_PERIODIC:
+                    cols[5] = GLOB_CELL_IDX(i, j, Nz);
+                    break;
+                case BC_VELOCITY_PERIODIC:
+                    if (type != 4) cols[5] = GLOB_CELL_IDX(i, j, Nz);
+                    else {
+                        values[5] = 0;
+                        values[0] += kz_D[k];
+                    }
+                    break;
                 }
-                else {
-                    values[0] -= kz_D[k];
-                }
-                values[5] = 0;
             }
 
-            /* Upper (k = Nz) => free-slip wall.
-                * u1[i][j][Nz+1] = u1[i][j][Nz]
-                * u2[i][j][Nz+1] = u2[i][j][Nz]
-                * u3[i][j][Nz+1] + u3[i][j][Nz] = 0
-                * p[i][j][Nz+1] = p[i][j][Nz] */
+            /* Up (k = Nz) */
             if (k == Nz) {
-                if (type == 3) {
-                    values[0] += kz_U[k];
+                switch (solver->bc_type[5]) {
+                case BC_VELOCITY_INLET:
+                case BC_STATIONARY_WALL:
+                    values[6] = 0;
+                    if (type != 4) values[0] += kz_U[k];
+                    else           values[0] -= kz_U[k];
+                    break;
+                case BC_PRESSURE_OUTLET:
+                    values[6] = 0;
+                    if (type == 4) values[0] += kz_U[k];
+                    else {
+                        values[0] -= kz_U[j]*(zc[k+1]-zc[k-1])/(zc[k]-zc[k-1]);
+                        values[5] += kz_U[j]*(zc[k+1]-zc[k])/(zc[k]-zc[k-1]);
+                    }
+                    break;
+                case BC_FREE_SLIP_WALL:
+                    values[6] = 0;
+                    if (type == 3) values[0] += kz_U[k];
+                    else           values[0] -= kz_U[k];
+                    break;
+                case BC_ALL_PERIODIC:
+                    cols[6] = GLOB_CELL_IDX(i, j, 1);
+                    break;
+                case BC_VELOCITY_PERIODIC:
+                    if (type != 4) cols[6] = GLOB_CELL_IDX(i, j, 1);
+                    else {
+                        values[6] = 0;
+                        values[0] += kz_U[k];
+                    }
+                    break;
                 }
-                else {
-                    values[0] -= kz_U[k];
-                }
-                values[6] = 0;
             }
 
+            /* Remove zero elements. */
             ncols = 1;
             for (int l = 1; l < 7; l++) {
                 if (values[l] != 0) {
@@ -823,7 +986,9 @@ static HYPRE_IJMatrix create_matrix(IBMSolver *solver, const double3d _lvset, in
                 }
             }
 
+            /* Normalize pressure equation. */
             if (type == 4) {
+                p_coeffsum[i][j][k] = values[0];
                 for (int l = 1; l < ncols; l++) {
                     values[l] /= values[0];
                 }
@@ -837,7 +1002,7 @@ static HYPRE_IJMatrix create_matrix(IBMSolver *solver, const double3d _lvset, in
             int interp_idx[8];
             double interp_coeff[8];
 
-            get_interp_info(solver, lvset, i, j, k, interp_idx, interp_coeff);
+            get_interp_info(solver, i, j, k, interp_idx, interp_coeff);
 
             for (int l = 0; l < 8; l++) {
                 if (interp_idx[l] == cur_idx) {
@@ -894,7 +1059,7 @@ static HYPRE_IJMatrix create_matrix(IBMSolver *solver, const double3d _lvset, in
 }
 
 static void get_interp_info(
-    IBMSolver *solver, const double3d _lvset,
+    IBMSolver *solver,
     const int i, const int j, const int k,
     int *restrict interp_idx, double *restrict interp_coeff
 ) {
@@ -907,7 +1072,7 @@ static void get_interp_info(
     const double *zc = solver->zc;
     const double *xc_global = solver->xc_global;
 
-    const double (*lvset)[Ny+2][Nz+2] = _lvset;
+    const double (*lvset)[Ny+2][Nz+2] = solver->lvset;
 
     Vector n, m;
 
@@ -996,5 +1161,15 @@ static void interp_stag_vel(IBMSolver *solver) {
                 U3[i][j][k] = (u3[i][j][k]*dz[k+1] + u3[i][j][k+1]*dz[k]) / (dz[k]+dz[k+1]);
             }
         }
+    }
+}
+
+static bool isperiodic(IBMSolverBCType type) {
+    switch (type) {
+    case BC_ALL_PERIODIC:
+    case BC_VELOCITY_PERIODIC:
+        return true;
+    default:
+        return false;
     }
 }

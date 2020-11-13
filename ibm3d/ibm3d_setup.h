@@ -6,17 +6,20 @@
 IBMSolver *IBMSolver_new(const int, const int);
 void IBMSolver_destroy(IBMSolver *);
 
-void IBMSolver_set_grid_params(
+void IBMSolver_set_grid(
     IBMSolver *,
     const int, const int, const int,
     const double *restrict,
     const double *restrict,
-    const double *restrict,
-    const double, const double
+    const double *restrict
 );
+void IBMSolver_set_params(IBMSolver *, const double, const double);
+
 void IBMSolver_set_bc(IBMSolver *, IBMSolverDirection, IBMSolverBCType, double);
 void IBMSolver_set_obstacle(IBMSolver *, Polyhedron *);
-void IBMSolver_set_linear_solver(IBMSolver *, IBMSolverLinearSolverType, IBMSolverPrecondType);
+void IBMSolver_set_linear_solver(IBMSolver *, IBMSolverLinearSolverType, IBMSolverPrecondType, const double);
+
+void IBMSolver_assemble(IBMSolver *);
 
 void IBMSolver_init_flow_const(IBMSolver *);
 void IBMSolver_init_flow_file(IBMSolver *, const char *, const char *, const char *, const char *);
