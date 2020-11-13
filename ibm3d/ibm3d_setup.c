@@ -20,6 +20,8 @@ static const int adj[6][3] = {
             4
 */
 
+static const double PI = 3.1415926535897932;
+
 static void alloc_arrays(IBMSolver *);
 static void build_hypre(IBMSolver *);
 static HYPRE_IJMatrix create_matrix(IBMSolver *, int);
@@ -331,7 +333,7 @@ void IBMSolver_init_flow_const(IBMSolver *solver) {
                 u1[i][j][k] = 1;
                 u2[i][j][k] = 0;
                 u3[i][j][k] = 0;
-                p[i][j][k] = 0;
+                p[i][j][k] = 1;
             }
         }
     }
@@ -919,8 +921,8 @@ static HYPRE_IJMatrix create_matrix(IBMSolver *solver, int type) {
                     values[5] = 0;
                     if (type == 4) values[0] += kz_D[k];
                     else {
-                        values[0] -= kz_D[j]*(zc[k+1]-zc[k-1])/(zc[k+1]-zc[k]);
-                        values[6] += kz_D[j]*(zc[k]-zc[k-1])/(zc[k+1]-zc[k]);
+                        values[0] -= kz_D[k]*(zc[k+1]-zc[k-1])/(zc[k+1]-zc[k]);
+                        values[6] += kz_D[k]*(zc[k]-zc[k-1])/(zc[k+1]-zc[k]);
                     }
                     break;
                 case BC_FREE_SLIP_WALL:
@@ -954,8 +956,8 @@ static HYPRE_IJMatrix create_matrix(IBMSolver *solver, int type) {
                     values[6] = 0;
                     if (type == 4) values[0] += kz_U[k];
                     else {
-                        values[0] -= kz_U[j]*(zc[k+1]-zc[k-1])/(zc[k]-zc[k-1]);
-                        values[5] += kz_U[j]*(zc[k+1]-zc[k])/(zc[k]-zc[k-1]);
+                        values[0] -= kz_U[k]*(zc[k+1]-zc[k-1])/(zc[k]-zc[k-1]);
+                        values[5] += kz_U[k]*(zc[k+1]-zc[k])/(zc[k]-zc[k-1]);
                     }
                     break;
                 case BC_FREE_SLIP_WALL:
@@ -1151,7 +1153,7 @@ static void interp_stag_vel(IBMSolver *solver) {
     for (int i = 0; i <= Nx+1; i++) {
         for (int j = 0; j <= Ny; j++) {
             for (int k = 0; k <= Nz+1; k++) {
-        U2[i][j][k] = (u2[i][j][k]*dy[j+1] + u2[i][j+1][k]*dy[j]) / (dy[j]+dy[j+1]);
+                U2[i][j][k] = (u2[i][j][k]*dy[j+1] + u2[i][j+1][k]*dy[j]) / (dy[j]+dy[j+1]);
             }
         }
     }

@@ -10,7 +10,7 @@ const int Ny = 160;
 const int Nz = 129;
 
 const double Re = 3300;
-const double dt = 0.01;
+const double dt = 0.005;
 
 const double PI = 3.1415926535897932;
 
@@ -51,26 +51,26 @@ int main(int argc, char **argv) {
     IBMSolver_set_grid(solver, Nx, Ny, Nz, xf, yf, zf);
     IBMSolver_set_params(solver, Re, dt);
 
-    IBMSolver_set_bc(solver, DIR_WEST, BC_VELOCITY_PERIODIC, 1);
-    IBMSolver_set_bc(solver, DIR_EAST, BC_VELOCITY_PERIODIC, 0);
+    IBMSolver_set_bc(solver, DIR_WEST, BC_VELOCITY_INLET, 1);
+    IBMSolver_set_bc(solver, DIR_EAST, BC_PRESSURE_OUTLET, 1);
     IBMSolver_set_bc(solver, DIR_SOUTH | DIR_NORTH, BC_ALL_PERIODIC, 0);
     IBMSolver_set_bc(solver, DIR_DOWN | DIR_UP, BC_STATIONARY_WALL, 0);
 
     IBMSolver_set_obstacle(solver, NULL);
 
-    IBMSolver_set_linear_solver(solver, SOLVER_BiCGSTAB, PRECOND_AMG, 1e-4);
+    IBMSolver_set_linear_solver(solver, SOLVER_BiCGSTAB, PRECOND_AMG, 1e-6);
 
     IBMSolver_assemble(solver);
 
     /* Initialize. */
-    // IBMSolver_init_flow_const(solver);
-    IBMSolver_init_flow_file(
-        solver,
-        "channel_u1.out", "channel_u2.out", "channel_u3.out", "channel_p.out"
-    );
+    IBMSolver_init_flow_const(solver);
+    // IBMSolver_init_flow_file(
+    //     solver,
+    //     "channel_u1.out", "channel_u2.out", "channel_u3.out", "channel_p.out"
+    // );
 
     /* Iterate. */
-    IBMSolver_iterate(solver, 5, true);
+    IBMSolver_iterate(solver, 10, true);
 
     /* Export result. */
     IBMSolver_export_results(

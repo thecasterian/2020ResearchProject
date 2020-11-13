@@ -48,12 +48,13 @@ d = mlab.pipeline.add_dataset(sg)
 gz = mlab.pipeline.grid_plane(d)
 gz.grid_plane.axis = 'y'
 
-cut_plane = mlab.pipeline.scalar_cut_plane(d, plane_orientation='x_axes')
+cut_plane = mlab.pipeline.scalar_cut_plane(d, plane_orientation='y_axes')
 cut_plane.implicit_plane.origin = (0, 0, 0)
-cut_plane.implicit_plane.widget.enabled = False
+# cut_plane.implicit_plane.widget.enabled = False
 
 mlab.show()
 
+# plt.plot(*np.meshgrid(xc, zc), 'ko')
 C = plt.contourf(xc, zc, V[:, Ny//2, :], 20)
 plt.colorbar(C)
 plt.axis('equal')

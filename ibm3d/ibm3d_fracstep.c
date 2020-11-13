@@ -659,7 +659,7 @@ static inline void calc_u_tilde(IBMSolver *solver) {
     }
 
     /* Up. */
-    switch (solver->bc_type[4]) {
+    switch (solver->bc_type[5]) {
     case BC_PRESSURE_OUTLET:
         for (int i = 1; i <= Nx; i++) {
             for (int j = 1; j <= Ny; j++) {
@@ -1454,7 +1454,7 @@ static inline void update_next(IBMSolver *solver) {
         for (int i = 1; i <= Nx; i++) {
             for (int k = 1; k <= Nz; k++) {
                 u1_next[i][Ny+1][k] = -u1_next[i][Ny][k];
-                u2_next[i][Ny+1][k] = 2*solver->bc_val[2] - u2_next[i][Ny][k];
+                u2_next[i][Ny+1][k] = 2*solver->bc_val[0] - u2_next[i][Ny][k];
                 u3_next[i][Ny+1][k] = -u3_next[i][Ny][k];
             }
         }
