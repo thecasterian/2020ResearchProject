@@ -14,6 +14,8 @@ static inline void calc_U_star(IBMSolver *);
 static inline void calc_p_prime(IBMSolver *, double *);
 static inline void update_next(IBMSolver *);
 
+static void autosave(IBMSolver *);
+
 void IBMSolver_iterate(IBMSolver *solver, int num_time_steps, bool verbose) {
     struct timespec t_start, t_end;
     long elapsed_time, hour, min, sec;
@@ -28,7 +30,7 @@ void IBMSolver_iterate(IBMSolver *solver, int num_time_steps, bool verbose) {
         clock_gettime(CLOCK_REALTIME, &t_start);
     }
 
-    for (int i = 1; i <= num_time_steps; i++) {
+    do {
         calc_N(solver);
         calc_u_star(solver, &final_norm_u1, &final_norm_u2, &final_norm_u3);
         calc_u_tilde(solver);
@@ -36,13 +38,15 @@ void IBMSolver_iterate(IBMSolver *solver, int num_time_steps, bool verbose) {
         calc_p_prime(solver, &final_norm_p);
         update_next(solver);
 
+        solver->iter++;
+
         /* Print iteration results. */
         if (verbose && solver->rank == 0) {
             clock_gettime(CLOCK_REALTIME, &t_end);
             elapsed_time = (t_end.tv_sec*1000+t_end.tv_nsec/1000000)
                 - (t_start.tv_sec*1000+t_start.tv_nsec/1000000);
 
-            if (i % 10 == 1) {
+            if (solver->iter % 10 == 1) {
                 printf("\n  iter       u1 res       u2 res       u3 res        p res       time\n");
                 printf("---------------------------------------------------------------------\n");
             }
@@ -61,11 +65,20 @@ void IBMSolver_iterate(IBMSolver *solver, int num_time_steps, bool verbose) {
 
             printf(
                 "%6d   %10.4e   %10.4e   %10.4e   %10.4e   %02ld:%02ld:%02ld\n",
-                i, final_norm_u1, final_norm_u2, final_norm_u3, final_norm_p,
+                solver->iter,
+                final_norm_u1, final_norm_u2, final_norm_u3, final_norm_p,
                 hour, min, sec
             );
         }
-    }
+
+        /* Autosave. */
+        if (solver->iter % solver->autosave_period == 0) {
+            if (solver->rank == 0) {
+                printf("\nAutosave...\n\n");
+            }
+            autosave(solver);
+        }
+    } while (solver->iter < num_time_steps);
 }
 
 static inline void calc_N(IBMSolver *solver) {
@@ -873,13 +886,6 @@ static inline void calc_p_prime(IBMSolver *solver, double *final_norm_p) {
     const double *const dy = solver->dy;
     const double *const dz = solver->dz;
 
-    const double *const kx_W = solver->kx_W;
-    const double *const kx_E = solver->kx_E;
-    const double *const ky_S = solver->ky_S;
-    const double *const ky_N = solver->ky_N;
-    const double *const kz_D = solver->kz_D;
-    const double *const kz_U = solver->kz_U;
-
     const int (*const flag)[Ny+2][Nz+2] = solver->flag;
 
     const double (*const U1_star)[Ny+2][Nz+2] = solver->U1_star;
@@ -897,65 +903,6 @@ static inline void calc_p_prime(IBMSolver *solver, double *final_norm_p) {
                     + (U2_star[i][j][k] - U2_star[i][j-1][k]) / dy[j]
                     + (U3_star[i][j][k] - U3_star[i][j][k-1]) / dz[k]
                 );
-
-            // /* West. */
-            // if (LOCL_TO_GLOB(i) == 1) {
-            //     switch (solver->bc_type[3]) {
-            //     case BC_PRESSURE_OUTLET:
-            //     case BC_VELOCITY_PERIODIC:
-            //         *rhs += 2*solver->bc_val[3]*kx_W[i];
-            //         break;
-            //     default:;
-            //     }
-            // }
-
-            // /* East. */
-            // if (LOCL_TO_GLOB(i) == Nx_global) {
-            //     switch (solver->bc_type[1]) {
-            //     case BC_PRESSURE_OUTLET:
-            //     case BC_VELOCITY_PERIODIC:
-            //         *rhs += 2*solver->bc_val[1]*kx_E[i];
-            //         break;
-            //     default:;
-            //     }
-            // }
-
-            // /* South. */
-            // switch (solver->bc_type[2]) {
-            // case BC_PRESSURE_OUTLET:
-            // case BC_VELOCITY_PERIODIC:
-            //     *rhs += 2*solver->bc_val[2]*ky_S[j];
-            //     break;
-            // default:;
-            // }
-
-            // /* North. */
-            // switch (solver->bc_type[0]) {
-            // case BC_PRESSURE_OUTLET:
-            // case BC_VELOCITY_PERIODIC:
-            //     *rhs += 2*solver->bc_val[0]*ky_N[j];
-            //     break;
-            // default:;
-            // }
-
-            // /* Down. */
-            // switch (solver->bc_type[4]) {
-            // case BC_PRESSURE_OUTLET:
-            // case BC_VELOCITY_PERIODIC:
-            //     *rhs += 2*solver->bc_val[4]*kz_D[k];
-            //     break;
-            // default:;
-            // }
-
-            // /* Up. */
-            // switch (solver->bc_type[5]) {
-            // case BC_PRESSURE_OUTLET:
-            // case BC_VELOCITY_PERIODIC:
-            //     *rhs += 2*solver->bc_val[5]*kz_U[k];
-            //     break;
-            // default:;
-            // }
-
             *rhs /= p_coeffsum[i][j][k];
         }
     }
@@ -1018,14 +965,6 @@ static inline void calc_p_prime(IBMSolver *solver, double *final_norm_p) {
                 }
             }
             break;
-        // case BC_PRESSURE_OUTLET:
-        // case BC_VELOCITY_PERIODIC:
-        //     for (int j = 1; j <= Ny; j++) {
-        //         for (int k = 1; k <= Nz; k++) {
-        //             p_prime[0][j][k] = 2*solver->bc_val[3] - p_prime[1][j][k];
-        //         }
-        //     }
-        //     break;
         case BC_ALL_PERIODIC:
             if (solver->num_process == 1) {
                 for (int j = 1; j <= Ny; j++) {
@@ -1055,14 +994,6 @@ static inline void calc_p_prime(IBMSolver *solver, double *final_norm_p) {
                 }
             }
             break;
-        // case BC_PRESSURE_OUTLET:
-        // case BC_VELOCITY_PERIODIC:
-        //     for (int j = 1; j <= Ny; j++) {
-        //         for (int k = 1; k <= Nz; k++) {
-        //             p_prime[Nx+1][j][k] = 2*solver->bc_val[1] - p_prime[Nx][j][k];
-        //         }
-        //     }
-        //     break;
         case BC_ALL_PERIODIC:
             if (solver->num_process == 1) {
                 for (int j = 1; j <= Ny; j++) {
@@ -1091,14 +1022,6 @@ static inline void calc_p_prime(IBMSolver *solver, double *final_norm_p) {
             }
         }
         break;
-    // case BC_PRESSURE_OUTLET:
-    // case BC_VELOCITY_PERIODIC:
-    //     for (int i = 1; i <= Nx; i++) {
-    //         for (int k = 1; k <= Nz; k++) {
-    //             p_prime[i][0][k] = 2*solver->bc_val[2] - p_prime[i][1][k];
-    //         }
-    //     }
-    //     break;
     case BC_ALL_PERIODIC:
         for (int i = 1; i <= Nx; i++) {
             for (int k = 1; k <= Nz; k++) {
@@ -1120,14 +1043,6 @@ static inline void calc_p_prime(IBMSolver *solver, double *final_norm_p) {
             }
         }
         break;
-    // case BC_PRESSURE_OUTLET:
-    // case BC_VELOCITY_PERIODIC:
-    //     for (int i = 1; i <= Nx; i++) {
-    //         for (int k = 1; k <= Nz; k++) {
-    //             p_prime[i][Ny+1][k] = 2*solver->bc_val[0] - p_prime[i][Ny][k];
-    //         }
-    //     }
-    //     break;
     case BC_ALL_PERIODIC:
         for (int i = 1; i <= Nx; i++) {
             for (int k = 1; k <= Nz; k++) {
@@ -1149,14 +1064,6 @@ static inline void calc_p_prime(IBMSolver *solver, double *final_norm_p) {
             }
         }
         break;
-    // case BC_PRESSURE_OUTLET:
-    // case BC_VELOCITY_PERIODIC:
-    //     for (int i = 1; i <= Nx; i++) {
-    //         for (int j = 1; j <= Ny; j++) {
-    //             p_prime[i][j][0] = 2*solver->bc_val[4] - p_prime[i][j][1];
-    //         }
-    //     }
-    //     break;
     case BC_ALL_PERIODIC:
         for (int i = 1; i <= Nx; i++) {
             for (int j = 1; j <= Ny; j++) {
@@ -1178,14 +1085,6 @@ static inline void calc_p_prime(IBMSolver *solver, double *final_norm_p) {
             }
         }
         break;
-    // case BC_PRESSURE_OUTLET:
-    // case BC_VELOCITY_PERIODIC:
-    //     for (int i = 1; i <= Nx; i++) {
-    //         for (int j = 1; j <= Ny; j++) {
-    //             p_prime[i][j][Nz+1] = 2*solver->bc_val[5] - p_prime[i][j][Nz];
-    //         }
-    //     }
-    //     break;
     case BC_ALL_PERIODIC:
         for (int i = 1; i <= Nx; i++) {
             for (int j = 1; j <= Ny; j++) {
@@ -1832,4 +1731,17 @@ static inline void update_next(IBMSolver *solver) {
     SWAP(solver->N1_prev, solver->N1);
     SWAP(solver->N2_prev, solver->N2);
     SWAP(solver->N3_prev, solver->N3);
+}
+
+static void autosave(IBMSolver *solver) {
+    char filename_u1[100], filename_u2[100], filename_u3[100], filename_p[100];
+
+    snprintf(filename_u1, 100, "%s-%05d", solver->autosave_u1, solver->iter);
+    snprintf(filename_u2, 100, "%s-%05d", solver->autosave_u2, solver->iter);
+    snprintf(filename_u3, 100, "%s-%05d", solver->autosave_u3, solver->iter);
+    snprintf(filename_p, 100, "%s-%05d", solver->autosave_p, solver->iter);
+
+    IBMSolver_export_results(
+        solver, filename_u1, filename_u2, filename_u3, filename_p
+    );
 }

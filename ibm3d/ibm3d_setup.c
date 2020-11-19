@@ -4,6 +4,8 @@
 #include "utils.h"
 #include "math.h"
 
+#include <string.h>
+
 /* Index of adjacent cells in 3-d cartesian coordinate */
 static const int adj[6][3] = {
     {0, 1, 0}, {1, 0, 0}, {0, -1, 0}, {-1, 0, 0}, {0, 0, -1}, {0, 0, 1}
@@ -327,13 +329,15 @@ void IBMSolver_init_flow_const(IBMSolver *solver) {
     double (*const u3)[Ny+2][Nz+2] = solver->u3;
     double (*const p)[Ny+2][Nz+2] = solver->p;
 
+    solver->iter = 0;
+
     for (int i = 0; i <= Nx+1; i++) {
         for (int j = 0; j <= Ny+1; j++) {
             for (int k = 0; k <= Nz+1; k++) {
                 u1[i][j][k] = 1;
                 u2[i][j][k] = 0;
                 u3[i][j][k] = 0;
-                p[i][j][k] = 1;
+                p[i][j][k] = 0;
             }
         }
     }
@@ -351,6 +355,8 @@ void IBMSolver_init_flow_file(
     const int Nx = solver->Nx;
     const int Ny = solver->Ny;
     const int Nz = solver->Nz;
+
+    solver->iter = 0;
 
     FILE *fp_u1 = fopen_check(filename_u1, "rb");
     FILE *fp_u2 = fopen_check(filename_u2, "rb");
@@ -375,6 +381,21 @@ void IBMSolver_init_flow_file(
     interp_stag_vel(solver);
 }
 
+void IBMSolver_set_autosave(
+    IBMSolver *solver,
+    const char *filename_u1,
+    const char *filename_u2,
+    const char *filename_u3,
+    const char *filename_p,
+    int period
+) {
+    solver->autosave_u1 = filename_u1;
+    solver->autosave_u2 = filename_u2;
+    solver->autosave_u3 = filename_u3;
+    solver->autosave_p = filename_p;
+    solver->autosave_period = period;
+}
+
 void IBMSolver_export_results(
     IBMSolver *solver,
     const char *filename_u1,
@@ -391,6 +412,14 @@ void IBMSolver_export_results(
     const double (*const u2)[Ny+2][Nz+2] = solver->u2;
     const double (*const u3)[Ny+2][Nz+2] = solver->u3;
     const double (*const p)[Ny+2][Nz+2] = solver->p;
+
+    char ext_u1[100], ext_u2[100], ext_u3[100], ext_p[100];
+
+    /* Concatenate extension. */
+    snprintf(ext_u1, 100, "%s.out", filename_u1);
+    snprintf(ext_u2, 100, "%s.out", filename_u2);
+    snprintf(ext_u3, 100, "%s.out", filename_u3);
+    snprintf(ext_p, 100, "%s.out", filename_p);
 
     if (solver->rank == 0) {
         double (*const u1_global)[Ny+2][Nz+2] = calloc(Nx_global+2, sizeof(double [Ny+2][Nz+2]));
@@ -415,10 +444,10 @@ void IBMSolver_export_results(
             MPI_Recv(p_global[ilower_r], (Nx_r+1)*(Ny+2)*(Nz+2), MPI_DOUBLE, r, 3, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
         }
 
-        FILE *fp_u1 = fopen(filename_u1, "wb");
-        FILE *fp_u2 = fopen(filename_u2, "wb");
-        FILE *fp_u3 = fopen(filename_u3, "wb");
-        FILE *fp_p = fopen(filename_p, "wb");
+        FILE *fp_u1 = fopen(ext_u1, "wb");
+        FILE *fp_u2 = fopen(ext_u2, "wb");
+        FILE *fp_u3 = fopen(ext_u3, "wb");
+        FILE *fp_p = fopen(ext_p, "wb");
 
         fwrite(u1_global, sizeof(double), (Nx_global+2)*(Ny+2)*(Nz+2), fp_u1);
         fwrite(u2_global, sizeof(double), (Nx_global+2)*(Ny+2)*(Nz+2), fp_u2);

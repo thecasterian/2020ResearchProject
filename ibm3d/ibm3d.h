@@ -114,6 +114,13 @@ typedef struct _ibm_solver {
 
     int *vector_rows;
     double *vector_values, *vector_zeros, *vector_res;
+
+    /* Iteration info. */
+    int iter;
+
+    /* Autosave. */
+    const char *autosave_u1, *autosave_u2, *autosave_u3, *autosave_p;
+    int autosave_period;
 } IBMSolver;
 
 #include "ibm3d_setup.h"
