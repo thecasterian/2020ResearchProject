@@ -13,6 +13,11 @@ const double dt = 0.02;
 
 const double PI = 3.1415926535897932;
 
+double initfunc_u1(double, double, double);
+double initfunc_u2(double, double, double);
+double initfunc_u3(double, double, double);
+double initfunc_p(double, double, double);
+
 int main(int argc, char **argv) {
     /* Number of all processes. */
     int num_process;
@@ -50,7 +55,7 @@ int main(int argc, char **argv) {
     IBMSolver_set_grid(solver, Nx, Ny, Nz, xf, yf, zf);
     IBMSolver_set_params(solver, Re, dt);
 
-    IBMSolver_set_bc(solver, DIR_WEST, BC_PRESSURE_OUTLET, 0.09);
+    IBMSolver_set_bc(solver, DIR_WEST, BC_PRESSURE_OUTLET, 0.08);
     IBMSolver_set_bc(solver, DIR_EAST, BC_PRESSURE_OUTLET, 0);
     IBMSolver_set_bc(solver, DIR_SOUTH | DIR_NORTH, BC_ALL_PERIODIC, 0);
     IBMSolver_set_bc(solver, DIR_DOWN | DIR_UP, BC_STATIONARY_WALL, 0);
@@ -61,18 +66,25 @@ int main(int argc, char **argv) {
 
     IBMSolver_set_autosave(
         solver,
-        "channel_u1", "channel_u2", "channel_u3", "channel_p",
+        "data/channel_u1", "data/channel_u2", "data/channel_u3", "data/channel_p",
         200
     );
 
     IBMSolver_assemble(solver);
 
     /* Initialize. */
-    // IBMSolver_init_flow_const(solver);
-    IBMSolver_init_flow_file(
-        solver,
-        "channel_u1.out", "channel_u2.out", "channel_u3.out", "channel_p.out"
-    );
+    if (1) {
+        IBMSolver_init_flow_func(
+            solver,
+            initfunc_u1, initfunc_u2, initfunc_u3, initfunc_p
+        );
+    }
+    else {
+        IBMSolver_init_flow_file(
+            solver,
+            "channel_u1.out", "channel_u2.out", "channel_u3.out", "channel_p.out"
+        );
+    }
 
     /* Iterate. */
     IBMSolver_iterate(solver, 10, true);
@@ -80,7 +92,7 @@ int main(int argc, char **argv) {
     /* Export result. */
     IBMSolver_export_results(
         solver,
-        "channel_u1", "channel_u2", "channel_u3", "channel_p"
+        "data/channel_u1", "data/channel_u2", "data/channel_u3", "data/channel_p"
     );
 
     /* Finalize. */
@@ -89,5 +101,21 @@ int main(int argc, char **argv) {
     HYPRE_Finalize();
     MPI_Finalize();
 
+    return 0;
+}
+
+double initfunc_u1(double x, double y, double z) {
+    return 1 - x*x;
+}
+
+double initfunc_u2(double x, double y, double z) {
+    return 0;
+}
+
+double initfunc_u3(double x, double y, double z) {
+    return 0;
+}
+
+double initfunc_p(double x, double y, double z) {
     return 0;
 }

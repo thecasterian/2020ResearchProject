@@ -15,11 +15,14 @@ static inline void calc_p_prime(IBMSolver *, double *);
 static inline void update_next(IBMSolver *);
 
 static void autosave(IBMSolver *);
+static void update_bc(IBMSolver *);
 
 void IBMSolver_iterate(IBMSolver *solver, int num_time_steps, bool verbose) {
     struct timespec t_start, t_end;
     long elapsed_time, hour, min, sec;
     double final_norm_u1, final_norm_u2, final_norm_u3, final_norm_p;
+
+    update_bc(solver);
 
     calc_N(solver);
     SWAP(solver->N1, solver->N1_prev);
@@ -72,7 +75,7 @@ void IBMSolver_iterate(IBMSolver *solver, int num_time_steps, bool verbose) {
         }
 
         /* Autosave. */
-        if (solver->iter % solver->autosave_period == 0) {
+        if (solver->autosave_period != 0 && solver->iter % solver->autosave_period == 0) {
             if (solver->rank == 0) {
                 printf("\nAutosave...\n\n");
             }
@@ -1116,7 +1119,6 @@ static inline void update_next(IBMSolver *solver) {
     const int Nx = solver->Nx;
     const int Ny = solver->Ny;
     const int Nz = solver->Nz;
-    const int Nx_global = solver->Nx_global;
     const double dt = solver->dt;
 
     const double *const xc = solver->xc;
@@ -1166,532 +1168,6 @@ static inline void update_next(IBMSolver *solver) {
         U3_next[i][j][k] = U3_star[i][j][k] - dt * (p_prime[i][j][k+1] - p_prime[i][j][k]) / (zc[k+1] - zc[k]);
     }
 
-    /* Set velocity boundary conditions. */
-
-    /* West. */
-    if (solver->ilower == 1) {
-        switch (solver->bc_type[3]) {
-        case BC_VELOCITY_INLET:
-            for (int j = 1; j <= Ny; j++) {
-                for (int k = 1; k <= Nz; k++) {
-                    u1_next[0][j][k] = 2*solver->bc_val[3] - u1_next[1][j][k];
-                    u2_next[0][j][k] = -u2_next[1][j][k];
-                    u3_next[0][j][k] = -u3_next[1][j][k];
-                }
-            }
-            break;
-        case BC_PRESSURE_OUTLET:
-            for (int j = 1; j <= Ny; j++) {
-                for (int k = 1; k <= Nz; k++) {
-                    u1_next[0][j][k] = (u1_next[1][j][k]*(xc[2]-xc[0])-u1_next[2][j][k]*(xc[1]-xc[0])) / (xc[2]-xc[1]);
-                    u2_next[0][j][k] = (u2_next[1][j][k]*(xc[2]-xc[0])-u2_next[2][j][k]*(xc[1]-xc[0])) / (xc[2]-xc[1]);
-                    u3_next[0][j][k] = (u3_next[1][j][k]*(xc[2]-xc[0])-u3_next[2][j][k]*(xc[1]-xc[0])) / (xc[2]-xc[1]);
-                }
-            }
-            break;
-        case BC_STATIONARY_WALL:
-            for (int j = 1; j <= Ny; j++) {
-                for (int k = 1; k <= Nz; k++) {
-                    u1_next[0][j][k] = -u1_next[1][j][k];
-                    u2_next[0][j][k] = -u2_next[1][j][k];
-                    u3_next[0][j][k] = -u3_next[1][j][k];
-                }
-            }
-            break;
-        case BC_FREE_SLIP_WALL:
-            for (int j = 1; j <= Ny; j++) {
-                for (int k = 1; k <= Nz; k++) {
-                    u1_next[0][j][k] = -u1_next[1][j][k];
-                    u2_next[0][j][k] = u2_next[1][j][k];
-                    u3_next[0][j][k] = u3_next[1][j][k];
-                }
-            }
-            break;
-        case BC_ALL_PERIODIC:
-        case BC_VELOCITY_PERIODIC:
-            if (solver->num_process == 1) {
-                for (int j = 1; j <= Ny; j++) {
-                    for (int k = 1; k <= Nz; k++) {
-                        u1_next[0][j][k] = u1_next[Nx][j][k];
-                        u2_next[0][j][k] = u2_next[Nx][j][k];
-                        u3_next[0][j][k] = u3_next[Nx][j][k];
-                    }
-                }
-            }
-            else {
-                MPI_Send(u1_next[1], (Ny+2)*(Nz+2), MPI_DOUBLE, solver->num_process-1, 0, MPI_COMM_WORLD);
-                MPI_Send(u2_next[1], (Ny+2)*(Nz+2), MPI_DOUBLE, solver->num_process-1, 1, MPI_COMM_WORLD);
-                MPI_Send(u3_next[1], (Ny+2)*(Nz+2), MPI_DOUBLE, solver->num_process-1, 2, MPI_COMM_WORLD);
-
-                MPI_Recv(u1_next[0], (Ny+2)*(Nz+2), MPI_DOUBLE, solver->num_process-1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-                MPI_Recv(u2_next[0], (Ny+2)*(Nz+2), MPI_DOUBLE, solver->num_process-1, 1, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-                MPI_Recv(u3_next[0], (Ny+2)*(Nz+2), MPI_DOUBLE, solver->num_process-1, 2, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-            }
-            break;
-        default:;
-        }
-    }
-
-    /* East. */
-    if (solver->iupper == Nx_global) {
-        switch (solver->bc_type[1]) {
-        case BC_VELOCITY_INLET:
-            for (int j = 1; j <= Ny; j++) {
-                for (int k = 1; k <= Nz; k++) {
-                    u1_next[Nx+1][j][k] = 2*solver->bc_val[1] - u1_next[Nx][j][k];
-                    u2_next[Nx+1][j][k] = -u2_next[Nx][j][k];
-                    u3_next[Nx+1][j][k] = -u3_next[Nx][j][k];
-                }
-            }
-            break;
-        case BC_PRESSURE_OUTLET:
-            for (int j = 1; j <= Ny; j++) {
-                for (int k = 1; k <= Nz; k++) {
-                    u1_next[Nx+1][j][k] = (u1_next[Nx][j][k]*(xc[Nx+1]-xc[Nx-1])-u1_next[Nx-1][j][k]*(xc[Nx+1]-xc[Nx])) / (xc[Nx]-xc[Nx-1]);
-                    u2_next[Nx+1][j][k] = (u2_next[Nx][j][k]*(xc[Nx+1]-xc[Nx-1])-u2_next[Nx-1][j][k]*(xc[Nx+1]-xc[Nx])) / (xc[Nx]-xc[Nx-1]);
-                    u3_next[Nx+1][j][k] = (u3_next[Nx][j][k]*(xc[Nx+1]-xc[Nx-1])-u3_next[Nx-1][j][k]*(xc[Nx+1]-xc[Nx])) / (xc[Nx]-xc[Nx-1]);
-                }
-            }
-            break;
-        case BC_STATIONARY_WALL:
-            for (int j = 1; j <= Ny; j++) {
-                for (int k = 1; k <= Nz; k++) {
-                    u1_next[Nx+1][j][k] = -u1_next[Nx][j][k];
-                    u2_next[Nx+1][j][k] = -u2_next[Nx][j][k];
-                    u3_next[Nx+1][j][k] = -u3_next[Nx][j][k];
-                }
-            }
-            break;
-        case BC_FREE_SLIP_WALL:
-            for (int j = 1; j <= Ny; j++) {
-                for (int k = 1; k <= Nz; k++) {
-                    u1_next[Nx+1][j][k] = -u1_next[Nx][j][k];
-                    u2_next[Nx+1][j][k] = u2_next[Nx][j][k];
-                    u3_next[Nx+1][j][k] = u3_next[Nx][j][k];
-                }
-            }
-            break;
-        case BC_ALL_PERIODIC:
-        case BC_VELOCITY_PERIODIC:
-            if (solver->num_process == 1) {
-                for (int j = 1; j <= Ny; j++) {
-                    for (int k = 1; k <= Nz; k++) {
-                        u1_next[Nx+1][j][k] = u1_next[1][j][k];
-                        u2_next[Nx+1][j][k] = u2_next[1][j][k];
-                        u3_next[Nx+1][j][k] = u3_next[1][j][k];
-                    }
-                }
-            }
-            else {
-                MPI_Recv(u1_next[Nx+1], (Ny+2)*(Nz+2), MPI_DOUBLE, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-                MPI_Recv(u2_next[Nx+1], (Ny+2)*(Nz+2), MPI_DOUBLE, 0, 1, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-                MPI_Recv(u3_next[Nx+1], (Ny+2)*(Nz+2), MPI_DOUBLE, 0, 2, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-
-                MPI_Send(u1_next[Nx], (Ny+2)*(Nz+2), MPI_DOUBLE, 0, 0, MPI_COMM_WORLD);
-                MPI_Send(u2_next[Nx], (Ny+2)*(Nz+2), MPI_DOUBLE, 0, 1, MPI_COMM_WORLD);
-                MPI_Send(u3_next[Nx], (Ny+2)*(Nz+2), MPI_DOUBLE, 0, 2, MPI_COMM_WORLD);
-            }
-            break;
-        default:;
-        }
-    }
-
-    /* South. */
-    switch (solver->bc_type[2]) {
-    case BC_VELOCITY_INLET:
-        for (int i = 1; i <= Nx; i++) {
-            for (int k = 1; k <= Nz; k++) {
-                u1_next[i][0][k] = -u1_next[i][1][k];
-                u2_next[i][0][k] = 2*solver->bc_val[2] - u2_next[i][1][k];
-                u3_next[i][0][k] = -u3_next[i][1][k];
-            }
-        }
-        break;
-    case BC_PRESSURE_OUTLET:
-        for (int i = 1; i <= Nx; i++) {
-            for (int k = 1; k <= Nz; k++) {
-                u1_next[i][0][k] = (u1_next[i][1][k]*(yc[2]-yc[0])-u1_next[i][2][k]*(yc[1]-yc[0])) / (yc[2]-yc[1]);
-                u2_next[i][0][k] = (u2_next[i][1][k]*(yc[2]-yc[0])-u2_next[i][2][k]*(yc[1]-yc[0])) / (yc[2]-yc[1]);
-                u3_next[i][0][k] = (u3_next[i][1][k]*(yc[2]-yc[0])-u3_next[i][2][k]*(yc[1]-yc[0])) / (yc[2]-yc[1]);
-            }
-        }
-        break;
-    case BC_STATIONARY_WALL:
-        for (int i = 1; i <= Nx; i++) {
-            for (int k = 1; k <= Nz; k++) {
-                u1_next[i][0][k] = -u1_next[i][1][k];
-                u2_next[i][0][k] = -u2_next[i][1][k];
-                u3_next[i][0][k] = -u3_next[i][1][k];
-            }
-        }
-        break;
-    case BC_FREE_SLIP_WALL:
-        for (int i = 1; i <= Nx; i++) {
-            for (int k = 1; k <= Nz; k++) {
-                u1_next[i][0][k] = u1_next[i][1][k];
-                u2_next[i][0][k] = -u2_next[i][1][k];
-                u3_next[i][0][k] = u3_next[i][1][k];
-            }
-        }
-        break;
-    case BC_ALL_PERIODIC:
-    case BC_VELOCITY_PERIODIC:
-        for (int i = 1; i <= Nx; i++) {
-            for (int k = 1; k <= Nz; k++) {
-                u1_next[i][0][k] = u1_next[i][Ny][k];
-                u2_next[i][0][k] = u2_next[i][Ny][k];
-                u3_next[i][0][k] = u3_next[i][Ny][k];
-            }
-        }
-        break;
-    default:;
-    }
-
-    /* North. */
-    switch (solver->bc_type[0]) {
-    case BC_VELOCITY_INLET:
-        for (int i = 1; i <= Nx; i++) {
-            for (int k = 1; k <= Nz; k++) {
-                u1_next[i][Ny+1][k] = -u1_next[i][Ny][k];
-                u2_next[i][Ny+1][k] = 2*solver->bc_val[0] - u2_next[i][Ny][k];
-                u3_next[i][Ny+1][k] = -u3_next[i][Ny][k];
-            }
-        }
-        break;
-    case BC_PRESSURE_OUTLET:
-        for (int i = 1; i <= Nx; i++) {
-            for (int k = 1; k <= Nz; k++) {
-                u1_next[i][Ny+1][k] = (u1_next[i][Ny][k]*(yc[Ny+1]-yc[Ny-1])-u1_next[i][Ny-1][k]*(yc[Ny+1]-yc[Ny])) / (yc[Ny]-yc[Ny-1]);
-                u2_next[i][Ny+1][k] = (u2_next[i][Ny][k]*(yc[Ny+1]-yc[Ny-1])-u2_next[i][Ny-1][k]*(yc[Ny+1]-yc[Ny])) / (yc[Ny]-yc[Ny-1]);
-                u3_next[i][Ny+1][k] = (u3_next[i][Ny][k]*(yc[Ny+1]-yc[Ny-1])-u3_next[i][Ny-1][k]*(yc[Ny+1]-yc[Ny])) / (yc[Ny]-yc[Ny-1]);
-            }
-        }
-        break;
-    case BC_STATIONARY_WALL:
-        for (int i = 1; i <= Nx; i++) {
-            for (int k = 1; k <= Nz; k++) {
-                u1_next[i][Ny+1][k] = -u1_next[i][Ny][k];
-                u2_next[i][Ny+1][k] = -u2_next[i][Ny][k];
-                u3_next[i][Ny+1][k] = -u3_next[i][Ny][k];
-            }
-        }
-        break;
-    case BC_FREE_SLIP_WALL:
-        for (int i = 1; i <= Nx; i++) {
-            for (int k = 1; k <= Nz; k++) {
-                u1_next[i][Ny+1][k] = u1_next[i][Ny][k];
-                u2_next[i][Ny+1][k] = -u2_next[i][Ny][k];
-                u3_next[i][Ny+1][k] = u3_next[i][Ny][k];
-            }
-        }
-        break;
-    case BC_ALL_PERIODIC:
-    case BC_VELOCITY_PERIODIC:
-        for (int i = 1; i <= Nx; i++) {
-            for (int k = 1; k <= Nz; k++) {
-                u1_next[i][Ny+1][k] = u1_next[i][1][k];
-                u2_next[i][Ny+1][k] = u2_next[i][1][k];
-                u3_next[i][Ny+1][k] = u3_next[i][1][k];
-            }
-        }
-        break;
-    default:;
-    }
-
-    /* Down. */
-    switch (solver->bc_type[4]) {
-    case BC_VELOCITY_INLET:
-        for (int i = 1; i <= Nx; i++) {
-            for (int j = 1; j <= Ny; j++) {
-                u1_next[i][j][0] = -u1_next[i][j][1];
-                u2_next[i][j][0] = -u2_next[i][j][1];
-                u3_next[i][j][0] = 2*solver->bc_val[4] - u3_next[i][j][1];
-            }
-        }
-        break;
-    case BC_PRESSURE_OUTLET:
-        for (int i = 1; i <= Nx; i++) {
-            for (int j = 1; j <= Ny; j++) {
-                u1_next[i][j][0] = (u1_next[i][j][1]*(zc[2]-zc[0])-u1_next[i][j][2]*(zc[1]-zc[0])) / (zc[2]-zc[1]);
-                u2_next[i][j][0] = (u2_next[i][j][1]*(zc[2]-zc[0])-u2_next[i][j][2]*(zc[1]-zc[0])) / (zc[2]-zc[1]);
-                u3_next[i][j][0] = (u3_next[i][j][1]*(zc[2]-zc[0])-u3_next[i][j][2]*(zc[1]-zc[0])) / (zc[2]-zc[1]);
-            }
-        }
-        break;
-    case BC_STATIONARY_WALL:
-        for (int i = 1; i <= Nx; i++) {
-            for (int j = 1; j <= Ny; j++) {
-                u1_next[i][j][0] = -u1_next[i][j][1];
-                u2_next[i][j][0] = -u2_next[i][j][1];
-                u3_next[i][j][0] = -u3_next[i][j][1];
-            }
-        }
-        break;
-    case BC_FREE_SLIP_WALL:
-        for (int i = 1; i <= Nx; i++) {
-            for (int j = 1; j <= Ny; j++) {
-                u1_next[i][j][0] = u1_next[i][j][1];
-                u2_next[i][j][0] = u2_next[i][j][1];
-                u3_next[i][j][0] = -u3_next[i][j][1];
-            }
-        }
-        break;
-    case BC_ALL_PERIODIC:
-    case BC_VELOCITY_PERIODIC:
-        for (int i = 1; i <= Nx; i++) {
-            for (int j = 1; j <= Ny; j++) {
-                u1_next[i][j][0] = u1_next[i][j][Nz];
-                u2_next[i][j][0] = u2_next[i][j][Nz];
-                u3_next[i][j][0] = u3_next[i][j][Nz];
-            }
-        }
-        break;
-    default:;
-    }
-
-    /* Up. */
-    switch (solver->bc_type[5]) {
-    case BC_VELOCITY_INLET:
-        for (int i = 1; i <= Nx; i++) {
-            for (int j = 1; j <= Ny; j++) {
-                u1_next[i][j][Nz+1] = -u1_next[i][j][Nz];
-                u2_next[i][j][Nz+1] = -u2_next[i][j][Nz];
-                u3_next[i][j][Nz+1] = 2*solver->bc_val[5] - u3_next[i][j][Nz];
-            }
-        }
-        break;
-    case BC_PRESSURE_OUTLET:
-        for (int i = 1; i <= Nx; i++) {
-            for (int j = 1; j <= Ny; j++) {
-                u1_next[i][j][Nz+1] = (u1_next[i][j][Nz]*(zc[Nz+1]-zc[Nz-1])-u1_next[i][j][Nz-1]*(zc[Nz+1]-zc[Nz])) / (zc[Nz]-zc[Nz-1]);
-                u2_next[i][j][Nz+1] = (u2_next[i][j][Nz]*(zc[Nz+1]-zc[Nz-1])-u2_next[i][j][Nz-1]*(zc[Nz+1]-zc[Nz])) / (zc[Nz]-zc[Nz-1]);
-                u3_next[i][j][Nz+1] = (u3_next[i][j][Nz]*(zc[Nz+1]-zc[Nz-1])-u3_next[i][j][Nz-1]*(zc[Nz+1]-zc[Nz])) / (zc[Nz]-zc[Nz-1]);
-            }
-        }
-        break;
-    case BC_STATIONARY_WALL:
-        for (int i = 1; i <= Nx; i++) {
-            for (int j = 1; j <= Ny; j++) {
-                u1_next[i][j][Nz+1] = -u1_next[i][j][Nz];
-                u2_next[i][j][Nz+1] = -u2_next[i][j][Nz];
-                u3_next[i][j][Nz+1] = -u3_next[i][j][Nz];
-            }
-        }
-        break;
-    case BC_FREE_SLIP_WALL:
-        for (int i = 1; i <= Nx; i++) {
-            for (int j = 1; j <= Ny; j++) {
-                u1_next[i][j][Nz+1] = u1_next[i][j][Nz];
-                u2_next[i][j][Nz+1] = u2_next[i][j][Nz];
-                u3_next[i][j][Nz+1] = -u3_next[i][j][Nz];
-            }
-        }
-        break;
-    case BC_ALL_PERIODIC:
-    case BC_VELOCITY_PERIODIC:
-        for (int i = 1; i <= Nx; i++) {
-            for (int j = 1; j <= Ny; j++) {
-                u1_next[i][j][Nz+1] = u1_next[i][j][1];
-                u2_next[i][j][Nz+1] = u2_next[i][j][1];
-                u3_next[i][j][Nz+1] = u3_next[i][j][1];
-            }
-        }
-        break;
-    default:;
-    }
-
-    /* Set pressure boundary conditions. */
-
-    /* West. */
-    if (solver->ilower == 1) {
-        switch (solver->bc_type[3]) {
-        case BC_VELOCITY_INLET:
-        case BC_STATIONARY_WALL:
-        case BC_FREE_SLIP_WALL:
-            for (int j = 1; j <= Ny; j++) {
-                for (int k = 1; k <= Nz; k++) {
-                    p_next[0][j][k] = p_next[1][j][k];
-                }
-            }
-            break;
-        case BC_PRESSURE_OUTLET:
-        case BC_VELOCITY_PERIODIC:
-            for (int j = 1; j <= Ny; j++) {
-                for (int k = 1; k <= Nz; k++) {
-                    p_next[0][j][k] = 2*solver->bc_val[3] - p_next[1][j][k];
-                }
-            }
-            break;
-        case BC_ALL_PERIODIC:
-            if (solver->num_process == 1) {
-                for (int j = 1; j <= Ny; j++) {
-                    for (int k = 1; k <= Nz; k++) {
-                        p_next[0][j][k] = p_next[Nx][j][k];
-                    }
-                }
-            }
-            else {
-                MPI_Send(p_next[1], (Ny+2)*(Nz+2), MPI_DOUBLE, solver->num_process-1, 0, MPI_COMM_WORLD);
-                MPI_Recv(p_next[0], (Ny+2)*(Nz+2), MPI_DOUBLE, solver->num_process-1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-            }
-            break;
-        default:;
-        }
-    }
-
-    /* East. */
-    if (solver->iupper == Nx_global) {
-        switch (solver->bc_type[1]) {
-        case BC_VELOCITY_INLET:
-        case BC_STATIONARY_WALL:
-        case BC_FREE_SLIP_WALL:
-            for (int j = 1; j <= Ny; j++) {
-                for (int k = 1; k <= Nz; k++) {
-                    p_next[Nx+1][j][k] = p_next[Nx][j][k];
-                }
-            }
-            break;
-        case BC_PRESSURE_OUTLET:
-        case BC_VELOCITY_PERIODIC:
-            for (int j = 1; j <= Ny; j++) {
-                for (int k = 1; k <= Nz; k++) {
-                    p_next[Nx+1][j][k] = 2*solver->bc_val[1] - p_next[Nx][j][k];
-                }
-            }
-            break;
-        case BC_ALL_PERIODIC:
-            if (solver->num_process == 1) {
-                for (int j = 1; j <= Ny; j++) {
-                    for (int k = 1; k <= Nz; k++) {
-                        p_next[Nx+1][j][k] = p_next[1][j][k];
-                    }
-                }
-            }
-            else {
-                MPI_Recv(p_next[Nx+1], (Ny+2)*(Nz+2), MPI_DOUBLE, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-                MPI_Send(p_next[Nx], (Ny+2)*(Nz+2), MPI_DOUBLE, 0, 0, MPI_COMM_WORLD);
-            }
-            break;
-        default:;
-        }
-    }
-
-    /* South. */
-    switch (solver->bc_type[2]) {
-    case BC_VELOCITY_INLET:
-    case BC_STATIONARY_WALL:
-    case BC_FREE_SLIP_WALL:
-        for (int i = 1; i <= Nx; i++) {
-            for (int k = 1; k <= Nz; k++) {
-                p_next[i][0][k] = p_next[i][1][k];
-            }
-        }
-        break;
-    case BC_PRESSURE_OUTLET:
-    case BC_VELOCITY_PERIODIC:
-        for (int i = 1; i <= Nx; i++) {
-            for (int k = 1; k <= Nz; k++) {
-                p_next[i][0][k] = 2*solver->bc_val[2] - p_next[i][1][k];
-            }
-        }
-        break;
-    case BC_ALL_PERIODIC:
-        for (int i = 1; i <= Nx; i++) {
-            for (int k = 1; k <= Nz; k++) {
-                p_next[i][0][k] = p_next[i][Ny][k];
-            }
-        }
-        break;
-    default:;
-    }
-
-    /* North. */
-    switch (solver->bc_type[0]) {
-    case BC_VELOCITY_INLET:
-    case BC_STATIONARY_WALL:
-    case BC_FREE_SLIP_WALL:
-        for (int i = 1; i <= Nx; i++) {
-            for (int k = 1; k <= Nz; k++) {
-                p_next[i][Ny+1][k] = p_next[i][Ny][k];
-            }
-        }
-        break;
-    case BC_PRESSURE_OUTLET:
-    case BC_VELOCITY_PERIODIC:
-        for (int i = 1; i <= Nx; i++) {
-            for (int k = 1; k <= Nz; k++) {
-                p_next[i][Ny+1][k] = 2*solver->bc_val[0] - p_next[i][Ny][k];
-            }
-        }
-        break;
-    case BC_ALL_PERIODIC:
-        for (int i = 1; i <= Nx; i++) {
-            for (int k = 1; k <= Nz; k++) {
-                p_next[i][Ny+1][k] = p_next[i][1][k];
-            }
-        }
-        break;
-    default:;
-    }
-
-    /* Down. */
-    switch (solver->bc_type[4]) {
-    case BC_VELOCITY_INLET:
-    case BC_STATIONARY_WALL:
-    case BC_FREE_SLIP_WALL:
-        for (int i = 1; i <= Nx; i++) {
-            for (int j = 1; j <= Ny; j++) {
-                p_next[i][j][0] = p_next[i][j][1];
-            }
-        }
-        break;
-    case BC_PRESSURE_OUTLET:
-    case BC_VELOCITY_PERIODIC:
-        for (int i = 1; i <= Nx; i++) {
-            for (int j = 1; j <= Ny; j++) {
-                p_next[i][j][0] = 2*solver->bc_val[4] - p_next[i][j][1];
-            }
-        }
-        break;
-    case BC_ALL_PERIODIC:
-        for (int i = 1; i <= Nx; i++) {
-            for (int j = 1; j <= Ny; j++) {
-                p_next[i][j][0] = p_next[i][j][Nz];
-            }
-        }
-        break;
-    default:;
-    }
-
-    /* Up. */
-    switch (solver->bc_type[5]) {
-    case BC_VELOCITY_INLET:
-    case BC_STATIONARY_WALL:
-    case BC_FREE_SLIP_WALL:
-        for (int i = 1; i <= Nx; i++) {
-            for (int j = 1; j <= Ny; j++) {
-                p_next[i][j][Nz+1] = p_next[i][j][Nz];
-            }
-        }
-        break;
-    case BC_PRESSURE_OUTLET:
-    case BC_VELOCITY_PERIODIC:
-        for (int i = 1; i <= Nx; i++) {
-            for (int j = 1; j <= Ny; j++) {
-                p_next[i][j][Nz+1] = 2*solver->bc_val[5] - p_next[i][j][Nz];
-            }
-        }
-        break;
-    case BC_ALL_PERIODIC:
-        for (int i = 1; i <= Nx; i++) {
-            for (int j = 1; j <= Ny; j++) {
-                p_next[i][j][Nz+1] = p_next[i][j][1];
-            }
-        }
-        break;
-    default:;
-    }
-
     /* Exchange u1, u2, u3, and p between the adjacent processes. */
     if (solver->rank != solver->num_process-1) {
         /* Send to next process. */
@@ -1731,6 +1207,9 @@ static inline void update_next(IBMSolver *solver) {
     SWAP(solver->N1_prev, solver->N1);
     SWAP(solver->N2_prev, solver->N2);
     SWAP(solver->N3_prev, solver->N3);
+
+    /* Set boundary conditions. */
+    update_bc(solver);
 }
 
 static void autosave(IBMSolver *solver) {
@@ -1744,4 +1223,546 @@ static void autosave(IBMSolver *solver) {
     IBMSolver_export_results(
         solver, filename_u1, filename_u2, filename_u3, filename_p
     );
+}
+
+static void update_bc(IBMSolver *solver) {
+    const int Nx = solver->Nx;
+    const int Ny = solver->Ny;
+    const int Nz = solver->Nz;
+    const int Nx_global = solver->Nx_global;
+
+    const double *const xc = solver->xc;
+    const double *const yc = solver->yc;
+    const double *const zc = solver->zc;
+
+    double (*const u1)[Ny+2][Nz+2] = solver->u1;
+    double (*const u2)[Ny+2][Nz+2] = solver->u2;
+    double (*const u3)[Ny+2][Nz+2] = solver->u3;
+    double (*const p)[Ny+2][Nz+2] = solver->p;
+
+    /* Set velocity boundary conditions. */
+
+    /* West. */
+    if (solver->ilower == 1) {
+        switch (solver->bc_type[3]) {
+        case BC_VELOCITY_INLET:
+            for (int j = 1; j <= Ny; j++) {
+                for (int k = 1; k <= Nz; k++) {
+                    u1[0][j][k] = 2*solver->bc_val[3] - u1[1][j][k];
+                    u2[0][j][k] = -u2[1][j][k];
+                    u3[0][j][k] = -u3[1][j][k];
+                }
+            }
+            break;
+        case BC_PRESSURE_OUTLET:
+            for (int j = 1; j <= Ny; j++) {
+                for (int k = 1; k <= Nz; k++) {
+                    u1[0][j][k] = (u1[1][j][k]*(xc[2]-xc[0])-u1[2][j][k]*(xc[1]-xc[0])) / (xc[2]-xc[1]);
+                    u2[0][j][k] = (u2[1][j][k]*(xc[2]-xc[0])-u2[2][j][k]*(xc[1]-xc[0])) / (xc[2]-xc[1]);
+                    u3[0][j][k] = (u3[1][j][k]*(xc[2]-xc[0])-u3[2][j][k]*(xc[1]-xc[0])) / (xc[2]-xc[1]);
+                }
+            }
+            break;
+        case BC_STATIONARY_WALL:
+            for (int j = 1; j <= Ny; j++) {
+                for (int k = 1; k <= Nz; k++) {
+                    u1[0][j][k] = -u1[1][j][k];
+                    u2[0][j][k] = -u2[1][j][k];
+                    u3[0][j][k] = -u3[1][j][k];
+                }
+            }
+            break;
+        case BC_FREE_SLIP_WALL:
+            for (int j = 1; j <= Ny; j++) {
+                for (int k = 1; k <= Nz; k++) {
+                    u1[0][j][k] = -u1[1][j][k];
+                    u2[0][j][k] = u2[1][j][k];
+                    u3[0][j][k] = u3[1][j][k];
+                }
+            }
+            break;
+        case BC_ALL_PERIODIC:
+        case BC_VELOCITY_PERIODIC:
+            if (solver->num_process == 1) {
+                for (int j = 1; j <= Ny; j++) {
+                    for (int k = 1; k <= Nz; k++) {
+                        u1[0][j][k] = u1[Nx][j][k];
+                        u2[0][j][k] = u2[Nx][j][k];
+                        u3[0][j][k] = u3[Nx][j][k];
+                    }
+                }
+            }
+            else {
+                MPI_Send(u1[1], (Ny+2)*(Nz+2), MPI_DOUBLE, solver->num_process-1, 0, MPI_COMM_WORLD);
+                MPI_Send(u2[1], (Ny+2)*(Nz+2), MPI_DOUBLE, solver->num_process-1, 1, MPI_COMM_WORLD);
+                MPI_Send(u3[1], (Ny+2)*(Nz+2), MPI_DOUBLE, solver->num_process-1, 2, MPI_COMM_WORLD);
+
+                MPI_Recv(u1[0], (Ny+2)*(Nz+2), MPI_DOUBLE, solver->num_process-1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+                MPI_Recv(u2[0], (Ny+2)*(Nz+2), MPI_DOUBLE, solver->num_process-1, 1, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+                MPI_Recv(u3[0], (Ny+2)*(Nz+2), MPI_DOUBLE, solver->num_process-1, 2, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            }
+            break;
+        default:;
+        }
+    }
+
+    /* East. */
+    if (solver->iupper == Nx_global) {
+        switch (solver->bc_type[1]) {
+        case BC_VELOCITY_INLET:
+            for (int j = 1; j <= Ny; j++) {
+                for (int k = 1; k <= Nz; k++) {
+                    u1[Nx+1][j][k] = 2*solver->bc_val[1] - u1[Nx][j][k];
+                    u2[Nx+1][j][k] = -u2[Nx][j][k];
+                    u3[Nx+1][j][k] = -u3[Nx][j][k];
+                }
+            }
+            break;
+        case BC_PRESSURE_OUTLET:
+            for (int j = 1; j <= Ny; j++) {
+                for (int k = 1; k <= Nz; k++) {
+                    u1[Nx+1][j][k] = (u1[Nx][j][k]*(xc[Nx+1]-xc[Nx-1])-u1[Nx-1][j][k]*(xc[Nx+1]-xc[Nx])) / (xc[Nx]-xc[Nx-1]);
+                    u2[Nx+1][j][k] = (u2[Nx][j][k]*(xc[Nx+1]-xc[Nx-1])-u2[Nx-1][j][k]*(xc[Nx+1]-xc[Nx])) / (xc[Nx]-xc[Nx-1]);
+                    u3[Nx+1][j][k] = (u3[Nx][j][k]*(xc[Nx+1]-xc[Nx-1])-u3[Nx-1][j][k]*(xc[Nx+1]-xc[Nx])) / (xc[Nx]-xc[Nx-1]);
+                }
+            }
+            break;
+        case BC_STATIONARY_WALL:
+            for (int j = 1; j <= Ny; j++) {
+                for (int k = 1; k <= Nz; k++) {
+                    u1[Nx+1][j][k] = -u1[Nx][j][k];
+                    u2[Nx+1][j][k] = -u2[Nx][j][k];
+                    u3[Nx+1][j][k] = -u3[Nx][j][k];
+                }
+            }
+            break;
+        case BC_FREE_SLIP_WALL:
+            for (int j = 1; j <= Ny; j++) {
+                for (int k = 1; k <= Nz; k++) {
+                    u1[Nx+1][j][k] = -u1[Nx][j][k];
+                    u2[Nx+1][j][k] = u2[Nx][j][k];
+                    u3[Nx+1][j][k] = u3[Nx][j][k];
+                }
+            }
+            break;
+        case BC_ALL_PERIODIC:
+        case BC_VELOCITY_PERIODIC:
+            if (solver->num_process == 1) {
+                for (int j = 1; j <= Ny; j++) {
+                    for (int k = 1; k <= Nz; k++) {
+                        u1[Nx+1][j][k] = u1[1][j][k];
+                        u2[Nx+1][j][k] = u2[1][j][k];
+                        u3[Nx+1][j][k] = u3[1][j][k];
+                    }
+                }
+            }
+            else {
+                MPI_Recv(u1[Nx+1], (Ny+2)*(Nz+2), MPI_DOUBLE, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+                MPI_Recv(u2[Nx+1], (Ny+2)*(Nz+2), MPI_DOUBLE, 0, 1, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+                MPI_Recv(u3[Nx+1], (Ny+2)*(Nz+2), MPI_DOUBLE, 0, 2, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+
+                MPI_Send(u1[Nx], (Ny+2)*(Nz+2), MPI_DOUBLE, 0, 0, MPI_COMM_WORLD);
+                MPI_Send(u2[Nx], (Ny+2)*(Nz+2), MPI_DOUBLE, 0, 1, MPI_COMM_WORLD);
+                MPI_Send(u3[Nx], (Ny+2)*(Nz+2), MPI_DOUBLE, 0, 2, MPI_COMM_WORLD);
+            }
+            break;
+        default:;
+        }
+    }
+
+    /* South. */
+    switch (solver->bc_type[2]) {
+    case BC_VELOCITY_INLET:
+        for (int i = 1; i <= Nx; i++) {
+            for (int k = 1; k <= Nz; k++) {
+                u1[i][0][k] = -u1[i][1][k];
+                u2[i][0][k] = 2*solver->bc_val[2] - u2[i][1][k];
+                u3[i][0][k] = -u3[i][1][k];
+            }
+        }
+        break;
+    case BC_PRESSURE_OUTLET:
+        for (int i = 1; i <= Nx; i++) {
+            for (int k = 1; k <= Nz; k++) {
+                u1[i][0][k] = (u1[i][1][k]*(yc[2]-yc[0])-u1[i][2][k]*(yc[1]-yc[0])) / (yc[2]-yc[1]);
+                u2[i][0][k] = (u2[i][1][k]*(yc[2]-yc[0])-u2[i][2][k]*(yc[1]-yc[0])) / (yc[2]-yc[1]);
+                u3[i][0][k] = (u3[i][1][k]*(yc[2]-yc[0])-u3[i][2][k]*(yc[1]-yc[0])) / (yc[2]-yc[1]);
+            }
+        }
+        break;
+    case BC_STATIONARY_WALL:
+        for (int i = 1; i <= Nx; i++) {
+            for (int k = 1; k <= Nz; k++) {
+                u1[i][0][k] = -u1[i][1][k];
+                u2[i][0][k] = -u2[i][1][k];
+                u3[i][0][k] = -u3[i][1][k];
+            }
+        }
+        break;
+    case BC_FREE_SLIP_WALL:
+        for (int i = 1; i <= Nx; i++) {
+            for (int k = 1; k <= Nz; k++) {
+                u1[i][0][k] = u1[i][1][k];
+                u2[i][0][k] = -u2[i][1][k];
+                u3[i][0][k] = u3[i][1][k];
+            }
+        }
+        break;
+    case BC_ALL_PERIODIC:
+    case BC_VELOCITY_PERIODIC:
+        for (int i = 1; i <= Nx; i++) {
+            for (int k = 1; k <= Nz; k++) {
+                u1[i][0][k] = u1[i][Ny][k];
+                u2[i][0][k] = u2[i][Ny][k];
+                u3[i][0][k] = u3[i][Ny][k];
+            }
+        }
+        break;
+    default:;
+    }
+
+    /* North. */
+    switch (solver->bc_type[0]) {
+    case BC_VELOCITY_INLET:
+        for (int i = 1; i <= Nx; i++) {
+            for (int k = 1; k <= Nz; k++) {
+                u1[i][Ny+1][k] = -u1[i][Ny][k];
+                u2[i][Ny+1][k] = 2*solver->bc_val[0] - u2[i][Ny][k];
+                u3[i][Ny+1][k] = -u3[i][Ny][k];
+            }
+        }
+        break;
+    case BC_PRESSURE_OUTLET:
+        for (int i = 1; i <= Nx; i++) {
+            for (int k = 1; k <= Nz; k++) {
+                u1[i][Ny+1][k] = (u1[i][Ny][k]*(yc[Ny+1]-yc[Ny-1])-u1[i][Ny-1][k]*(yc[Ny+1]-yc[Ny])) / (yc[Ny]-yc[Ny-1]);
+                u2[i][Ny+1][k] = (u2[i][Ny][k]*(yc[Ny+1]-yc[Ny-1])-u2[i][Ny-1][k]*(yc[Ny+1]-yc[Ny])) / (yc[Ny]-yc[Ny-1]);
+                u3[i][Ny+1][k] = (u3[i][Ny][k]*(yc[Ny+1]-yc[Ny-1])-u3[i][Ny-1][k]*(yc[Ny+1]-yc[Ny])) / (yc[Ny]-yc[Ny-1]);
+            }
+        }
+        break;
+    case BC_STATIONARY_WALL:
+        for (int i = 1; i <= Nx; i++) {
+            for (int k = 1; k <= Nz; k++) {
+                u1[i][Ny+1][k] = -u1[i][Ny][k];
+                u2[i][Ny+1][k] = -u2[i][Ny][k];
+                u3[i][Ny+1][k] = -u3[i][Ny][k];
+            }
+        }
+        break;
+    case BC_FREE_SLIP_WALL:
+        for (int i = 1; i <= Nx; i++) {
+            for (int k = 1; k <= Nz; k++) {
+                u1[i][Ny+1][k] = u1[i][Ny][k];
+                u2[i][Ny+1][k] = -u2[i][Ny][k];
+                u3[i][Ny+1][k] = u3[i][Ny][k];
+            }
+        }
+        break;
+    case BC_ALL_PERIODIC:
+    case BC_VELOCITY_PERIODIC:
+        for (int i = 1; i <= Nx; i++) {
+            for (int k = 1; k <= Nz; k++) {
+                u1[i][Ny+1][k] = u1[i][1][k];
+                u2[i][Ny+1][k] = u2[i][1][k];
+                u3[i][Ny+1][k] = u3[i][1][k];
+            }
+        }
+        break;
+    default:;
+    }
+
+    /* Down. */
+    switch (solver->bc_type[4]) {
+    case BC_VELOCITY_INLET:
+        for (int i = 1; i <= Nx; i++) {
+            for (int j = 1; j <= Ny; j++) {
+                u1[i][j][0] = -u1[i][j][1];
+                u2[i][j][0] = -u2[i][j][1];
+                u3[i][j][0] = 2*solver->bc_val[4] - u3[i][j][1];
+            }
+        }
+        break;
+    case BC_PRESSURE_OUTLET:
+        for (int i = 1; i <= Nx; i++) {
+            for (int j = 1; j <= Ny; j++) {
+                u1[i][j][0] = (u1[i][j][1]*(zc[2]-zc[0])-u1[i][j][2]*(zc[1]-zc[0])) / (zc[2]-zc[1]);
+                u2[i][j][0] = (u2[i][j][1]*(zc[2]-zc[0])-u2[i][j][2]*(zc[1]-zc[0])) / (zc[2]-zc[1]);
+                u3[i][j][0] = (u3[i][j][1]*(zc[2]-zc[0])-u3[i][j][2]*(zc[1]-zc[0])) / (zc[2]-zc[1]);
+            }
+        }
+        break;
+    case BC_STATIONARY_WALL:
+        for (int i = 1; i <= Nx; i++) {
+            for (int j = 1; j <= Ny; j++) {
+                u1[i][j][0] = -u1[i][j][1];
+                u2[i][j][0] = -u2[i][j][1];
+                u3[i][j][0] = -u3[i][j][1];
+            }
+        }
+        break;
+    case BC_FREE_SLIP_WALL:
+        for (int i = 1; i <= Nx; i++) {
+            for (int j = 1; j <= Ny; j++) {
+                u1[i][j][0] = u1[i][j][1];
+                u2[i][j][0] = u2[i][j][1];
+                u3[i][j][0] = -u3[i][j][1];
+            }
+        }
+        break;
+    case BC_ALL_PERIODIC:
+    case BC_VELOCITY_PERIODIC:
+        for (int i = 1; i <= Nx; i++) {
+            for (int j = 1; j <= Ny; j++) {
+                u1[i][j][0] = u1[i][j][Nz];
+                u2[i][j][0] = u2[i][j][Nz];
+                u3[i][j][0] = u3[i][j][Nz];
+            }
+        }
+        break;
+    default:;
+    }
+
+    /* Up. */
+    switch (solver->bc_type[5]) {
+    case BC_VELOCITY_INLET:
+        for (int i = 1; i <= Nx; i++) {
+            for (int j = 1; j <= Ny; j++) {
+                u1[i][j][Nz+1] = -u1[i][j][Nz];
+                u2[i][j][Nz+1] = -u2[i][j][Nz];
+                u3[i][j][Nz+1] = 2*solver->bc_val[5] - u3[i][j][Nz];
+            }
+        }
+        break;
+    case BC_PRESSURE_OUTLET:
+        for (int i = 1; i <= Nx; i++) {
+            for (int j = 1; j <= Ny; j++) {
+                u1[i][j][Nz+1] = (u1[i][j][Nz]*(zc[Nz+1]-zc[Nz-1])-u1[i][j][Nz-1]*(zc[Nz+1]-zc[Nz])) / (zc[Nz]-zc[Nz-1]);
+                u2[i][j][Nz+1] = (u2[i][j][Nz]*(zc[Nz+1]-zc[Nz-1])-u2[i][j][Nz-1]*(zc[Nz+1]-zc[Nz])) / (zc[Nz]-zc[Nz-1]);
+                u3[i][j][Nz+1] = (u3[i][j][Nz]*(zc[Nz+1]-zc[Nz-1])-u3[i][j][Nz-1]*(zc[Nz+1]-zc[Nz])) / (zc[Nz]-zc[Nz-1]);
+            }
+        }
+        break;
+    case BC_STATIONARY_WALL:
+        for (int i = 1; i <= Nx; i++) {
+            for (int j = 1; j <= Ny; j++) {
+                u1[i][j][Nz+1] = -u1[i][j][Nz];
+                u2[i][j][Nz+1] = -u2[i][j][Nz];
+                u3[i][j][Nz+1] = -u3[i][j][Nz];
+            }
+        }
+        break;
+    case BC_FREE_SLIP_WALL:
+        for (int i = 1; i <= Nx; i++) {
+            for (int j = 1; j <= Ny; j++) {
+                u1[i][j][Nz+1] = u1[i][j][Nz];
+                u2[i][j][Nz+1] = u2[i][j][Nz];
+                u3[i][j][Nz+1] = -u3[i][j][Nz];
+            }
+        }
+        break;
+    case BC_ALL_PERIODIC:
+    case BC_VELOCITY_PERIODIC:
+        for (int i = 1; i <= Nx; i++) {
+            for (int j = 1; j <= Ny; j++) {
+                u1[i][j][Nz+1] = u1[i][j][1];
+                u2[i][j][Nz+1] = u2[i][j][1];
+                u3[i][j][Nz+1] = u3[i][j][1];
+            }
+        }
+        break;
+    default:;
+    }
+
+    /* Set pressure boundary conditions. */
+
+    /* West. */
+    if (solver->ilower == 1) {
+        switch (solver->bc_type[3]) {
+        case BC_VELOCITY_INLET:
+        case BC_STATIONARY_WALL:
+        case BC_FREE_SLIP_WALL:
+            for (int j = 1; j <= Ny; j++) {
+                for (int k = 1; k <= Nz; k++) {
+                    p[0][j][k] = p[1][j][k];
+                }
+            }
+            break;
+        case BC_PRESSURE_OUTLET:
+        case BC_VELOCITY_PERIODIC:
+            for (int j = 1; j <= Ny; j++) {
+                for (int k = 1; k <= Nz; k++) {
+                    p[0][j][k] = 2*solver->bc_val[3] - p[1][j][k];
+                }
+            }
+            break;
+        case BC_ALL_PERIODIC:
+            if (solver->num_process == 1) {
+                for (int j = 1; j <= Ny; j++) {
+                    for (int k = 1; k <= Nz; k++) {
+                        p[0][j][k] = p[Nx][j][k];
+                    }
+                }
+            }
+            else {
+                MPI_Send(p[1], (Ny+2)*(Nz+2), MPI_DOUBLE, solver->num_process-1, 0, MPI_COMM_WORLD);
+                MPI_Recv(p[0], (Ny+2)*(Nz+2), MPI_DOUBLE, solver->num_process-1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            }
+            break;
+        default:;
+        }
+    }
+
+    /* East. */
+    if (solver->iupper == Nx_global) {
+        switch (solver->bc_type[1]) {
+        case BC_VELOCITY_INLET:
+        case BC_STATIONARY_WALL:
+        case BC_FREE_SLIP_WALL:
+            for (int j = 1; j <= Ny; j++) {
+                for (int k = 1; k <= Nz; k++) {
+                    p[Nx+1][j][k] = p[Nx][j][k];
+                }
+            }
+            break;
+        case BC_PRESSURE_OUTLET:
+        case BC_VELOCITY_PERIODIC:
+            for (int j = 1; j <= Ny; j++) {
+                for (int k = 1; k <= Nz; k++) {
+                    p[Nx+1][j][k] = 2*solver->bc_val[1] - p[Nx][j][k];
+                }
+            }
+            break;
+        case BC_ALL_PERIODIC:
+            if (solver->num_process == 1) {
+                for (int j = 1; j <= Ny; j++) {
+                    for (int k = 1; k <= Nz; k++) {
+                        p[Nx+1][j][k] = p[1][j][k];
+                    }
+                }
+            }
+            else {
+                MPI_Recv(p[Nx+1], (Ny+2)*(Nz+2), MPI_DOUBLE, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+                MPI_Send(p[Nx], (Ny+2)*(Nz+2), MPI_DOUBLE, 0, 0, MPI_COMM_WORLD);
+            }
+            break;
+        default:;
+        }
+    }
+
+    /* South. */
+    switch (solver->bc_type[2]) {
+    case BC_VELOCITY_INLET:
+    case BC_STATIONARY_WALL:
+    case BC_FREE_SLIP_WALL:
+        for (int i = 1; i <= Nx; i++) {
+            for (int k = 1; k <= Nz; k++) {
+                p[i][0][k] = p[i][1][k];
+            }
+        }
+        break;
+    case BC_PRESSURE_OUTLET:
+    case BC_VELOCITY_PERIODIC:
+        for (int i = 1; i <= Nx; i++) {
+            for (int k = 1; k <= Nz; k++) {
+                p[i][0][k] = 2*solver->bc_val[2] - p[i][1][k];
+            }
+        }
+        break;
+    case BC_ALL_PERIODIC:
+        for (int i = 1; i <= Nx; i++) {
+            for (int k = 1; k <= Nz; k++) {
+                p[i][0][k] = p[i][Ny][k];
+            }
+        }
+        break;
+    default:;
+    }
+
+    /* North. */
+    switch (solver->bc_type[0]) {
+    case BC_VELOCITY_INLET:
+    case BC_STATIONARY_WALL:
+    case BC_FREE_SLIP_WALL:
+        for (int i = 1; i <= Nx; i++) {
+            for (int k = 1; k <= Nz; k++) {
+                p[i][Ny+1][k] = p[i][Ny][k];
+            }
+        }
+        break;
+    case BC_PRESSURE_OUTLET:
+    case BC_VELOCITY_PERIODIC:
+        for (int i = 1; i <= Nx; i++) {
+            for (int k = 1; k <= Nz; k++) {
+                p[i][Ny+1][k] = 2*solver->bc_val[0] - p[i][Ny][k];
+            }
+        }
+        break;
+    case BC_ALL_PERIODIC:
+        for (int i = 1; i <= Nx; i++) {
+            for (int k = 1; k <= Nz; k++) {
+                p[i][Ny+1][k] = p[i][1][k];
+            }
+        }
+        break;
+    default:;
+    }
+
+    /* Down. */
+    switch (solver->bc_type[4]) {
+    case BC_VELOCITY_INLET:
+    case BC_STATIONARY_WALL:
+    case BC_FREE_SLIP_WALL:
+        for (int i = 1; i <= Nx; i++) {
+            for (int j = 1; j <= Ny; j++) {
+                p[i][j][0] = p[i][j][1];
+            }
+        }
+        break;
+    case BC_PRESSURE_OUTLET:
+    case BC_VELOCITY_PERIODIC:
+        for (int i = 1; i <= Nx; i++) {
+            for (int j = 1; j <= Ny; j++) {
+                p[i][j][0] = 2*solver->bc_val[4] - p[i][j][1];
+            }
+        }
+        break;
+    case BC_ALL_PERIODIC:
+        for (int i = 1; i <= Nx; i++) {
+            for (int j = 1; j <= Ny; j++) {
+                p[i][j][0] = p[i][j][Nz];
+            }
+        }
+        break;
+    default:;
+    }
+
+    /* Up. */
+    switch (solver->bc_type[5]) {
+    case BC_VELOCITY_INLET:
+    case BC_STATIONARY_WALL:
+    case BC_FREE_SLIP_WALL:
+        for (int i = 1; i <= Nx; i++) {
+            for (int j = 1; j <= Ny; j++) {
+                p[i][j][Nz+1] = p[i][j][Nz];
+            }
+        }
+        break;
+    case BC_PRESSURE_OUTLET:
+    case BC_VELOCITY_PERIODIC:
+        for (int i = 1; i <= Nx; i++) {
+            for (int j = 1; j <= Ny; j++) {
+                p[i][j][Nz+1] = 2*solver->bc_val[5] - p[i][j][Nz];
+            }
+        }
+        break;
+    case BC_ALL_PERIODIC:
+        for (int i = 1; i <= Nx; i++) {
+            for (int j = 1; j <= Ny; j++) {
+                p[i][j][Nz+1] = p[i][j][1];
+            }
+        }
+        break;
+    default:;
+    }
 }

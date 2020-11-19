@@ -11,6 +11,7 @@
 #include "geo3d.h"
 
 typedef void *arr3d;
+typedef double (*IBMSolverInitFunc)(double, double, double);
 
 typedef enum _linear_solver_type {
     SOLVER_AMG,

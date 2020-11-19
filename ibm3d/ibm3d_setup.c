@@ -22,8 +22,6 @@ static const int adj[6][3] = {
             4
 */
 
-static const double PI = 3.1415926535897932;
-
 static void alloc_arrays(IBMSolver *);
 static void build_hypre(IBMSolver *);
 static HYPRE_IJMatrix create_matrix(IBMSolver *, int);
@@ -379,6 +377,34 @@ void IBMSolver_init_flow_file(
     fclose(fp_p);
 
     interp_stag_vel(solver);
+}
+
+void IBMSolver_init_flow_func(
+    IBMSolver *solver,
+    IBMSolverInitFunc initfunc_u1,
+    IBMSolverInitFunc initfunc_u2,
+    IBMSolverInitFunc initfunc_u3,
+    IBMSolverInitFunc initfunc_p
+) {
+    const int Nx = solver->Nx;
+    const int Ny = solver->Ny;
+    const int Nz = solver->Nz;
+
+    const double *const xc = solver->xc;
+    const double *const yc = solver->yc;
+    const double *const zc = solver->zc;
+
+    double (*const u1)[Ny+2][Nz+2] = solver->u1;
+    double (*const u2)[Ny+2][Nz+2] = solver->u2;
+    double (*const u3)[Ny+2][Nz+2] = solver->u3;
+    double (*const p)[Ny+2][Nz+2] = solver->p;
+
+    FOR_ALL_CELL(i, j, k) {
+        u1[i][j][k] = initfunc_u1(xc[i], yc[j], zc[k]);
+        u2[i][j][k] = initfunc_u2(xc[i], yc[j], zc[k]);
+        u3[i][j][k] = initfunc_u3(xc[i], yc[j], zc[k]);
+        p[i][j][k] = initfunc_p(xc[i], yc[j], zc[k]);
+    }
 }
 
 void IBMSolver_set_autosave(
