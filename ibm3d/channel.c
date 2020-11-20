@@ -8,8 +8,8 @@ const int Nx = 192;
 const int Ny = 160;
 const int Nz = 129;
 
-const double Re = 3300;
-const double dt = 0.02;
+const double Re = 100;
+const double dt = 0.005;
 
 const double PI = 3.1415926535897932;
 
@@ -55,14 +55,14 @@ int main(int argc, char **argv) {
     IBMSolver_set_grid(solver, Nx, Ny, Nz, xf, yf, zf);
     IBMSolver_set_params(solver, Re, dt);
 
-    IBMSolver_set_bc(solver, DIR_WEST, BC_PRESSURE_OUTLET, 0.08);
+    IBMSolver_set_bc(solver, DIR_WEST, BC_PRESSURE_OUTLET, 8*PI/Re);
     IBMSolver_set_bc(solver, DIR_EAST, BC_PRESSURE_OUTLET, 0);
     IBMSolver_set_bc(solver, DIR_SOUTH | DIR_NORTH, BC_ALL_PERIODIC, 0);
     IBMSolver_set_bc(solver, DIR_DOWN | DIR_UP, BC_STATIONARY_WALL, 0);
 
     IBMSolver_set_obstacle(solver, NULL);
 
-    IBMSolver_set_linear_solver(solver, SOLVER_BiCGSTAB, PRECOND_AMG, 1e-4);
+    IBMSolver_set_linear_solver(solver, SOLVER_BiCGSTAB, PRECOND_AMG, 1e-6);
 
     IBMSolver_set_autosave(
         solver,
@@ -73,7 +73,7 @@ int main(int argc, char **argv) {
     IBMSolver_assemble(solver);
 
     /* Initialize. */
-    if (1) {
+    if (0) {
         IBMSolver_init_flow_func(
             solver,
             initfunc_u1, initfunc_u2, initfunc_u3, initfunc_p
@@ -82,12 +82,12 @@ int main(int argc, char **argv) {
     else {
         IBMSolver_init_flow_file(
             solver,
-            "channel_u1.out", "channel_u2.out", "channel_u3.out", "channel_p.out"
+            "data/channel_u1.out", "data/channel_u2.out", "data/channel_u3.out", "data/channel_p.out"
         );
     }
 
     /* Iterate. */
-    IBMSolver_iterate(solver, 10, true);
+    IBMSolver_iterate(solver, 100, true);
 
     /* Export result. */
     IBMSolver_export_results(
@@ -105,7 +105,7 @@ int main(int argc, char **argv) {
 }
 
 double initfunc_u1(double x, double y, double z) {
-    return 1 - x*x;
+    return 1 - z*z;
 }
 
 double initfunc_u2(double x, double y, double z) {
@@ -117,5 +117,5 @@ double initfunc_u3(double x, double y, double z) {
 }
 
 double initfunc_p(double x, double y, double z) {
-    return 0;
+    return 4*PI/Re - 2/Re*x;
 }

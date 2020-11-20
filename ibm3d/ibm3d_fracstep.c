@@ -33,7 +33,7 @@ void IBMSolver_iterate(IBMSolver *solver, int num_time_steps, bool verbose) {
         clock_gettime(CLOCK_REALTIME, &t_start);
     }
 
-    do {
+    while (solver->iter < num_time_steps) {
         calc_N(solver);
         calc_u_star(solver, &final_norm_u1, &final_norm_u2, &final_norm_u3);
         calc_u_tilde(solver);
@@ -81,7 +81,7 @@ void IBMSolver_iterate(IBMSolver *solver, int num_time_steps, bool verbose) {
             }
             autosave(solver);
         }
-    } while (solver->iter < num_time_steps);
+    }
 }
 
 static inline void calc_N(IBMSolver *solver) {
@@ -968,6 +968,13 @@ static inline void calc_p_prime(IBMSolver *solver, double *final_norm_p) {
                 }
             }
             break;
+        case BC_PRESSURE_OUTLET:
+            for (int j = 1; j <= Ny; j++) {
+                for (int k = 1; k <= Nz; k++) {
+                    p_prime[0][j][k] = -p_prime[1][j][k];
+                }
+            }
+            break;
         case BC_ALL_PERIODIC:
             if (solver->num_process == 1) {
                 for (int j = 1; j <= Ny; j++) {
@@ -994,6 +1001,13 @@ static inline void calc_p_prime(IBMSolver *solver, double *final_norm_p) {
             for (int j = 1; j <= Ny; j++) {
                 for (int k = 1; k <= Nz; k++) {
                     p_prime[Nx+1][j][k] = p_prime[Nx][j][k];
+                }
+            }
+            break;
+        case BC_PRESSURE_OUTLET:
+            for (int j = 1; j <= Ny; j++) {
+                for (int k = 1; k <= Nz; k++) {
+                    p_prime[Nx+1][j][k] = -p_prime[Nx][j][k];
                 }
             }
             break;
@@ -1025,6 +1039,13 @@ static inline void calc_p_prime(IBMSolver *solver, double *final_norm_p) {
             }
         }
         break;
+    case BC_PRESSURE_OUTLET:
+        for (int i = 1; i <= Nx; i++) {
+            for (int k = 1; k <= Nz; k++) {
+                p_prime[i][0][k] = -p_prime[i][1][k];
+            }
+        }
+        break;
     case BC_ALL_PERIODIC:
         for (int i = 1; i <= Nx; i++) {
             for (int k = 1; k <= Nz; k++) {
@@ -1043,6 +1064,13 @@ static inline void calc_p_prime(IBMSolver *solver, double *final_norm_p) {
         for (int i = 1; i <= Nx; i++) {
             for (int k = 1; k <= Nz; k++) {
                 p_prime[i][Ny+1][k] = p_prime[i][Ny][k];
+            }
+        }
+        break;
+    case BC_PRESSURE_OUTLET:
+        for (int i = 1; i <= Nx; i++) {
+            for (int k = 1; k <= Nz; k++) {
+                p_prime[i][Ny+1][k] = -p_prime[i][Ny][k];
             }
         }
         break;
@@ -1067,6 +1095,13 @@ static inline void calc_p_prime(IBMSolver *solver, double *final_norm_p) {
             }
         }
         break;
+    case BC_PRESSURE_OUTLET:
+        for (int i = 1; i <= Nx; i++) {
+            for (int j = 1; j <= Ny; j++) {
+                p_prime[i][j][0] = -p_prime[i][j][1];
+            }
+        }
+        break;
     case BC_ALL_PERIODIC:
         for (int i = 1; i <= Nx; i++) {
             for (int j = 1; j <= Ny; j++) {
@@ -1085,6 +1120,13 @@ static inline void calc_p_prime(IBMSolver *solver, double *final_norm_p) {
         for (int i = 1; i <= Nx; i++) {
             for (int j = 1; j <= Ny; j++) {
                 p_prime[i][j][Nz+1] = p_prime[i][j][Nz];
+            }
+        }
+        break;
+    case BC_PRESSURE_OUTLET:
+        for (int i = 1; i <= Nx; i++) {
+            for (int j = 1; j <= Ny; j++) {
+                p_prime[i][j][Nz+1] = -p_prime[i][j][Nz];
             }
         }
         break;

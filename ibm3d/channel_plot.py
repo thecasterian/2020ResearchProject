@@ -10,11 +10,7 @@ Nz = 129
 
 xf = np.linspace(-2*np.pi, 2*np.pi, Nx+1)
 yf = np.linspace(-np.pi, np.pi, Ny+1)
-zf = -2*np.cos(np.linspace(0, np.pi, Nz+1))
-
-xf = np.hstack(([2*xf[0] - xf[1]], xf, [2*xf[-1] - xf[-2]]))
-yf = np.hstack(([2*yf[0] - yf[1]], yf, [2*yf[-1] - yf[-2]]))
-zf = np.hstack(([2*zf[0] - zf[1]], zf, [2*zf[-1] - zf[-2]]))
+zf = -np.cos(np.linspace(0, np.pi, Nz+1))
 
 xc = (xf[1:] + xf[:-1]) / 2
 yc = (yf[1:] + yf[:-1]) / 2
@@ -22,13 +18,13 @@ zc = (zf[1:] + zf[:-1]) / 2
 
 X, Y, Z = np.meshgrid(xc, yc, zc, indexing='ij')
 
-u1 = np.fromfile('channel_u1.out').reshape((Nx+2, Ny+2, Nz+2))
-u2 = np.fromfile('channel_u2.out').reshape((Nx+2, Ny+2, Nz+2))
-u3 = np.fromfile('channel_u3.out').reshape((Nx+2, Ny+2, Nz+2))
-p = np.fromfile('channel_p.out').reshape((Nx+2, Ny+2, Nz+2))
+u1 = np.fromfile('data/channel_u1.out').reshape((Nx+2, Ny+2, Nz+2))[1:-1, 1:-1, 1:-1]
+u2 = np.fromfile('data/channel_u2.out').reshape((Nx+2, Ny+2, Nz+2))[1:-1, 1:-1, 1:-1]
+u3 = np.fromfile('data/channel_u3.out').reshape((Nx+2, Ny+2, Nz+2))[1:-1, 1:-1, 1:-1]
+p = np.fromfile('data/channel_p.out').reshape((Nx+2, Ny+2, Nz+2))[1:-1, 1:-1, 1:-1]
 
-# V = np.sqrt(u1**2 + u2**2 + u3**2)
-V = p
+V = np.sqrt(u1**2 + u2**2 + u3**2)
+# V = p
 
 pts = np.empty(Z.shape + (3,), dtype=float)
 pts[..., 0] = X
@@ -54,8 +50,10 @@ cut_plane.implicit_plane.origin = (0, 0, 0)
 
 mlab.show()
 
-# plt.plot(*np.meshgrid(xc, zc), 'ko')
-C = plt.contourf(xc, zc, V[:, Ny//2, :], 20)
+C = plt.contourf(xc, zc, V[:, Ny//2, :], 50)
 plt.colorbar(C)
 plt.axis('equal')
 plt.show()
+
+# plt.plot(zc, V[:, Ny//2, 0])
+# plt.show()
