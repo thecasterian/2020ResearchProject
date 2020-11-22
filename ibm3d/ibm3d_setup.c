@@ -30,7 +30,6 @@ static void get_interp_info(
     const int, const int, const int,
     int *restrict, double *restrict
 );
-static void interp_stag_vel(IBMSolver *);
 static bool isperiodic(IBMSolverBCType);
 
 IBMSolver *IBMSolver_new(const int num_process, const int rank) {
@@ -339,8 +338,6 @@ void IBMSolver_init_flow_const(IBMSolver *solver) {
             }
         }
     }
-
-    interp_stag_vel(solver);
 }
 
 void IBMSolver_init_flow_file(
@@ -375,8 +372,6 @@ void IBMSolver_init_flow_file(
     fclose(fp_u2);
     fclose(fp_u3);
     fclose(fp_p);
-
-    interp_stag_vel(solver);
 }
 
 void IBMSolver_init_flow_func(
@@ -470,10 +465,10 @@ void IBMSolver_export_results(
             MPI_Recv(p_global[ilower_r], (Nx_r+1)*(Ny+2)*(Nz+2), MPI_DOUBLE, r, 3, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
         }
 
-        FILE *fp_u1 = fopen(ext_u1, "wb");
-        FILE *fp_u2 = fopen(ext_u2, "wb");
-        FILE *fp_u3 = fopen(ext_u3, "wb");
-        FILE *fp_p = fopen(ext_p, "wb");
+        FILE *fp_u1 = fopen_check(ext_u1, "wb");
+        FILE *fp_u2 = fopen_check(ext_u2, "wb");
+        FILE *fp_u3 = fopen_check(ext_u3, "wb");
+        FILE *fp_p = fopen_check(ext_p, "wb");
 
         fwrite(u1_global, sizeof(double), (Nx_global+2)*(Ny+2)*(Nz+2), fp_u1);
         fwrite(u2_global, sizeof(double), (Nx_global+2)*(Ny+2)*(Nz+2), fp_u2);
@@ -707,24 +702,24 @@ static void build_hypre(IBMSolver *solver) {
         case SOLVER_PCG:
             HYPRE_ParCSRPCGSetPrecond(
                 solver->linear_solver_p,
-                (HYPRE_PtrToSolverFcn)HYPRE_BoomerAMGSolve,
-                (HYPRE_PtrToSolverFcn)HYPRE_BoomerAMGSetup,
+                (HYPRE_PtrToParSolverFcn)HYPRE_BoomerAMGSolve,
+                (HYPRE_PtrToParSolverFcn)HYPRE_BoomerAMGSetup,
                 solver->precond_p
             );
             break;
         case SOLVER_BiCGSTAB:
             HYPRE_ParCSRBiCGSTABSetPrecond(
                 solver->linear_solver_p,
-                (HYPRE_PtrToSolverFcn)HYPRE_BoomerAMGSolve,
-                (HYPRE_PtrToSolverFcn)HYPRE_BoomerAMGSetup,
+                (HYPRE_PtrToParSolverFcn)HYPRE_BoomerAMGSolve,
+                (HYPRE_PtrToParSolverFcn)HYPRE_BoomerAMGSetup,
                 solver->precond_p
             );
             break;
         case SOLVER_GMRES:
             HYPRE_ParCSRGMRESSetPrecond(
                 solver->linear_solver_p,
-                (HYPRE_PtrToSolverFcn)HYPRE_BoomerAMGSolve,
-                (HYPRE_PtrToSolverFcn)HYPRE_BoomerAMGSetup,
+                (HYPRE_PtrToParSolverFcn)HYPRE_BoomerAMGSolve,
+                (HYPRE_PtrToParSolverFcn)HYPRE_BoomerAMGSetup,
                 solver->precond_p
             );
             break;
@@ -1179,46 +1174,6 @@ static void get_interp_info(
     interp_coeff[5] = (m.x-xl)*(yu-m.y)*(m.z-zl) / vol;
     interp_coeff[6] = (m.x-xl)*(m.y-yl)*(zu-m.z) / vol;
     interp_coeff[7] = (m.x-xl)*(m.y-yl)*(m.z-zl) / vol;
-}
-
-static void interp_stag_vel(IBMSolver *solver) {
-    const int Nx = solver->Nx;
-    const int Ny = solver->Ny;
-    const int Nz = solver->Nz;
-
-    const double *const dx = solver->dx;
-    const double *const dy = solver->dy;
-    const double *const dz = solver->dz;
-
-    double (*const u1)[Ny+2][Nz+2] = solver->u1;
-    double (*const u2)[Ny+2][Nz+2] = solver->u2;
-    double (*const u3)[Ny+2][Nz+2] = solver->u3;
-
-    double (*const U1)[Ny+2][Nz+2] = solver->U1;
-    double (*const U2)[Ny+1][Nz+2] = solver->U2;
-    double (*const U3)[Ny+2][Nz+1] = solver->U3;
-
-    for (int i = 0; i <= Nx; i++) {
-        for (int j = 0; j <= Ny+1; j++) {
-            for (int k = 0; k <= Nz+1; k++) {
-                U1[i][j][k] = (u1[i][j][k]*dx[i+1] + u1[i+1][j][k]*dx[i]) / (dx[i]+dx[i+1]);
-            }
-        }
-    }
-    for (int i = 0; i <= Nx+1; i++) {
-        for (int j = 0; j <= Ny; j++) {
-            for (int k = 0; k <= Nz+1; k++) {
-                U2[i][j][k] = (u2[i][j][k]*dy[j+1] + u2[i][j+1][k]*dy[j]) / (dy[j]+dy[j+1]);
-            }
-        }
-    }
-    for (int i = 0; i <= Nx+1; i++) {
-        for (int j = 0; j <= Ny+1; j++) {
-            for (int k = 0; k <= Nz; k++) {
-                U3[i][j][k] = (u3[i][j][k]*dz[k+1] + u3[i][j][k+1]*dz[k]) / (dz[k]+dz[k+1]);
-            }
-        }
-    }
 }
 
 static bool isperiodic(IBMSolverBCType type) {

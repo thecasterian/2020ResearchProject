@@ -1,7 +1,7 @@
 UNAME = $(shell uname)
 
 CC = mpicc
-CFLAGS = -Wall -O3 -Wno-unused-result -Wno-incompatible-pointer-types
+CFLAGS = -Wall -O3 -Wno-unused-result
 
 ifeq ($(UNAME), Darwin)
 	INCLUDE = -I/usr/local/Cellar/glib/2.66.0/include/glib-2.0 -I/usr/local/include
@@ -19,10 +19,8 @@ all: $(TARGET)
 
 clean:
 	rm -f $(TARGET)
-	rm -f ibm3d.a
-	rm -f ibm3d_setup.o
-	rm -f ibm3d_fracstep.o
-	rm -f geo3d.o
+	rm -f *.a
+	rm -f *.o
 
 $(TARGET): main.c ibm3d.a geo3d.o
 	$(CC) $(INCLUDE) $^ $(HYPRE) -o $@ $(LDLIBS) $(CFLAGS)
