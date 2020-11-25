@@ -4,6 +4,7 @@
 #define __USE_POSIX199309
 #endif
 #include <time.h>
+#include <math.h>
 
 #include "utils.h"
 
@@ -18,6 +19,7 @@ static void interp_stag_vel(IBMSolver *);
 static void autosave(IBMSolver *);
 static void update_bc(IBMSolver *);
 static void adj_exchange(IBMSolver *);
+static void update_obstacle_bc(IBMSolver *);
 
 void IBMSolver_iterate(IBMSolver *solver, int num_time_steps, bool verbose) {
     struct timespec t_start, t_end;
@@ -27,6 +29,7 @@ void IBMSolver_iterate(IBMSolver *solver, int num_time_steps, bool verbose) {
     update_bc(solver);
     adj_exchange(solver);
     interp_stag_vel(solver);
+    update_obstacle_bc(solver);
 
     calc_N(solver);
     SWAP(solver->N1, solver->N1_prev);
@@ -97,6 +100,8 @@ static inline void calc_N(IBMSolver *solver) {
     const double *const dy = solver->dy;
     const double *const dz = solver->dz;
 
+    const int (*const flag)[Ny+2][Nz+2] = solver->flag;
+
     const double (*const u1)[Ny+2][Nz+2] = solver->u1;
     const double (*const u2)[Ny+2][Nz+2] = solver->u2;
     const double (*const u3)[Ny+2][Nz+2] = solver->u3;
@@ -114,40 +119,45 @@ static inline void calc_N(IBMSolver *solver) {
     double u3_w, u3_e, u3_s, u3_n, u3_d, u3_u;
 
     FOR_ALL_CELL (i, j, k) {
-        u1_w = (u1[i-1][j][k]*dx[i]+u1[i][j][k]*dx[i-1]) / (dx[i-1]+dx[i]);
-        u2_w = (u2[i-1][j][k]*dx[i]+u2[i][j][k]*dx[i-1]) / (dx[i-1]+dx[i]);
-        u3_w = (u3[i-1][j][k]*dx[i]+u3[i][j][k]*dx[i-1]) / (dx[i-1]+dx[i]);
+        if (flag[i][j][k] == FLAG_FLUID) {
+            u1_w = (u1[i-1][j][k]*dx[i]+u1[i][j][k]*dx[i-1]) / (dx[i-1]+dx[i]);
+            u2_w = (u2[i-1][j][k]*dx[i]+u2[i][j][k]*dx[i-1]) / (dx[i-1]+dx[i]);
+            u3_w = (u3[i-1][j][k]*dx[i]+u3[i][j][k]*dx[i-1]) / (dx[i-1]+dx[i]);
 
-        u1_e = (u1[i][j][k]*dx[i+1]+u1[i+1][j][k]*dx[i]) / (dx[i]+dx[i+1]);
-        u2_e = (u2[i][j][k]*dx[i+1]+u2[i+1][j][k]*dx[i]) / (dx[i]+dx[i+1]);
-        u3_e = (u3[i][j][k]*dx[i+1]+u3[i+1][j][k]*dx[i]) / (dx[i]+dx[i+1]);
+            u1_e = (u1[i][j][k]*dx[i+1]+u1[i+1][j][k]*dx[i]) / (dx[i]+dx[i+1]);
+            u2_e = (u2[i][j][k]*dx[i+1]+u2[i+1][j][k]*dx[i]) / (dx[i]+dx[i+1]);
+            u3_e = (u3[i][j][k]*dx[i+1]+u3[i+1][j][k]*dx[i]) / (dx[i]+dx[i+1]);
 
-        u1_s = (u1[i][j-1][k]*dy[j]+u1[i][j][k]*dy[j-1]) / (dy[j-1]+dy[j]);
-        u2_s = (u2[i][j-1][k]*dy[j]+u2[i][j][k]*dy[j-1]) / (dy[j-1]+dy[j]);
-        u3_s = (u3[i][j-1][k]*dy[j]+u3[i][j][k]*dy[j-1]) / (dy[j-1]+dy[j]);
+            u1_s = (u1[i][j-1][k]*dy[j]+u1[i][j][k]*dy[j-1]) / (dy[j-1]+dy[j]);
+            u2_s = (u2[i][j-1][k]*dy[j]+u2[i][j][k]*dy[j-1]) / (dy[j-1]+dy[j]);
+            u3_s = (u3[i][j-1][k]*dy[j]+u3[i][j][k]*dy[j-1]) / (dy[j-1]+dy[j]);
 
-        u1_n = (u1[i][j][k]*dy[j+1]+u1[i][j+1][k]*dy[j]) / (dy[j]+dy[j+1]);
-        u2_n = (u2[i][j][k]*dy[j+1]+u2[i][j+1][k]*dy[j]) / (dy[j]+dy[j+1]);
-        u3_n = (u3[i][j][k]*dy[j+1]+u3[i][j+1][k]*dy[j]) / (dy[j]+dy[j+1]);
+            u1_n = (u1[i][j][k]*dy[j+1]+u1[i][j+1][k]*dy[j]) / (dy[j]+dy[j+1]);
+            u2_n = (u2[i][j][k]*dy[j+1]+u2[i][j+1][k]*dy[j]) / (dy[j]+dy[j+1]);
+            u3_n = (u3[i][j][k]*dy[j+1]+u3[i][j+1][k]*dy[j]) / (dy[j]+dy[j+1]);
 
-        u1_d = (u1[i][j][k-1]*dz[k]+u1[i][j][k]*dz[k-1]) / (dz[k-1]+dz[k]);
-        u2_d = (u2[i][j][k-1]*dz[k]+u2[i][j][k]*dz[k-1]) / (dz[k-1]+dz[k]);
-        u3_d = (u3[i][j][k-1]*dz[k]+u3[i][j][k]*dz[k-1]) / (dz[k-1]+dz[k]);
+            u1_d = (u1[i][j][k-1]*dz[k]+u1[i][j][k]*dz[k-1]) / (dz[k-1]+dz[k]);
+            u2_d = (u2[i][j][k-1]*dz[k]+u2[i][j][k]*dz[k-1]) / (dz[k-1]+dz[k]);
+            u3_d = (u3[i][j][k-1]*dz[k]+u3[i][j][k]*dz[k-1]) / (dz[k-1]+dz[k]);
 
-        u1_u = (u1[i][j][k]*dz[k+1]+u1[i][j][k+1]*dz[k]) / (dz[k]+dz[k+1]);
-        u2_u = (u2[i][j][k]*dz[k+1]+u2[i][j][k+1]*dz[k]) / (dz[k]+dz[k+1]);
-        u3_u = (u3[i][j][k]*dz[k+1]+u3[i][j][k+1]*dz[k]) / (dz[k]+dz[k+1]);
+            u1_u = (u1[i][j][k]*dz[k+1]+u1[i][j][k+1]*dz[k]) / (dz[k]+dz[k+1]);
+            u2_u = (u2[i][j][k]*dz[k+1]+u2[i][j][k+1]*dz[k]) / (dz[k]+dz[k+1]);
+            u3_u = (u3[i][j][k]*dz[k+1]+u3[i][j][k+1]*dz[k]) / (dz[k]+dz[k+1]);
 
-        /* Ni = d(U1ui)/dx + d(U2ui)/dy + d(U3ui)/dz */
-        N1[i][j][k] = (U1[i][j][k]*u1_e-U1[i-1][j][k]*u1_w) / dx[i]
-            + (U2[i][j][k]*u1_n-U2[i][j-1][k]*u1_s) / dy[j]
-            + (U3[i][j][k]*u1_u-U3[i][j][k-1]*u1_d) / dz[k];
-        N2[i][j][k] = (U1[i][j][k]*u2_e-U1[i-1][j][k]*u2_w) / dx[i]
-            + (U2[i][j][k]*u2_n-U2[i][j-1][k]*u2_s) / dy[j]
-            + (U3[i][j][k]*u2_u-U3[i][j][k-1]*u2_d) / dz[k];
-        N3[i][j][k] = (U1[i][j][k]*u3_e-U1[i-1][j][k]*u3_w) / dx[i]
-            + (U2[i][j][k]*u3_n-U2[i][j-1][k]*u3_s) / dy[j]
-            + (U3[i][j][k]*u3_u-U3[i][j][k-1]*u3_d) / dz[k];
+            /* Ni = d(U1ui)/dx + d(U2ui)/dy + d(U3ui)/dz */
+            N1[i][j][k] = (U1[i][j][k]*u1_e-U1[i-1][j][k]*u1_w) / dx[i]
+                + (U2[i][j][k]*u1_n-U2[i][j-1][k]*u1_s) / dy[j]
+                + (U3[i][j][k]*u1_u-U3[i][j][k-1]*u1_d) / dz[k];
+            N2[i][j][k] = (U1[i][j][k]*u2_e-U1[i-1][j][k]*u2_w) / dx[i]
+                + (U2[i][j][k]*u2_n-U2[i][j-1][k]*u2_s) / dy[j]
+                + (U3[i][j][k]*u2_u-U3[i][j][k-1]*u2_d) / dz[k];
+            N3[i][j][k] = (U1[i][j][k]*u3_e-U1[i-1][j][k]*u3_w) / dx[i]
+                + (U2[i][j][k]*u3_n-U2[i][j-1][k]*u3_s) / dy[j]
+                + (U3[i][j][k]*u3_u-U3[i][j][k-1]*u3_d) / dz[k];
+        }
+        else {
+            N1[i][j][k] = N2[i][j][k] = N3[i][j][k] = NAN;
+        }
     }
 }
 
@@ -191,16 +201,23 @@ static inline void calc_u_star(
     const double (*const N2_prev)[Ny+2][Nz+2] = solver->N2_prev;
     const double (*const N3_prev)[Ny+2][Nz+2] = solver->N3_prev;
 
+    int hypre_ierr = 0;
+
     /* u1_star. */
     FOR_ALL_CELL (i, j, k) {
         double *const rhs = &solver->vector_values[LOCL_CELL_IDX(i, j, k)-1];
-        if (flag[i][j][k] != 2) {
+        if (flag[i][j][k] == FLAG_FLUID) {
             *rhs = -dt/2 * (3*N1[i][j][k] - N1_prev[i][j][k])
                 - dt * (p[i+1][j][k] - p[i-1][j][k]) / (xc[i+1] - xc[i-1])
                 + (1-kx_W[i]-kx_E[i]-ky_S[j]-ky_N[j]-kz_D[k]-kz_U[k]) * u1[i][j][k]
                 + kx_W[i]*u1[i-1][j][k] + kx_E[i]*u1[i+1][j][k]
                 + ky_S[j]*u1[i][j-1][k] + ky_N[j]*u1[i][j+1][k]
                 + kz_D[k]*u1[i][j][k-1] + kz_U[k]*u1[i][j][k+1];
+
+            if (isnan(*rhs)) {
+                printf("error\n");
+                MPI_Abort(MPI_COMM_WORLD, -1);
+            }
 
             /* West. */
             if (LOCL_TO_GLOB(i) == 1) {
@@ -249,6 +266,9 @@ static inline void calc_u_star(
                 }
             }
         }
+        else {
+            *rhs = 0;
+        }
     }
     HYPRE_IJVectorSetValues(solver->b, Nx*Ny*Nz, solver->vector_rows, solver->vector_values);
     HYPRE_IJVectorSetValues(solver->x, Nx*Ny*Nz, solver->vector_rows, solver->vector_zeros);
@@ -258,7 +278,12 @@ static inline void calc_u_star(
     HYPRE_IJVectorGetObject(solver->x, (void **)&solver->par_x);
 
     HYPRE_ParCSRBiCGSTABSetup(solver->linear_solver, solver->parcsr_A_u1, solver->par_b, solver->par_x);
-    HYPRE_ParCSRBiCGSTABSolve(solver->linear_solver, solver->parcsr_A_u1, solver->par_b, solver->par_x);
+    hypre_ierr = HYPRE_ParCSRBiCGSTABSolve(solver->linear_solver, solver->parcsr_A_u1, solver->par_b, solver->par_x);
+    if (hypre_ierr) {
+        printf("error: floating pointer error raised in u1_star\n");
+        MPI_Abort(MPI_COMM_WORLD, -1);
+    }
+
     HYPRE_IJVectorGetValues(solver->x, Nx*Ny*Nz, solver->vector_rows, solver->vector_res);
     FOR_ALL_CELL (i, j, k) {
         u1_star[i][j][k] = solver->vector_res[LOCL_CELL_IDX(i, j, k)-1];
@@ -268,7 +293,7 @@ static inline void calc_u_star(
     /* u2_star. */
     FOR_ALL_CELL (i, j, k) {
         double *const rhs = &solver->vector_values[LOCL_CELL_IDX(i, j, k)-1];
-        if (flag[i][j][k] != 2) {
+        if (flag[i][j][k] == FLAG_FLUID) {
             *rhs = -dt/2 * (3*N2[i][j][k] - N2_prev[i][j][k])
                 - dt * (p[i][j+1][k] - p[i][j-1][k]) / (yc[j+1] - yc[j-1])
                 + (1-kx_W[i]-kx_E[i]-ky_S[j]-ky_N[j]-kz_D[k]-kz_U[k]) * u2[i][j][k]
@@ -324,6 +349,9 @@ static inline void calc_u_star(
                 }
             }
         }
+        else {
+            *rhs = 0;
+        }
     }
     HYPRE_IJVectorSetValues(solver->b, Nx*Ny*Nz, solver->vector_rows, solver->vector_values);
     HYPRE_IJVectorSetValues(solver->x, Nx*Ny*Nz, solver->vector_rows, solver->vector_zeros);
@@ -333,7 +361,12 @@ static inline void calc_u_star(
     HYPRE_IJVectorGetObject(solver->x, (void **)&solver->par_x);
 
     HYPRE_ParCSRBiCGSTABSetup(solver->linear_solver, solver->parcsr_A_u2, solver->par_b, solver->par_x);
-    HYPRE_ParCSRBiCGSTABSolve(solver->linear_solver, solver->parcsr_A_u2, solver->par_b, solver->par_x);
+    hypre_ierr = HYPRE_ParCSRBiCGSTABSolve(solver->linear_solver, solver->parcsr_A_u2, solver->par_b, solver->par_x);
+    if (hypre_ierr) {
+        printf("error: floating pointer error raised in u2_star\n");
+        MPI_Abort(MPI_COMM_WORLD, -1);
+    }
+
     HYPRE_IJVectorGetValues(solver->x, Nx*Ny*Nz, solver->vector_rows, solver->vector_res);
     FOR_ALL_CELL (i, j, k) {
         u2_star[i][j][k] = solver->vector_res[LOCL_CELL_IDX(i, j, k)-1];
@@ -343,7 +376,7 @@ static inline void calc_u_star(
     /* u3_star. */
     FOR_ALL_CELL (i, j, k) {
         double *const rhs = &solver->vector_values[LOCL_CELL_IDX(i, j, k)-1];
-        if (flag[i][j][k] != 2) {
+        if (flag[i][j][k] == FLAG_FLUID) {
             *rhs = -dt/2 * (3*N3[i][j][k] - N3_prev[i][j][k])
                 - dt * (p[i][j][k+1] - p[i][j][k-1]) / (zc[k+1] - zc[k-1])
                 + (1-kx_W[i]-kx_E[i]-ky_S[j]-ky_N[j]-kz_D[k]-kz_U[k]) * u3[i][j][k]
@@ -399,6 +432,9 @@ static inline void calc_u_star(
                 }
             }
         }
+        else {
+            *rhs = 0;
+        }
     }
     HYPRE_IJVectorSetValues(solver->b, Nx*Ny*Nz, solver->vector_rows, solver->vector_values);
     HYPRE_IJVectorSetValues(solver->x, Nx*Ny*Nz, solver->vector_rows, solver->vector_zeros);
@@ -408,7 +444,12 @@ static inline void calc_u_star(
     HYPRE_IJVectorGetObject(solver->x, (void **)&solver->par_x);
 
     HYPRE_ParCSRBiCGSTABSetup(solver->linear_solver, solver->parcsr_A_u3, solver->par_b, solver->par_x);
-    HYPRE_ParCSRBiCGSTABSolve(solver->linear_solver, solver->parcsr_A_u3, solver->par_b, solver->par_x);
+    hypre_ierr = HYPRE_ParCSRBiCGSTABSolve(solver->linear_solver, solver->parcsr_A_u3, solver->par_b, solver->par_x);
+    if (hypre_ierr) {
+        printf("error: floating pointer error raised in u3_star\n");
+        MPI_Abort(MPI_COMM_WORLD, -1);
+    }
+
     HYPRE_IJVectorGetValues(solver->x, Nx*Ny*Nz, solver->vector_rows, solver->vector_res);
     FOR_ALL_CELL (i, j, k) {
         u3_star[i][j][k] = solver->vector_res[LOCL_CELL_IDX(i, j, k)-1];
@@ -545,6 +586,8 @@ static inline void calc_u_tilde(IBMSolver *solver) {
     const double *const yc = solver->yc;
     const double *const zc = solver->zc;
 
+    const int (*const flag)[Ny+2][Nz+2] = solver->flag;
+
     const double (*const u1_star)[Ny+2][Nz+2] = solver->u1_star;
     const double (*const u2_star)[Ny+2][Nz+2] = solver->u2_star;
     const double (*const u3_star)[Ny+2][Nz+2] = solver->u3_star;
@@ -556,9 +599,11 @@ static inline void calc_u_tilde(IBMSolver *solver) {
     const double (*const p)[Ny+2][Nz+2] = solver->p;
 
     FOR_ALL_CELL (i, j, k) {
-        u1_tilde[i][j][k] = u1_star[i][j][k] + solver->dt * (p[i+1][j][k] - p[i-1][j][k]) / (xc[i+1] - xc[i-1]);
-        u2_tilde[i][j][k] = u2_star[i][j][k] + solver->dt * (p[i][j+1][k] - p[i][j-1][k]) / (yc[j+1] - yc[j-1]);
-        u3_tilde[i][j][k] = u3_star[i][j][k] + solver->dt * (p[i][j][k+1] - p[i][j][k-1]) / (zc[k+1] - zc[k-1]);
+        if (flag[i][j][k] == FLAG_FLUID) {
+            u1_tilde[i][j][k] = u1_star[i][j][k] + solver->dt * (p[i+1][j][k] - p[i-1][j][k]) / (xc[i+1] - xc[i-1]);
+            u2_tilde[i][j][k] = u2_star[i][j][k] + solver->dt * (p[i][j+1][k] - p[i][j-1][k]) / (yc[j+1] - yc[j-1]);
+            u3_tilde[i][j][k] = u3_star[i][j][k] + solver->dt * (p[i][j][k+1] - p[i][j][k-1]) / (zc[k+1] - zc[k-1]);
+        }
     }
 
     /* West. */
@@ -761,6 +806,12 @@ static inline void calc_U_star(IBMSolver *solver) {
     const double *const yc = solver->yc;
     const double *const zc = solver->zc;
 
+    const int (*const flag)[Ny+2][Nz+2] = solver->flag;
+
+    const double (*const u1_star)[Ny+2][Nz+2] = solver->u1_star;
+    const double (*const u2_star)[Ny+2][Nz+2] = solver->u2_star;
+    const double (*const u3_star)[Ny+2][Nz+2] = solver->u3_star;
+
     const double (*const u1_tilde)[Ny+2][Nz+2] = solver->u1_tilde;
     const double (*const u2_tilde)[Ny+2][Nz+2] = solver->u2_tilde;
     const double (*const u3_tilde)[Ny+2][Nz+2] = solver->u3_tilde;
@@ -909,6 +960,22 @@ static inline void calc_U_star(IBMSolver *solver) {
         break;
     default:;
     }
+
+    FOR_ALL_XSTAG (i, j, k) {
+        if ((flag[i][j][k] == FLAG_FLUID && flag[i+1][j][k] == FLAG_GHOST) || (flag[i][j][k] == FLAG_GHOST && flag[i+1][j][k] == FLAG_FLUID)) {
+            U1_star[i][j][k] = (u1_star[i][j][k] * dx[i+1] + u1_star[i+1][j][k] * dx[i]) / (dx[i] + dx[i+1]);
+        }
+    }
+    FOR_ALL_YSTAG (i, j, k) {
+        if ((flag[i][j][k] == FLAG_FLUID && flag[i][j+1][k] == FLAG_GHOST) || (flag[i][j][k] == FLAG_GHOST && flag[i][j+1][k] == FLAG_FLUID)) {
+            U2_star[i][j][k] = (u2_star[i][j][k] * dy[j+1] + u2_star[i][j+1][k] * dy[j]) / (dy[j] + dy[j+1]);
+        }
+    }
+    FOR_ALL_ZSTAG (i, j, k) {
+        if ((flag[i][j][k] == FLAG_FLUID && flag[i][j][k+1] == FLAG_GHOST) || (flag[i][j][k] == FLAG_GHOST && flag[i][j][k+1] == FLAG_FLUID)) {
+            U3_star[i][j][k] = (u3_star[i][j][k] * dz[k+1] + u3_star[i][j][k+1] * dz[k]) / (dz[k] + dz[k+1]);
+        }
+    }
 }
 
 static inline void calc_p_prime(IBMSolver *solver, double *final_norm_p) {
@@ -931,15 +998,20 @@ static inline void calc_p_prime(IBMSolver *solver, double *final_norm_p) {
     double (*const p_prime)[Ny+2][Nz+2] = solver->p_prime;
     double (*const p_coeffsum)[Ny+2][Nz+2] = solver->p_coeffsum;
 
+    int hypre_ierr = 0;
+
     FOR_ALL_CELL (i, j, k) {
-        if (flag[i][j][k] != 2) {
-            double *const rhs = &solver->vector_values[LOCL_CELL_IDX(i, j, k)-1];
+        double *const rhs = &solver->vector_values[LOCL_CELL_IDX(i, j, k)-1];
+        if (flag[i][j][k] == 1) {
             *rhs = -1/(2*Re) * (
                     (U1_star[i][j][k] - U1_star[i-1][j][k]) / dx[i]
                     + (U2_star[i][j][k] - U2_star[i][j-1][k]) / dy[j]
                     + (U3_star[i][j][k] - U3_star[i][j][k-1]) / dz[k]
                 );
             *rhs /= p_coeffsum[i][j][k];
+        }
+        else {
+            *rhs = 0;
         }
     }
 
@@ -954,18 +1026,22 @@ static inline void calc_p_prime(IBMSolver *solver, double *final_norm_p) {
 
     switch (solver->linear_solver_type) {
     case SOLVER_AMG:
-        HYPRE_BoomerAMGSolve(solver->linear_solver_p, solver->parcsr_A_p, solver->par_b, solver->par_x);
+        hypre_ierr = HYPRE_BoomerAMGSolve(solver->linear_solver_p, solver->parcsr_A_p, solver->par_b, solver->par_x);
         break;
     case SOLVER_PCG:
-        HYPRE_ParCSRPCGSolve(solver->linear_solver_p, solver->parcsr_A_p, solver->par_b, solver->par_x);
+        hypre_ierr = HYPRE_ParCSRPCGSolve(solver->linear_solver_p, solver->parcsr_A_p, solver->par_b, solver->par_x);
         break;
     case SOLVER_BiCGSTAB:
-        HYPRE_ParCSRBiCGSTABSolve(solver->linear_solver_p, solver->parcsr_A_p, solver->par_b, solver->par_x);
+        hypre_ierr = HYPRE_ParCSRBiCGSTABSolve(solver->linear_solver_p, solver->parcsr_A_p, solver->par_b, solver->par_x);
         break;
     case SOLVER_GMRES:
-        HYPRE_ParCSRGMRESSolve(solver->linear_solver_p, solver->parcsr_A_p, solver->par_b, solver->par_x);
+        hypre_ierr = HYPRE_ParCSRGMRESSolve(solver->linear_solver_p, solver->parcsr_A_p, solver->par_b, solver->par_x);
         break;
     default:;
+    }
+    if (hypre_ierr) {
+        printf("error: floating pointer error raised in p_prime\n");
+        MPI_Abort(MPI_COMM_WORLD, -1);
     }
 
     HYPRE_IJVectorGetValues(solver->x, Nx*Ny*Nz, solver->vector_rows, solver->vector_res);
@@ -1206,6 +1282,8 @@ static inline void update_next(IBMSolver *solver) {
     const double *const yc = solver->yc;
     const double *const zc = solver->zc;
 
+    const int (*const flag)[Ny+2][Nz+2] = solver->flag;
+
     const double (*const p)[Ny+2][Nz+2] = solver->p;
 
     const double (*const u1_star)[Ny+2][Nz+2] = solver->u1_star;
@@ -1228,14 +1306,24 @@ static inline void update_next(IBMSolver *solver) {
 
     /* Calculate p_next. */
     FOR_ALL_CELL (i, j, k) {
-        p_next[i][j][k] = p[i][j][k] + p_prime[i][j][k];
+        if (flag[i][j][k] == FLAG_FLUID || flag[i][j][k] == FLAG_GHOST) {
+            p_next[i][j][k] = p[i][j][k] + p_prime[i][j][k];
+        }
+        else if (flag[i][j][k] == FLAG_SOLID) {
+            p_next[i][j][k] = NAN;
+        }
     }
 
     /* Calculate u_next. */
     FOR_ALL_CELL (i, j, k) {
-        u1_next[i][j][k] = u1_star[i][j][k] - dt * (p_prime[i+1][j][k] - p_prime[i-1][j][k]) / (xc[i+1] - xc[i-1]);
-        u2_next[i][j][k] = u2_star[i][j][k] - dt * (p_prime[i][j+1][k] - p_prime[i][j-1][k]) / (yc[j+1] - yc[j-1]);
-        u3_next[i][j][k] = u3_star[i][j][k] - dt * (p_prime[i][j][k+1] - p_prime[i][j][k-1]) / (zc[k+1] - zc[k-1]);
+        if (flag[i][j][k] == FLAG_FLUID) {
+            u1_next[i][j][k] = u1_star[i][j][k] - dt * (p_prime[i+1][j][k] - p_prime[i-1][j][k]) / (xc[i+1] - xc[i-1]);
+            u2_next[i][j][k] = u2_star[i][j][k] - dt * (p_prime[i][j+1][k] - p_prime[i][j-1][k]) / (yc[j+1] - yc[j-1]);
+            u3_next[i][j][k] = u3_star[i][j][k] - dt * (p_prime[i][j][k+1] - p_prime[i][j][k-1]) / (zc[k+1] - zc[k-1]);
+        }
+        else if (flag[i][j][k] == FLAG_SOLID) {
+            u1_next[i][j][k] = u2_next[i][j][k] = u3_next[i][j][k] = NAN;
+        }
     }
 
     /* Calculate U_next. */
@@ -1266,6 +1354,9 @@ static inline void update_next(IBMSolver *solver) {
 
     /* Exchange u1, u2, u3, and p between the adjacent processes. */
     adj_exchange(solver);
+
+    /* Set boundary condition on obstacle surface. */
+    update_obstacle_bc(solver);
 }
 
 static void interp_stag_vel(IBMSolver *solver) {
@@ -1927,5 +2018,125 @@ static void adj_exchange(IBMSolver *solver) {
         MPI_Recv(u2[Nx+1], (Ny+2)*(Nz+2), MPI_DOUBLE, solver->rank+1, 1, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
         MPI_Recv(u3[Nx+1], (Ny+2)*(Nz+2), MPI_DOUBLE, solver->rank+1, 2, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
         MPI_Recv(p[Nx+1], (Ny+2)*(Nz+2), MPI_DOUBLE, solver->rank+1, 3, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+    }
+}
+
+static void update_obstacle_bc(IBMSolver *solver) {
+    const int Nx = solver->Nx;
+    const int Ny = solver->Ny;
+    const int Nz = solver->Nz;
+
+    const double (*const dx) = solver->dx;
+    const double (*const dy) = solver->dy;
+    const double (*const dz) = solver->dz;
+    const double (*const xc) = solver->xc;
+    const double (*const yc) = solver->yc;
+    const double (*const zc) = solver->zc;
+
+    const double (*const lvset)[Ny+2][Nz+2] = solver->lvset;
+    const int (*const flag)[Ny+2][Nz+2] = solver->flag;
+
+    double (*const u1)[Ny+2][Nz+2] = solver->u1;
+    double (*const u2)[Ny+2][Nz+2] = solver->u2;
+    double (*const u3)[Ny+2][Nz+2] = solver->u3;
+
+    double (*const U1)[Ny+2][Nz+2] = solver->U1;
+    double (*const U2)[Ny+1][Nz+2] = solver->U2;
+    double (*const U3)[Ny+2][Nz+1] = solver->U3;
+
+    double (*const p)[Ny+2][Nz+2] = solver->p;
+
+    FOR_ALL_CELL (i, j, k) {
+        if (flag[i][j][k] == FLAG_GHOST) {
+            Vector n, m;
+
+            n.x = (lvset[i+1][j][k] - lvset[i-1][j][k]) / (xc[i+1] - xc[i-1]);
+            n.y = (lvset[i][j+1][k] - lvset[i][j-1][k]) / (yc[j+1] - yc[j-1]);
+            n.z = (lvset[i][j][k+1] - lvset[i][j][k-1]) / (zc[k+1] - zc[k-1]);
+
+            m = Vector_lincom(
+                1, (Vector){xc[i], yc[j], zc[k]},
+                -2*lvset[i][j][k], n
+            );
+
+            const int im = upper_bound(Nx+2, xc, m.x) - 1;
+            const int jm = upper_bound(Ny+2, yc, m.y) - 1;
+            const int km = upper_bound(Nz+2, zc, m.z) - 1;
+
+            const double xl = xc[im], xu = xc[im+1];
+            const double yl = yc[jm], yu = yc[jm+1];
+            const double zl = zc[km], zu = zc[km+1];
+            const double vol = (xu - xl) * (yu - yl) * (zu - zl);
+
+            double interp_coeff[8];
+            interp_coeff[0] = (xu-m.x)*(yu-m.y)*(zu-m.z) / vol;
+            interp_coeff[1] = (xu-m.x)*(yu-m.y)*(m.z-zl) / vol;
+            interp_coeff[2] = (xu-m.x)*(m.y-yl)*(zu-m.z) / vol;
+            interp_coeff[3] = (xu-m.x)*(m.y-yl)*(m.z-zl) / vol;
+            interp_coeff[4] = (m.x-xl)*(yu-m.y)*(zu-m.z) / vol;
+            interp_coeff[5] = (m.x-xl)*(yu-m.y)*(m.z-zl) / vol;
+            interp_coeff[6] = (m.x-xl)*(m.y-yl)*(zu-m.z) / vol;
+            interp_coeff[7] = (m.x-xl)*(m.y-yl)*(m.z-zl) / vol;
+
+            double center_coeff = 1;
+            double coeff_sum = 0;
+            double sum_u1 = 0, sum_u2 = 0, sum_u3 = 0;
+
+            for (int l = 0; l < 8; l++) {
+                int ni = im + !!(l & 4);
+                int nj = jm + !!(l & 2);
+                int nk = km + !!(l & 1);
+
+                if (ni < 0 || ni > Nx+1 || nj < 0 || nj > Ny+1 || nk < 0 || nk > Nz+1) {
+                    continue;
+                }
+                if (flag[ni][nj][nk] == FLAG_SOLID) {
+                    continue;
+                }
+
+                coeff_sum += interp_coeff[l];
+
+                if (ni == i && nj == j && nk == k) {
+                    center_coeff += interp_coeff[l];
+                }
+                else {
+                    sum_u1 += u1[ni][nj][nk] * interp_coeff[l];
+                    sum_u2 += u2[ni][nj][nk] * interp_coeff[l];
+                    sum_u3 += u3[ni][nj][nk] * interp_coeff[l];
+                }
+            }
+
+            u1[i][j][k] = -sum_u1 / center_coeff / coeff_sum;
+            u2[i][j][k] = -sum_u2 / center_coeff / coeff_sum;
+            u3[i][j][k] = -sum_u3 / center_coeff / coeff_sum;
+        }
+        else if (flag[i][j][k] == FLAG_SOLID) {
+            u1[i][j][k] = u2[i][j][k] = u3[i][j][k] = p[i][j][k] = NAN;
+        }
+    }
+
+    FOR_ALL_XSTAG (i, j, k) {
+        if ((flag[i][j][k] == FLAG_FLUID && flag[i+1][j][k] == FLAG_GHOST) || (flag[i][j][k] == FLAG_GHOST && flag[i+1][j][k] == FLAG_FLUID)) {
+            U1[i][j][k] = (u1[i][j][k] * dx[i+1] + u1[i+1][j][k] * dx[i]) / (dx[i] + dx[i+1]);
+        }
+        else if (flag[i][j][k] == FLAG_SOLID || flag[i+1][j][k] == FLAG_SOLID) {
+            U1[i][j][k] = NAN;
+        }
+    }
+    FOR_ALL_YSTAG (i, j, k) {
+        if ((flag[i][j][k] == FLAG_FLUID && flag[i][j+1][k] == FLAG_GHOST) || (flag[i][j][k] == FLAG_GHOST && flag[i][j+1][k] == FLAG_FLUID)) {
+            U2[i][j][k] = (u2[i][j][k] * dy[j+1] + u2[i][j+1][k] * dy[j]) / (dy[j] + dy[j+1]);
+        }
+        else if (flag[i][j][k] == FLAG_SOLID || flag[i][j+1][k] == FLAG_SOLID) {
+            U2[i][j][k] = NAN;
+        }
+    }
+    FOR_ALL_ZSTAG (i, j, k) {
+        if ((flag[i][j][k] == FLAG_FLUID && flag[i][j][k+1] == FLAG_GHOST) || (flag[i][j][k] == FLAG_GHOST && flag[i][j][k+1] == FLAG_FLUID)) {
+            U3[i][j][k] = (u3[i][j][k] * dz[k+1] + u3[i][j][k+1] * dz[k]) / (dz[k] + dz[k+1]);
+        }
+        else if (flag[i][j][k] == FLAG_SOLID || flag[i][j][k+1] == FLAG_SOLID) {
+            U2[i][j][k] = NAN;
+        }
     }
 }

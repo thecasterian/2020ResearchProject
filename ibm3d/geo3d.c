@@ -6,6 +6,8 @@
 #include <float.h>
 #include <glib.h>
 
+#include "mpi.h"
+
 static const double PI = 3.141592653589793;
 
 #define max(a, b) ({typeof(a) _a = a; typeof(b) _b = b; _a > _b ? _a : _b;})
@@ -409,6 +411,14 @@ void Polyhedron_print_stats(Polyhedron *poly) {
     printf("  xmin: %10.4lf, xmax: %10.4lf\n", xmin, xmax);
     printf("  ymin: %10.4lf, ymax: %10.4lf\n", ymin, ymax);
     printf("  zmin: %10.4lf, zmax: %10.4lf\n", zmin, zmax);
+}
+
+void Polyhedron_scale(Polyhedron *poly, double scale) {
+    for (int i = 0; i < poly->num_vertices; i++) {
+        poly->vertex_list[i].coord.x *= scale;
+        poly->vertex_list[i].coord.y *= scale;
+        poly->vertex_list[i].coord.z *= scale;
+    }
 }
 
 void Polyhedron_cpt(

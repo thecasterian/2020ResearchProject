@@ -18,10 +18,13 @@ zc = (zf[1:] + zf[:-1]) / 2
 
 X, Y, Z = np.meshgrid(xc, yc, zc, indexing='ij')
 
-u1 = np.fromfile('data/channel_u1.out').reshape((Nx+2, Ny+2, Nz+2))[1:-1, 1:-1, 1:-1]
-u2 = np.fromfile('data/channel_u2.out').reshape((Nx+2, Ny+2, Nz+2))[1:-1, 1:-1, 1:-1]
-u3 = np.fromfile('data/channel_u3.out').reshape((Nx+2, Ny+2, Nz+2))[1:-1, 1:-1, 1:-1]
-p = np.fromfile('data/channel_p.out').reshape((Nx+2, Ny+2, Nz+2))[1:-1, 1:-1, 1:-1]
+prefix = 'nurion/'
+postfix = '-10800'
+
+u1 = np.fromfile(f'{prefix}channel_u1{postfix}.out').reshape((Nx+2, Ny+2, Nz+2))[1:-1, 1:-1, 1:-1]
+u2 = np.fromfile(f'{prefix}channel_u2{postfix}.out').reshape((Nx+2, Ny+2, Nz+2))[1:-1, 1:-1, 1:-1]
+u3 = np.fromfile(f'{prefix}channel_u3{postfix}.out').reshape((Nx+2, Ny+2, Nz+2))[1:-1, 1:-1, 1:-1]
+p = np.fromfile(f'{prefix}channel_p{postfix}.out').reshape((Nx+2, Ny+2, Nz+2))[1:-1, 1:-1, 1:-1]
 
 V = np.sqrt(u1**2 + u2**2 + u3**2)
 # V = p

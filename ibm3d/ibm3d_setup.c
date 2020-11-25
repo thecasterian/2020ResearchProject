@@ -23,8 +23,10 @@ static const int adj[6][3] = {
 */
 
 static void alloc_arrays(IBMSolver *);
+static void calc_lvset_flag(IBMSolver *);
 static void build_hypre(IBMSolver *);
 static HYPRE_IJMatrix create_matrix(IBMSolver *, int);
+
 static void get_interp_info(
     IBMSolver *,
     const int, const int, const int,
@@ -187,47 +189,7 @@ void IBMSolver_set_bc(
 }
 
 void IBMSolver_set_obstacle(IBMSolver *solver, Polyhedron *poly) {
-    const int Nx = solver->Nx;
-    const int Ny = solver->Ny;
-    const int Nz = solver->Nz;
-
-    int (*flag)[Ny+2][Nz+2] = solver->flag;
-    double (*const lvset)[Ny+2][Nz+2] = solver->lvset;
-
-    /* No obstacle: every cell is fluid cell. */
-    if (poly == NULL) {
-        FOR_ALL_CELL (i, j, k) {
-            flag[i][j][k] = 1;
-        }
-        return;
-    }
-
-    /* Calculate level set function. */
-    Polyhedron_cpt(
-        poly,
-        Nx+2, Ny+2, Nz+2,
-        solver->xc, solver->yc, solver->zc,
-        lvset, .2
-    );
-
-    /* Calculate flag.
-       * Level set function is positive           => fluid cell (flag = 1)
-       * Level set function if negative and at
-           least one adjacent cell is fluid cell  => ghost cell (flag = 2)
-       * Otherwise                                => solid cell (flag = 0) */
-    FOR_ALL_CELL (i, j, k) {
-        if (lvset[i][j][k] > 0) {
-            flag[i][j][k] = 1;
-        }
-        else {
-            bool is_ghost_cell = false;
-            for (int l = 0; l < 6; l++) {
-                int ni = i + adj[l][0], nj = j + adj[l][1], nk = k + adj[l][2];
-                is_ghost_cell = is_ghost_cell || (lvset[ni][nj][nk] > 0);
-            }
-            flag[i][j][k] = is_ghost_cell ? 2 : 0;
-        }
-    }
+    solver->poly = poly;
 }
 
 void IBMSolver_set_linear_solver(
@@ -311,6 +273,9 @@ void IBMSolver_assemble(IBMSolver *solver) {
         solver->kz_D[k] = dt / (2*Re * (zc[k] - zc[k-1])*dz[k]);
         solver->kz_U[k] = dt / (2*Re * (zc[k+1] - zc[k])*dz[k]);
     }
+
+    /* Calculate level set function and flag. */
+    calc_lvset_flag(solver);
 
     /* Build HYPRE variables. */
     build_hypre(solver);
@@ -494,6 +459,78 @@ void IBMSolver_export_results(
     }
 }
 
+void IBMSolver_export_lvset(IBMSolver *solver, const char *filename) {
+    const int Nx = solver->Nx;
+    const int Ny = solver->Ny;
+    const int Nz = solver->Nz;
+    const int Nx_global = solver->Nx_global;
+
+    const double (*const lvset)[Ny+2][Nz+2] = solver->lvset;
+
+    if (solver->rank == 0) {
+        double (*const lvset_global)[Ny+2][Nz+2] = calloc(Nx_global+2, sizeof(double [Ny+2][Nz+2]));
+
+        memcpy(lvset_global, lvset, sizeof(double)*(Nx+2)*(Ny+2)*(Nz+2));
+
+        /* Receive from other processes. */
+        for (int r = 1; r < solver->num_process; r++) {
+            const int ilower_r = r * Nx_global / solver->num_process + 1;
+            const int iupper_r = (r+1) * Nx_global / solver->num_process;
+            const int Nx_r = iupper_r - ilower_r + 1;
+
+            MPI_Recv(lvset_global[ilower_r], (Nx_r+1)*(Ny+2)*(Nz+2), MPI_DOUBLE, r, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        }
+
+        FILE *fp = fopen_check(filename, "wb");
+
+        fwrite(lvset_global, sizeof(double), (Nx_global+2)*(Ny+2)*(Nz+2), fp);
+
+        fclose(fp);
+
+        free(lvset_global);
+    }
+    else {
+        /* Send to process 0. */
+        MPI_Send(lvset[1], (Nx+1)*(Ny+2)*(Nz+2), MPI_DOUBLE, 0, 0, MPI_COMM_WORLD);
+    }
+}
+
+void IBMSolver_export_flag(IBMSolver *solver, const char *filename) {
+    const int Nx = solver->Nx;
+    const int Ny = solver->Ny;
+    const int Nz = solver->Nz;
+    const int Nx_global = solver->Nx_global;
+
+    const int (*const flag)[Ny+2][Nz+2] = solver->flag;
+
+    if (solver->rank == 0) {
+        int (*const flag_global)[Ny+2][Nz+2] = calloc(Nx_global+2, sizeof(int [Ny+2][Nz+2]));
+
+        memcpy(flag_global, flag, sizeof(int)*(Nx+2)*(Ny+2)*(Nz+2));
+
+        /* Receive from other processes. */
+        for (int r = 1; r < solver->num_process; r++) {
+            const int ilower_r = r * Nx_global / solver->num_process + 1;
+            const int iupper_r = (r+1) * Nx_global / solver->num_process;
+            const int Nx_r = iupper_r - ilower_r + 1;
+
+            MPI_Recv(flag_global[ilower_r], (Nx_r+1)*(Ny+2)*(Nz+2), MPI_INT, r, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        }
+
+        FILE *fp = fopen_check(filename, "wb");
+
+        fwrite(flag_global, sizeof(int), (Nx_global+2)*(Ny+2)*(Nz+2), fp);
+
+        fclose(fp);
+
+        free(flag_global);
+    }
+    else {
+        /* Send to process 0. */
+        MPI_Send(flag[1], (Nx+1)*(Ny+2)*(Nz+2), MPI_INT, 0, 0, MPI_COMM_WORLD);
+    }
+}
+
 static void alloc_arrays(IBMSolver *solver) {
     const int Nx = solver->Nx;
     const int Ny = solver->Ny;
@@ -558,6 +595,66 @@ static void alloc_arrays(IBMSolver *solver) {
     solver->kz_U = calloc(Nz+2, sizeof(double));
 
     solver->p_coeffsum = calloc(Nx+2, sizeof(double [Ny+2][Nz+2]));
+}
+
+static void calc_lvset_flag(IBMSolver *solver) {
+    const int Nx = solver->Nx;
+    const int Ny = solver->Ny;
+    const int Nz = solver->Nz;
+
+    int (*flag)[Ny+2][Nz+2] = solver->flag;
+    double (*const lvset)[Ny+2][Nz+2] = solver->lvset;
+
+    /* No obstacle: every cell is fluid cell. */
+    if (solver->poly == NULL) {
+        FOR_ALL_CELL (i, j, k) {
+            flag[i][j][k] = 1;
+        }
+        return;
+    }
+
+    /* Calculate level set function. */
+    Polyhedron_cpt(
+        solver->poly,
+        Nx+2, Ny+2, Nz+2,
+        solver->xc, solver->yc, solver->zc,
+        lvset, .5
+    );
+
+    /* Calculate flag.
+       * Level set function is positive or zero.  => fluid cell
+       * Level set function if negative and at
+         least one adjacent cell is fluid cell.   => ghost cell
+       * Otherwise.                               => solid cell */
+    FOR_ALL_CELL (i, j, k) {
+        if (lvset[i][j][k] >= 0) {
+            flag[i][j][k] = FLAG_FLUID;
+        }
+        else {
+            bool is_ghost_cell = false;
+            for (int l = 0; l < 6; l++) {
+                int ni = i + adj[l][0], nj = j + adj[l][1], nk = k + adj[l][2];
+                is_ghost_cell = is_ghost_cell || (lvset[ni][nj][nk] >= 0);
+            }
+            flag[i][j][k] = is_ghost_cell ? FLAG_GHOST : FLAG_SOLID;
+        }
+    }
+
+    /* Exchange flag between the adjacent processes. */
+    if (solver->rank != solver->num_process-1) {
+        /* Send to next process. */
+        MPI_Send(flag[Nx], (Ny+2)*(Nz+2), MPI_INT, solver->rank+1, 0, MPI_COMM_WORLD);
+    }
+    if (solver->rank != 0) {
+        /* Receive from previous process. */
+        MPI_Recv(flag[0], (Ny+2)*(Nz+2), MPI_INT, solver->rank-1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        /* Send to previous process. */
+        MPI_Send(flag[1], (Ny+2)*(Nz+2), MPI_INT, solver->rank-1, 0, MPI_COMM_WORLD);
+    }
+    if (solver->rank != solver->num_process-1) {
+        /* Receive from next process. */
+        MPI_Recv(flag[Nx+1], (Ny+2)*(Nz+2), MPI_INT, solver->rank+1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+    }
 }
 
 static void build_hypre(IBMSolver *solver) {
@@ -796,8 +893,8 @@ static HYPRE_IJMatrix create_matrix(IBMSolver *solver, int type) {
         int cols[9];
         double values[9];
 
-        /* Fluid and solid cell. */
-        if (flag[i][j][k] != 2) {
+        /* Fluid cell. */
+        if (flag[i][j][k] == FLAG_FLUID) {
             cols[0] = cur_idx;
             for (int l = 0; l < 6; l++) {
                 cols[l+1] = GLOB_CELL_IDX(i+adj[l][0], j+adj[l][1], k+adj[l][2]);
@@ -1049,7 +1146,7 @@ static HYPRE_IJMatrix create_matrix(IBMSolver *solver, int type) {
         }
 
         /* Ghost cell. */
-        else {
+        else if (flag[i][j][k] == FLAG_GHOST) {
             int idx = -1;
             int interp_idx[8];
             double interp_coeff[8];
@@ -1073,7 +1170,12 @@ static HYPRE_IJMatrix create_matrix(IBMSolver *solver, int type) {
                 }
                 values[0] = 1;
                 for (int l = 0; l < 8; l++) {
-                    values[l+1] = interp_coeff[l];
+                    if (type != 4) {
+                        values[l+1] = interp_coeff[l];
+                    }
+                    else {
+                        values[l+1] = -interp_coeff[l];
+                    }
                 }
             }
             /* Otherwise. */
@@ -1100,6 +1202,13 @@ static HYPRE_IJMatrix create_matrix(IBMSolver *solver, int type) {
                     }
                 }
             }
+        }
+
+        /* Solid cell. */
+        else if (flag[i][j][k] == FLAG_SOLID) {
+            ncols = 1;
+            cols[0] = cur_idx;
+            values[0] = 1;
         }
 
         HYPRE_IJMatrixSetValues(A, 1, &ncols, &cur_idx, cols, values);
@@ -1152,14 +1261,9 @@ static void get_interp_info(
            +----------+
           000        100
     */
-    interp_idx[0] = LOCL_CELL_IDX(im  , jm  , km  );
-    interp_idx[1] = LOCL_CELL_IDX(im  , jm  , km+1);
-    interp_idx[2] = LOCL_CELL_IDX(im  , jm+1, km  );
-    interp_idx[3] = LOCL_CELL_IDX(im  , jm+1, km+1);
-    interp_idx[4] = LOCL_CELL_IDX(im+1, jm  , km  );
-    interp_idx[5] = LOCL_CELL_IDX(im+1, jm  , km+1);
-    interp_idx[6] = LOCL_CELL_IDX(im+1, jm+1, km  );
-    interp_idx[7] = LOCL_CELL_IDX(im+1, jm+1, km+1);
+    for (int l = 0; l < 8; l++) {
+        interp_idx[l] = LOCL_CELL_IDX(im + !!(l & 4), jm + !!(l & 2), km + !!(l & 1));
+    }
 
     const double xl = xc_global[im], xu = xc_global[im+1];
     const double yl = yc[jm], yu = yc[jm+1];

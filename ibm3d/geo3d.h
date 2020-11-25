@@ -3,6 +3,9 @@
 
 #include <stdio.h>
 
+#define SCALE_INCH_TO_MM 25.4
+#define SCALE_MM_TO_INCH (1 / 25.4)
+
 /* 3-dimensional vector. */
 typedef struct _vector {
     double x, y, z;         /* Coordinates. */
@@ -28,6 +31,8 @@ Polyhedron *Polyhedron_new(void);
 void Polyhedron_destroy(Polyhedron *);
 void Polyhedron_read_stl(Polyhedron *, FILE *);
 void Polyhedron_print_stats(Polyhedron *);
+
+void Polyhedron_scale(Polyhedron *, double);
 
 void Polyhedron_cpt(
     const Polyhedron *const poly,

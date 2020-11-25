@@ -8,7 +8,7 @@ const int Nx = 192;
 const int Ny = 160;
 const int Nz = 129;
 
-const double Re = 100;
+const double Re = 3300;
 const double dt = 0.005;
 
 const double PI = 3.1415926535897932;
@@ -55,8 +55,8 @@ int main(int argc, char **argv) {
     IBMSolver_set_grid(solver, Nx, Ny, Nz, xf, yf, zf);
     IBMSolver_set_params(solver, Re, dt);
 
-    IBMSolver_set_bc(solver, DIR_WEST, BC_PRESSURE_OUTLET, 8*PI/Re);
-    IBMSolver_set_bc(solver, DIR_EAST, BC_PRESSURE_OUTLET, 0);
+    IBMSolver_set_bc(solver, DIR_WEST, BC_VELOCITY_PERIODIC, 8*PI/Re);
+    IBMSolver_set_bc(solver, DIR_EAST, BC_VELOCITY_PERIODIC, 0);
     IBMSolver_set_bc(solver, DIR_SOUTH | DIR_NORTH, BC_ALL_PERIODIC, 0);
     IBMSolver_set_bc(solver, DIR_DOWN | DIR_UP, BC_STATIONARY_WALL, 0);
 
@@ -73,7 +73,7 @@ int main(int argc, char **argv) {
     IBMSolver_assemble(solver);
 
     /* Initialize. */
-    if (0) {
+    if (1) {
         IBMSolver_init_flow_func(
             solver,
             initfunc_u1, initfunc_u2, initfunc_u3, initfunc_p
@@ -87,7 +87,7 @@ int main(int argc, char **argv) {
     }
 
     /* Iterate. */
-    IBMSolver_iterate(solver, 100, true);
+    IBMSolver_iterate(solver, 10, true);
 
     /* Export result. */
     IBMSolver_export_results(

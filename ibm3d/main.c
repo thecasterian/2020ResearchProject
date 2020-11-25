@@ -149,7 +149,7 @@ int main(int argc, char **argv) {
 
     IBMSolver_set_obstacle(solver, poly);
 
-    IBMSolver_set_linear_solver(solver, SOLVER_BiCGSTAB, PRECOND_AMG);
+    IBMSolver_set_linear_solver(solver, SOLVER_BiCGSTAB, PRECOND_AMG, 1e-6);
 
     IBMSolver_assemble(solver);
 

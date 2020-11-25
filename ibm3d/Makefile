@@ -42,3 +42,6 @@ test: test.c geo3d.o
 
 channel: channel.c ibm3d.a geo3d.o
 	$(CC) $(INCLUDE) $^ $(HYPRE) -o $@ $(LDLIBS) $(CFLAGS)
+
+building: building.c ibm3d.a geo3d.o
+	$(CC) $(INCLUDE) $^ $(HYPRE) -o $@ $(LDLIBS) $(CFLAGS)

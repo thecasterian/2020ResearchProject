@@ -85,8 +85,5 @@ mlab.show()
 C = plt.contourf(xc, zc, V[:, Ny//2, :], 100, zorder=-1)
 plt.colorbar(C)
 
-plt.plot(X, Y, 'k')
-plt.plot(X.T, Y.T, 'k')
-
 plt.axis('equal')
 plt.show()

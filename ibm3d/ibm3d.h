@@ -11,6 +11,7 @@
 #include "geo3d.h"
 
 typedef void *arr3d;
+typedef void *arr4d;
 typedef double (*IBMSolverInitFunc)(double, double, double);
 
 typedef enum _linear_solver_type {
@@ -42,6 +43,12 @@ typedef enum _bc_type {
     BC_ALL_PERIODIC,            /* All periodic. */
     BC_VELOCITY_PERIODIC,       /* Velocity periodic, pressure specified. */
 } IBMSolverBCType;
+
+enum {
+    FLAG_FLUID = 1,
+    FLAG_GHOST,
+    FLAG_SOLID
+};
 
 typedef struct _ibm_solver {
     /* Rank of current process. */
@@ -79,6 +86,8 @@ typedef struct _ibm_solver {
     IBMSolverBCType bc_type[6];
     double bc_val[6];
 
+    /* Obstacle. */
+    Polyhedron *poly;
     /* Flag of each cell (1: fluid cell, 2: ghost cell, 0: solid cell) */
     arr3d flag;
     /* Level set function. */
