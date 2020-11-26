@@ -19,7 +19,7 @@ static void interp_stag_vel(IBMSolver *);
 static void autosave(IBMSolver *);
 static void update_bc(IBMSolver *);
 static void adj_exchange(IBMSolver *);
-static void update_obstacle_bc(IBMSolver *);
+static void update_ghost_and_solid(IBMSolver *);
 
 void IBMSolver_iterate(IBMSolver *solver, int num_time_steps, bool verbose) {
     struct timespec t_start, t_end;
@@ -29,7 +29,7 @@ void IBMSolver_iterate(IBMSolver *solver, int num_time_steps, bool verbose) {
     update_bc(solver);
     adj_exchange(solver);
     interp_stag_vel(solver);
-    update_obstacle_bc(solver);
+    update_ghost_and_solid(solver);
 
     calc_N(solver);
     SWAP(solver->N1, solver->N1_prev);
@@ -213,11 +213,6 @@ static inline void calc_u_star(
                 + kx_W[i]*u1[i-1][j][k] + kx_E[i]*u1[i+1][j][k]
                 + ky_S[j]*u1[i][j-1][k] + ky_N[j]*u1[i][j+1][k]
                 + kz_D[k]*u1[i][j][k-1] + kz_U[k]*u1[i][j][k+1];
-
-            if (isnan(*rhs)) {
-                printf("error\n");
-                MPI_Abort(MPI_COMM_WORLD, -1);
-            }
 
             /* West. */
             if (LOCL_TO_GLOB(i) == 1) {
@@ -581,6 +576,7 @@ static inline void calc_u_tilde(IBMSolver *solver) {
     const int Ny = solver->Ny;
     const int Nz = solver->Nz;
     const int Nx_global = solver->Nx_global;
+    const double dt = solver->dt;
 
     const double *const xc = solver->xc;
     const double *const yc = solver->yc;
@@ -600,9 +596,9 @@ static inline void calc_u_tilde(IBMSolver *solver) {
 
     FOR_ALL_CELL (i, j, k) {
         if (flag[i][j][k] == FLAG_FLUID) {
-            u1_tilde[i][j][k] = u1_star[i][j][k] + solver->dt * (p[i+1][j][k] - p[i-1][j][k]) / (xc[i+1] - xc[i-1]);
-            u2_tilde[i][j][k] = u2_star[i][j][k] + solver->dt * (p[i][j+1][k] - p[i][j-1][k]) / (yc[j+1] - yc[j-1]);
-            u3_tilde[i][j][k] = u3_star[i][j][k] + solver->dt * (p[i][j][k+1] - p[i][j][k-1]) / (zc[k+1] - zc[k-1]);
+            u1_tilde[i][j][k] = u1_star[i][j][k] + dt * (p[i+1][j][k] - p[i-1][j][k]) / (xc[i+1] - xc[i-1]);
+            u2_tilde[i][j][k] = u2_star[i][j][k] + dt * (p[i][j+1][k] - p[i][j-1][k]) / (yc[j+1] - yc[j-1]);
+            u3_tilde[i][j][k] = u3_star[i][j][k] + dt * (p[i][j][k+1] - p[i][j][k-1]) / (zc[k+1] - zc[k-1]);
         }
     }
 
@@ -612,9 +608,9 @@ static inline void calc_u_tilde(IBMSolver *solver) {
         case BC_PRESSURE_OUTLET:
             for (int j = 1; j <= Ny; j++) {
                 for (int k = 1; k <= Nz; k++) {
-                    u1_tilde[0][j][k] = u1_star[0][j][k] + solver->dt * (p[1][j][k] - p[0][j][k]) / (xc[1] - xc[0]);
-                    u2_tilde[0][j][k] = u2_star[0][j][k] + solver->dt * (p[0][j+1][k] - p[0][j-1][k]) / (yc[j+1] - yc[j-1]);
-                    u3_tilde[0][j][k] = u3_star[0][j][k] + solver->dt * (p[0][j][k+1] - p[0][j][k-1]) / (zc[k+1] - zc[k-1]);
+                    u1_tilde[0][j][k] = u1_star[0][j][k] + dt * (p[1][j][k] - p[0][j][k]) / (xc[1] - xc[0]);
+                    u2_tilde[0][j][k] = u2_star[0][j][k] + dt * (p[0][j+1][k] - p[0][j-1][k]) / (yc[j+1] - yc[j-1]);
+                    u3_tilde[0][j][k] = u3_star[0][j][k] + dt * (p[0][j][k+1] - p[0][j][k-1]) / (zc[k+1] - zc[k-1]);
                 }
             }
             break;
@@ -649,9 +645,9 @@ static inline void calc_u_tilde(IBMSolver *solver) {
         case BC_PRESSURE_OUTLET:
             for (int j = 1; j <= Ny; j++) {
                 for (int k = 1; k <= Nz; k++) {
-                    u1_tilde[Nx+1][j][k] = u1_star[Nx+1][j][k] + solver->dt * (p[Nx+1][j][k] - p[Nx][j][k]) / (xc[Nx+1] - xc[Nx]);
-                    u2_tilde[Nx+1][j][k] = u2_star[Nx+1][j][k] + solver->dt * (p[Nx+1][j+1][k] - p[Nx+1][j-1][k]) / (yc[j+1] - yc[j-1]);
-                    u3_tilde[Nx+1][j][k] = u3_star[Nx+1][j][k] + solver->dt * (p[Nx+1][j][k+1] - p[Nx+1][j][k-1]) / (zc[k+1] - zc[k-1]);
+                    u1_tilde[Nx+1][j][k] = u1_star[Nx+1][j][k] + dt * (p[Nx+1][j][k] - p[Nx][j][k]) / (xc[Nx+1] - xc[Nx]);
+                    u2_tilde[Nx+1][j][k] = u2_star[Nx+1][j][k] + dt * (p[Nx+1][j+1][k] - p[Nx+1][j-1][k]) / (yc[j+1] - yc[j-1]);
+                    u3_tilde[Nx+1][j][k] = u3_star[Nx+1][j][k] + dt * (p[Nx+1][j][k+1] - p[Nx+1][j][k-1]) / (zc[k+1] - zc[k-1]);
                 }
             }
             break;
@@ -685,9 +681,9 @@ static inline void calc_u_tilde(IBMSolver *solver) {
     case BC_PRESSURE_OUTLET:
         for (int i = 0; i <= Nx+1; i++) {
             for (int k = 1; k <= Nz; k++) {
-                u1_tilde[i][0][k] = u1_star[i][0][k] + solver->dt * (p[i+1][0][k] - p[i-1][0][k]) / (xc[i+1] - xc[i-1]);
-                u2_tilde[i][0][k] = u2_star[i][0][k] + solver->dt * (p[i][1][k] - p[i][0][k]) / (yc[1] - yc[0]);
-                u3_tilde[i][0][k] = u3_star[i][0][k] + solver->dt * (p[i][0][k+1] - p[i][0][k-1]) / (zc[k+1] - zc[k-1]);
+                u1_tilde[i][0][k] = u1_star[i][0][k] + dt * (p[i+1][0][k] - p[i-1][0][k]) / (xc[i+1] - xc[i-1]);
+                u2_tilde[i][0][k] = u2_star[i][0][k] + dt * (p[i][1][k] - p[i][0][k]) / (yc[1] - yc[0]);
+                u3_tilde[i][0][k] = u3_star[i][0][k] + dt * (p[i][0][k+1] - p[i][0][k-1]) / (zc[k+1] - zc[k-1]);
             }
         }
         break;
@@ -709,9 +705,9 @@ static inline void calc_u_tilde(IBMSolver *solver) {
     case BC_PRESSURE_OUTLET:
         for (int i = 0; i <= Nx+1; i++) {
             for (int k = 1; k <= Nz; k++) {
-                u1_tilde[i][Ny+1][k] = u1_star[i][Ny+1][k] + solver->dt * (p[i+1][Ny+1][k] - p[i-1][Ny+1][k]) / (xc[i+1] - xc[i-1]);
-                u2_tilde[i][Ny+1][k] = u2_star[i][Ny+1][k] + solver->dt * (p[i][Ny+1][k] - p[i][Ny][k]) / (yc[Ny+1] - yc[Ny]);
-                u3_tilde[i][Ny+1][k] = u3_star[i][Ny+1][k] + solver->dt * (p[i][Ny+1][k+1] - p[i][Ny+1][k-1]) / (zc[k+1] - zc[k-1]);
+                u1_tilde[i][Ny+1][k] = u1_star[i][Ny+1][k] + dt * (p[i+1][Ny+1][k] - p[i-1][Ny+1][k]) / (xc[i+1] - xc[i-1]);
+                u2_tilde[i][Ny+1][k] = u2_star[i][Ny+1][k] + dt * (p[i][Ny+1][k] - p[i][Ny][k]) / (yc[Ny+1] - yc[Ny]);
+                u3_tilde[i][Ny+1][k] = u3_star[i][Ny+1][k] + dt * (p[i][Ny+1][k+1] - p[i][Ny+1][k-1]) / (zc[k+1] - zc[k-1]);
             }
         }
         break;
@@ -733,9 +729,9 @@ static inline void calc_u_tilde(IBMSolver *solver) {
     case BC_PRESSURE_OUTLET:
         for (int i = 0; i <= Nx+1; i++) {
             for (int j = 0; j <= Ny+1; j++) {
-                u1_tilde[i][j][0] = u1_star[i][j][0] + solver->dt * (p[i+1][j][0] - p[i-1][j][0]) / (xc[i+1] - xc[i-1]);
-                u2_tilde[i][j][0] = u2_star[i][j][0] + solver->dt * (p[i][j+1][0] - p[i][j-1][0]) / (yc[j+1] - yc[j-1]);
-                u3_tilde[i][j][0] = u3_star[i][j][0] + solver->dt * (p[i][j][1] - p[i][j][0]) / (zc[1] - zc[0]);
+                u1_tilde[i][j][0] = u1_star[i][j][0] + dt * (p[i+1][j][0] - p[i-1][j][0]) / (xc[i+1] - xc[i-1]);
+                u2_tilde[i][j][0] = u2_star[i][j][0] + dt * (p[i][j+1][0] - p[i][j-1][0]) / (yc[j+1] - yc[j-1]);
+                u3_tilde[i][j][0] = u3_star[i][j][0] + dt * (p[i][j][1] - p[i][j][0]) / (zc[1] - zc[0]);
             }
         }
         break;
@@ -757,9 +753,9 @@ static inline void calc_u_tilde(IBMSolver *solver) {
     case BC_PRESSURE_OUTLET:
         for (int i = 0; i <= Nx+1; i++) {
             for (int j = 0; j <= Ny+1; j++) {
-                u1_tilde[i][j][Nz+1] = u1_star[i][j][Nz+1] + solver->dt * (p[i+1][j][Nz+1] - p[i-1][j][Nz+1]) / (xc[i+1] - xc[i-1]);
-                u2_tilde[i][j][Nz+1] = u2_star[i][j][Nz+1] + solver->dt * (p[i][j+1][Nz+1] - p[i][j-1][Nz+1]) / (yc[j+1] - yc[j-1]);
-                u3_tilde[i][j][Nz+1] = u3_star[i][j][Nz+1] + solver->dt * (p[i][j][Nz+1] - p[i][j][Nz]) / (zc[Nz+1] - zc[Nz]);
+                u1_tilde[i][j][Nz+1] = u1_star[i][j][Nz+1] + dt * (p[i+1][j][Nz+1] - p[i-1][j][Nz+1]) / (xc[i+1] - xc[i-1]);
+                u2_tilde[i][j][Nz+1] = u2_star[i][j][Nz+1] + dt * (p[i][j+1][Nz+1] - p[i][j-1][Nz+1]) / (yc[j+1] - yc[j-1]);
+                u3_tilde[i][j][Nz+1] = u3_star[i][j][Nz+1] + dt * (p[i][j][Nz+1] - p[i][j][Nz]) / (zc[Nz+1] - zc[Nz]);
             }
         }
         break;
@@ -1316,14 +1312,9 @@ static inline void update_next(IBMSolver *solver) {
 
     /* Calculate u_next. */
     FOR_ALL_CELL (i, j, k) {
-        if (flag[i][j][k] == FLAG_FLUID) {
-            u1_next[i][j][k] = u1_star[i][j][k] - dt * (p_prime[i+1][j][k] - p_prime[i-1][j][k]) / (xc[i+1] - xc[i-1]);
-            u2_next[i][j][k] = u2_star[i][j][k] - dt * (p_prime[i][j+1][k] - p_prime[i][j-1][k]) / (yc[j+1] - yc[j-1]);
-            u3_next[i][j][k] = u3_star[i][j][k] - dt * (p_prime[i][j][k+1] - p_prime[i][j][k-1]) / (zc[k+1] - zc[k-1]);
-        }
-        else if (flag[i][j][k] == FLAG_SOLID) {
-            u1_next[i][j][k] = u2_next[i][j][k] = u3_next[i][j][k] = NAN;
-        }
+        u1_next[i][j][k] = u1_star[i][j][k] - dt * (p_prime[i+1][j][k] - p_prime[i-1][j][k]) / (xc[i+1] - xc[i-1]);
+        u2_next[i][j][k] = u2_star[i][j][k] - dt * (p_prime[i][j+1][k] - p_prime[i][j-1][k]) / (yc[j+1] - yc[j-1]);
+        u3_next[i][j][k] = u3_star[i][j][k] - dt * (p_prime[i][j][k+1] - p_prime[i][j][k-1]) / (zc[k+1] - zc[k-1]);
     }
 
     /* Calculate U_next. */
@@ -1356,7 +1347,7 @@ static inline void update_next(IBMSolver *solver) {
     adj_exchange(solver);
 
     /* Set boundary condition on obstacle surface. */
-    update_obstacle_bc(solver);
+    update_ghost_and_solid(solver);
 }
 
 static void interp_stag_vel(IBMSolver *solver) {
@@ -2021,7 +2012,7 @@ static void adj_exchange(IBMSolver *solver) {
     }
 }
 
-static void update_obstacle_bc(IBMSolver *solver) {
+static void update_ghost_and_solid(IBMSolver *solver) {
     const int Nx = solver->Nx;
     const int Ny = solver->Ny;
     const int Nz = solver->Nz;
@@ -2088,6 +2079,7 @@ static void update_obstacle_bc(IBMSolver *solver) {
                 int nk = km + !!(l & 1);
 
                 if (ni < 0 || ni > Nx+1 || nj < 0 || nj > Ny+1 || nk < 0 || nk > Nz+1) {
+                    printf("error!\n");
                     continue;
                 }
                 if (flag[ni][nj][nk] == FLAG_SOLID) {
@@ -2136,7 +2128,7 @@ static void update_obstacle_bc(IBMSolver *solver) {
             U3[i][j][k] = (u3[i][j][k] * dz[k+1] + u3[i][j][k+1] * dz[k]) / (dz[k] + dz[k+1]);
         }
         else if (flag[i][j][k] == FLAG_SOLID || flag[i][j][k+1] == FLAG_SOLID) {
-            U2[i][j][k] = NAN;
+            U3[i][j][k] = NAN;
         }
     }
 }

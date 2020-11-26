@@ -7,6 +7,7 @@
 #include <glib.h>
 
 #include "mpi.h"
+#include "utils.h"
 
 static const double PI = 3.141592653589793;
 
@@ -883,37 +884,4 @@ static inline void FaceExtrusion_cpt(
             }
         }
     }
-}
-
-/* Find the index of the first element in ARR which is greater than or equal
-   to VAL. ARR must be sorted in increasing order. */
-int lower_bound(const int len, const double arr[const static len], const double val) {
-    int l = 0;
-    int h = len;
-    while (l < h) {
-        int mid =  l + (h - l) / 2;
-        if (val <= arr[mid]) {
-            h = mid;
-        } else {
-            l = mid + 1;
-        }
-    }
-    return l;
-}
-
-/* Find the index of the first element in ARR which is greater than VAL. ARR
-   must be sorted in increasing order. */
-int upper_bound(const int len, const double arr[const static len], const double val) {
-    int l = 0;
-    int h = len;
-    while (l < h) {
-        int mid =  l + (h - l) / 2;
-        if (val >= arr[mid]) {
-            l = mid + 1;
-        }
-        else {
-            h = mid;
-        }
-    }
-    return l;
 }

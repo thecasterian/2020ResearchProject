@@ -44,7 +44,4 @@ void Polyhedron_cpt(
     const double maxd
 );
 
-int lower_bound(const int, const double [], const double);
-int upper_bound(const int, const double [], const double);
-
 #endif

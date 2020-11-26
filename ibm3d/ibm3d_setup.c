@@ -6,7 +6,8 @@
 
 #include <string.h>
 
-/* Index of adjacent cells in 3-d cartesian coordinate */
+/* Index of adjacent cells in 3-d cartesian coordinate. Refer the order shown
+   below. */
 static const int adj[6][3] = {
     {0, 1, 0}, {1, 0, 0}, {0, -1, 0}, {-1, 0, 0}, {0, 0, -1}, {0, 0, 1}
 };
@@ -34,6 +35,15 @@ static void get_interp_info(
 );
 static bool isperiodic(IBMSolverBCType);
 
+/**
+ * @brief Makes new IBMSolver. It is dynamically allocated, so its memory must
+ *        be freed using IBMSolver_destroy().
+ *
+ * @param[in] num_process Number of all MPI process in MPI_COMM_WORLD.
+ * @param[in] rank Rank of current process in MPI_COMM_WORLD.
+ *
+ * @return New IBMSolver.
+ */
 IBMSolver *IBMSolver_new(const int num_process, const int rank) {
     IBMSolver *solver = calloc(1, sizeof(IBMSolver));
 
@@ -65,6 +75,11 @@ IBMSolver *IBMSolver_new(const int num_process, const int rank) {
     return solver;
 }
 
+/**
+ * @brief Destroys IBMSolver, freeing all its memory in use.
+ *
+ * @param[in] solver IBMSolver to destroy.
+ */
 void IBMSolver_destroy(IBMSolver *solver) {
     free(solver->dx); free(solver->dy); free(solver->dz);
     free(solver->xc); free(solver->yc); free(solver->zc);
@@ -131,31 +146,45 @@ void IBMSolver_destroy(IBMSolver *solver) {
     free(solver);
 }
 
+/**
+ * @brief Sets grid informations in IBMSolver.
+ *
+ * @param solver IBMSolver.
+ * @param Nx Number of cells in x-direction.
+ * @param Ny Number of cells in y-direction.
+ * @param Nz Number of cells in z-direction.
+ * @param xf Array of x-coordinates of cell faces in increasing order.
+ * @param yf Array of y-coordinates of cell faces in increasing order.
+ * @param zf Array of z-coordinates of cell faces in increasing order.
+ *
+ * @remark Length of \p xf, \p yf, and \p zf must be Nx+1, Ny+1, and Nz+1,
+ *         respectively.
+ */
 void IBMSolver_set_grid(
     IBMSolver *solver,
-    const int Nx_global, const int Ny, const int Nz,
+    const int Nx, const int Ny, const int Nz,
     const double *restrict xf,
     const double *restrict yf,
     const double *restrict zf
 ) {
-    solver->Nx_global = Nx_global;
+    solver->Nx_global = Nx;
     solver->Ny = Ny;
     solver->Nz = Nz;
 
-    solver->ilower = solver->rank * Nx_global / solver->num_process + 1;
-    solver->iupper = (solver->rank+1) * Nx_global / solver->num_process;
-    const int Nx = solver->Nx = solver->iupper - solver->ilower + 1;
+    solver->ilower = solver->rank * Nx / solver->num_process + 1;
+    solver->iupper = (solver->rank+1) * Nx / solver->num_process;
+    const int Nx_local = solver->Nx = solver->iupper - solver->ilower + 1;
 
     /* Allocate arrays. */
     alloc_arrays(solver);
 
     /* Cell widths and centroid coordinates. */
-    for (int i = 1; i <= Nx_global; i++) {
+    for (int i = 1; i <= Nx; i++) {
         solver->dx_global[i] = xf[i] - xf[i-1];
         solver->xc_global[i] = (xf[i] + xf[i-1]) / 2;
     }
 
-    for (int i = 1; i <= Nx; i++) {
+    for (int i = 1; i <= Nx_local; i++) {
         solver->dx[i] = xf[LOCL_TO_GLOB(i)] - xf[LOCL_TO_GLOB(i)-1];
         solver->xc[i] = (xf[LOCL_TO_GLOB(i)] + xf[LOCL_TO_GLOB(i)-1]) / 2;
     }
@@ -169,11 +198,29 @@ void IBMSolver_set_grid(
     }
 }
 
+/**
+ * @brief Sets solver parameters in IBMSolver such as Reynolds number, delta-t,
+ *        etc.
+ *
+ * @param solver IBMSolver.
+ * @param Re Reynolds number.
+ * @param dt Delta-t.
+ */
 void IBMSolver_set_params(IBMSolver *solver, const double Re, const double dt) {
     solver->Re = Re;
     solver->dt = dt;
 }
 
+/**
+ * @brief Sets boundary condition of 6 cell boundaries in IBMSolver. Multiple
+ *        boundary directions can be provided at once using bitwise-or operator
+ *        (|), e.g., DIR_WEST | DIR_EAST.
+ *
+ * @param solver IBMSolver.
+ * @param direction Direction of boundary.
+ * @param bc_type Type of boundary.
+ * @param bc_val Value used to calculate boundary condition.
+ */
 void IBMSolver_set_bc(
     IBMSolver *solver,
     IBMSolverDirection direction,
@@ -188,10 +235,26 @@ void IBMSolver_set_bc(
     }
 }
 
+/**
+ * @brief Sets obstacle in IBMSolver. If \p poly is NULL, then it sets no
+ *        obstacle in the calculation domain.
+ *
+ * @param solver IBMSolver.
+ * @param poly Obstacle in polyhedron format.
+ */
 void IBMSolver_set_obstacle(IBMSolver *solver, Polyhedron *poly) {
     solver->poly = poly;
 }
 
+/**
+ * @brief Sets linear system solver algorithm in IBMSolver.
+ *
+ * @param solver IBMSolver.
+ * @param linear_solver_type Linear system solver type.
+ * @param precond_type Preconditioner type. Must be PRECOND_NONE if
+ *                     \p linear_solver_type is SOLVER_AMG.
+ * @param tol Tolerance. The solver terminates when residual reaches to \p tol.
+ */
 void IBMSolver_set_linear_solver(
     IBMSolver *solver,
     IBMSolverLinearSolverType linear_solver_type,
@@ -203,6 +266,12 @@ void IBMSolver_set_linear_solver(
     solver->tol = tol;
 }
 
+/**
+ * @brief Assembles IBMSolver. Must be called after all IBMSolver_set_XXX()
+ *        functions are called.
+ *
+ * @param solver IBMSolver.
+ */
 void IBMSolver_assemble(IBMSolver *solver) {
     const int Nx = solver->Nx;
     const int Ny = solver->Ny;
@@ -281,7 +350,20 @@ void IBMSolver_assemble(IBMSolver *solver) {
     build_hypre(solver);
 }
 
-void IBMSolver_init_flow_const(IBMSolver *solver) {
+/**
+ * @brief Initializes flow with constant values.
+ *
+ * @param solver IBMSolver.
+ * @param value_u1 Initial value of x-velocity.
+ * @param value_u2 Initial value of y-velocity.
+ * @param value_u3 Initial value of z-velocity.
+ * @param value_p Initial value of pressure.
+ */
+void IBMSolver_init_flow_const(
+    IBMSolver *solver,
+    const double value_u1, const double value_u2, const double value_u3,
+    const double value_p
+) {
     const int Nx = solver->Nx;
     const int Ny = solver->Ny;
     const int Nz = solver->Nz;
@@ -296,15 +378,24 @@ void IBMSolver_init_flow_const(IBMSolver *solver) {
     for (int i = 0; i <= Nx+1; i++) {
         for (int j = 0; j <= Ny+1; j++) {
             for (int k = 0; k <= Nz+1; k++) {
-                u1[i][j][k] = 1;
-                u2[i][j][k] = 0;
-                u3[i][j][k] = 0;
-                p[i][j][k] = 0;
+                u1[i][j][k] = value_u1;
+                u2[i][j][k] = value_u2;
+                u3[i][j][k] = value_u3;
+                p[i][j][k] = value_p;
             }
         }
     }
 }
 
+/**
+ * @brief Initializes flow with data in the given files.
+ *
+ * @param solver IBMSolver.
+ * @param filename_u1 Name of file containing x-velocity data.
+ * @param filename_u2 Name of file containing y-velocity data.
+ * @param filename_u3 Name of file containing z-velocity data.
+ * @param filename_p Name of file containing pressure data.
+ */
 void IBMSolver_init_flow_file(
     IBMSolver *solver,
     const char *filename_u1,

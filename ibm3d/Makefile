@@ -25,7 +25,7 @@ clean:
 $(TARGET): main.c ibm3d.a geo3d.o
 	$(CC) $(INCLUDE) $^ $(HYPRE) -o $@ $(LDLIBS) $(CFLAGS)
 
-ibm3d.a: ibm3d_setup.o ibm3d_fracstep.o
+ibm3d.a: ibm3d_setup.o ibm3d_fracstep.o utils.o
 	ar rcs $@ $^
 
 ibm3d_setup.o: ibm3d_setup.c ibm3d_setup.h
@@ -34,8 +34,11 @@ ibm3d_setup.o: ibm3d_setup.c ibm3d_setup.h
 ibm3d_fracstep.o: ibm3d_fracstep.c ibm3d_fracstep.h
 	$(CC) $(INCLUDE) -c $< $(LDLIBS) $(CFLAGS)
 
-geo3d.o: geo3d.h geo3d.c
-	$(CC) $(INCLUDE) -c geo3d.c $(LDLIBS) $(CFLAGS)
+geo3d.o: geo3d.c geo3d.h
+	$(CC) $(INCLUDE) -c $< $(LDLIBS) $(CFLAGS)
+
+utils.o: utils.c utils.h
+	$(CC) $(INCLUDE) -c $< $(LDLIBS) $(CFLAGS)
 
 test: test.c geo3d.o
 	$(CC) $(INCLUDE) geo3d.o test.c -o test $(LDLIBS) $(CFLAGS)

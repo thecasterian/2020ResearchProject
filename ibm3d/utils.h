@@ -1,7 +1,7 @@
 #ifndef UTILS_H
 #define UTILS_H
 
-#include "mpi.h"
+#include <stdio.h>
 
 #define FOR_ALL_CELL(i, j, k) \
     for (int i = 1; i <= Nx; i++) \
@@ -33,13 +33,9 @@
 
 #define SWAP(a, b) do {typeof(a) tmp = a; a = b; b = tmp;} while (0)
 
-static FILE *fopen_check(const char *restrict filename, const char *restrict modes) {
-    FILE *fp = fopen(filename, modes);
-    if (!fp) {
-        fprintf(stderr, "error: cannot open file \"%s\"\n", filename);
-        MPI_Abort(MPI_COMM_WORLD, -1);
-    }
-    return fp;
-}
+FILE *fopen_check(const char *restrict filename, const char *restrict modes);
+
+int lower_bound(const int, const double [], const double);
+int upper_bound(const int, const double [], const double);
 
 #endif
