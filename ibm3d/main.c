@@ -151,14 +151,25 @@ int main(int argc, char **argv) {
 
     IBMSolver_set_linear_solver(solver, SOLVER_BiCGSTAB, PRECOND_AMG, 1e-6);
 
+    IBMSolver_set_autosave(
+        solver,
+        "data/sphere_u1",
+        "data/sphere_u2",
+        "data/sphere_u3",
+        "data/sphere_p",
+        10
+    );
+
     IBMSolver_assemble(solver);
+
+    IBMSolver_export_flag(solver, "data/flag.out");
 
     Polyhedron_destroy(poly);
 
     /*===== Initialize flow. =================================================*/
 
     if (!init_using_file) {
-        IBMSolver_init_flow_const(solver);
+        IBMSolver_init_flow_const(solver, 1, 0, 0, 0);
     }
     else {
         IBMSolver_init_flow_file(

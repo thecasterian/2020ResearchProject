@@ -20,6 +20,10 @@ xc = (xf[1:] + xf[:-1]) / 2
 yc = (yf[1:] + yf[:-1]) / 2
 zc = (zf[1:] + zf[:-1]) / 2
 
+xc = np.hstack(([2*xf[0]-xc[0]], xc, [2*xf[-1]-xc[-1]]))
+yc = np.hstack(([2*yf[0]-yc[0]], yc, [2*yf[-1]-yc[-1]]))
+zc = np.hstack(([2*zf[0]-zc[0]], zc, [2*zf[-1]-zc[-1]]))
+
 X, Y, Z = np.meshgrid(xc, yc, zc, indexing='ij')
 
 # read stl
@@ -48,12 +52,14 @@ verts = np.array(verts)
 tris = np.array(tris)
 
 # read variables
-u1 = np.fromfile('u1.out').reshape((Nx+2, Ny+2, Nz+2))
-u2 = np.fromfile('u2.out').reshape((Nx+2, Ny+2, Nz+2))
-u3 = np.fromfile('u3.out').reshape((Nx+2, Ny+2, Nz+2))
-p = np.fromfile('p.out').reshape((Nx+2, Ny+2, Nz+2))
-# V = np.fromfile('lvset.out').reshape((Nx+2, Ny+2, Nz+2))[1:-1, 1:-1, 1:-1]
-V = np.sqrt(u1**2 + u2**2 + u3**2)[1:-1, 1:-1, 1:-1]
+postfix = '-00010'
+
+u1 = np.fromfile(f'data/sphere_u1{postfix}.out').reshape((Nx+2, Ny+2, Nz+2))
+u2 = np.fromfile(f'data/sphere_u2{postfix}.out').reshape((Nx+2, Ny+2, Nz+2))
+u3 = np.fromfile(f'data/sphere_u3{postfix}.out').reshape((Nx+2, Ny+2, Nz+2))
+p = np.fromfile(f'data/sphere_p{postfix}.out').reshape((Nx+2, Ny+2, Nz+2))
+# V = np.fromfile('data/flag.out', dtype=np.int32).reshape((Nx+2, Ny+2, Nz+2))
+V = np.sqrt(u1**2 + u2**2 + u3**2)
 
 # plot
 mlab.triangular_mesh(verts[:, 0], verts[:, 1], verts[:, 2], tris, color=(0.7, 0.7, 0.7))

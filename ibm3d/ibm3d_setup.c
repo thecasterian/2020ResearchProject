@@ -31,7 +31,7 @@ static HYPRE_IJMatrix create_matrix(IBMSolver *, int);
 static void get_interp_info(
     IBMSolver *,
     const int, const int, const int,
-    int *restrict, double *restrict
+    int [restrict][3], double [restrict]
 );
 static bool isperiodic(IBMSolverBCType);
 
@@ -64,6 +64,7 @@ IBMSolver *IBMSolver_new(const int num_process, const int rank) {
     solver->N1 = solver->N1_prev = NULL;
     solver->N2 = solver->N2_prev = NULL;
     solver->N3 = solver->N3_prev = NULL;
+    solver->vel_2nd_halo_lower = solver->vel_2nd_halo_upper = NULL;
     solver->kx_W = solver->kx_E = NULL;
     solver->ky_S = solver->ky_N = NULL;
     solver->kz_D = solver->kz_U = NULL;
@@ -173,18 +174,18 @@ void IBMSolver_set_grid(
 
     solver->ilower = solver->rank * Nx / solver->num_process + 1;
     solver->iupper = (solver->rank+1) * Nx / solver->num_process;
-    const int Nx_local = solver->Nx = solver->iupper - solver->ilower + 1;
+    solver->Nx = solver->iupper - solver->ilower + 1;
 
     /* Allocate arrays. */
     alloc_arrays(solver);
 
     /* Cell widths and centroid coordinates. */
-    for (int i = 1; i <= Nx; i++) {
+    for (int i = 1; i <= solver->Nx_global; i++) {
         solver->dx_global[i] = xf[i] - xf[i-1];
         solver->xc_global[i] = (xf[i] + xf[i-1]) / 2;
     }
 
-    for (int i = 1; i <= Nx_local; i++) {
+    for (int i = 1; i <= solver->Nx; i++) {
         solver->dx[i] = xf[LOCL_TO_GLOB(i)] - xf[LOCL_TO_GLOB(i)-1];
         solver->xc[i] = (xf[LOCL_TO_GLOB(i)] + xf[LOCL_TO_GLOB(i)-1]) / 2;
     }
@@ -678,6 +679,13 @@ static void alloc_arrays(IBMSolver *solver) {
     solver->N3      = calloc(Nx+2, sizeof(double [Ny+2][Nz+2]));
     solver->N3_prev = calloc(Nx+2, sizeof(double [Ny+2][Nz+2]));
 
+    if (solver->rank != 0) {
+        solver->vel_2nd_halo_lower = calloc(3, sizeof(double [Ny+2][Nz+2]));
+    }
+    if (solver->rank != solver->num_process - 1) {
+        solver->vel_2nd_halo_upper = calloc(3, sizeof(double [Ny+2][Nz+2]));
+    }
+
     solver->kx_W = calloc(Nx+2, sizeof(double));
     solver->kx_E = calloc(Nx+2, sizeof(double));
     solver->ky_S = calloc(Ny+2, sizeof(double));
@@ -699,7 +707,7 @@ static void calc_lvset_flag(IBMSolver *solver) {
     /* No obstacle: every cell is fluid cell. */
     if (solver->poly == NULL) {
         FOR_ALL_CELL (i, j, k) {
-            flag[i][j][k] = 1;
+            flag[i][j][k] = FLAG_FLUID;
         }
         return;
     }
@@ -717,17 +725,24 @@ static void calc_lvset_flag(IBMSolver *solver) {
        * Level set function if negative and at
          least one adjacent cell is fluid cell.   => ghost cell
        * Otherwise.                               => solid cell */
-    FOR_ALL_CELL (i, j, k) {
-        if (lvset[i][j][k] >= 0) {
-            flag[i][j][k] = FLAG_FLUID;
-        }
-        else {
-            bool is_ghost_cell = false;
-            for (int l = 0; l < 6; l++) {
-                int ni = i + adj[l][0], nj = j + adj[l][1], nk = k + adj[l][2];
-                is_ghost_cell = is_ghost_cell || (lvset[ni][nj][nk] >= 0);
+    for (int i = 0; i <= Nx+1; i++) {
+        for (int j = 0; j <= Ny+1; j++) {
+            for (int k = 0; k <= Nz+1; k++) {
+                if (lvset[i][j][k] >= 0) {
+                    flag[i][j][k] = FLAG_FLUID;
+                }
+                else {
+                    bool is_ghost_cell = false;
+                    for (int l = 0; l < 6; l++) {
+                        int ni = i + adj[l][0], nj = j + adj[l][1], nk = k + adj[l][2];
+                        if (ni < 0 || ni > Nx+1 || nj < 0 || nj > Ny+1 || nk < 0 || nk > Nz+1) {
+                            continue;
+                        }
+                        is_ghost_cell = is_ghost_cell || (lvset[ni][nj][nk] >= 0);
+                    }
+                    flag[i][j][k] = is_ghost_cell ? FLAG_GHOST : FLAG_SOLID;
+                }
             }
-            flag[i][j][k] = is_ghost_cell ? FLAG_GHOST : FLAG_SOLID;
         }
     }
 
@@ -981,8 +996,8 @@ static HYPRE_IJMatrix create_matrix(IBMSolver *solver, int type) {
     FOR_ALL_CELL (i, j, k) {
         int cur_idx = GLOB_CELL_IDX(i, j, k);
         int ncols;
-        int cols[9];
-        double values[9];
+        int cols[9] = {cur_idx, 0};
+        double values[9] = {0};
 
         /* Fluid cell. */
         if (flag[i][j][k] == FLAG_FLUID) {
@@ -1216,20 +1231,10 @@ static HYPRE_IJMatrix create_matrix(IBMSolver *solver, int type) {
                 }
             }
 
-            /* Remove zero elements. */
-            ncols = 1;
-            for (int l = 1; l < 7; l++) {
-                if (values[l] != 0) {
-                    cols[ncols] = cols[l];
-                    values[ncols] = values[l];
-                    ncols++;
-                }
-            }
-
             /* Normalize pressure equation. */
             if (type == 4) {
                 p_coeffsum[i][j][k] = values[0];
-                for (int l = 1; l < ncols; l++) {
+                for (int l = 1; l < 7; l++) {
                     values[l] /= values[0];
                 }
                 values[0] = 1;
@@ -1238,68 +1243,72 @@ static HYPRE_IJMatrix create_matrix(IBMSolver *solver, int type) {
 
         /* Ghost cell. */
         else if (flag[i][j][k] == FLAG_GHOST) {
-            int idx = -1;
-            int interp_idx[8];
+            int interp_idx[8][3];
             double interp_coeff[8];
+            double coeffsum = 0;
+
+            values[0] = 1;
 
             get_interp_info(solver, i, j, k, interp_idx, interp_coeff);
 
+            /* If an interpolation cell index is out of range, ignore it. */
             for (int l = 0; l < 8; l++) {
-                if (interp_idx[l] == cur_idx) {
-                    idx = l;
-                    break;
+                if (
+                    interp_idx[l][0] < 1 || interp_idx[l][0] > Nx_global
+                    || interp_idx[l][1] < 1 || interp_idx[l][1] > Ny
+                    || interp_idx[l][2] < 1 || interp_idx[l][2] > Nz
+                ) {
+                    interp_coeff[l] = 0;
                 }
+            }
+
+            /* Normalize. */
+            for (int l = 0; l < 8; l++) {
+                coeffsum += interp_coeff[l];
+            }
+            for (int l = 0; l < 8; l++) {
+                interp_coeff[l] /= coeffsum;
             }
 
             /* If the mirror point is not interpolated using the ghost cell
                itself. */
-            if (idx == -1) {
-                ncols = 9;
-                cols[0] = cur_idx;
-                for (int l = 0; l < 8; l++) {
-                    cols[l+1] = interp_idx[l];
-                }
-                values[0] = 1;
-                for (int l = 0; l < 8; l++) {
+            for (int l = 0; l < 8; l++) {
+                if (LOCL_CELL_IDX(interp_idx[l][0], interp_idx[l][1], interp_idx[l][2]) == cur_idx) {
                     if (type != 4) {
-                        values[l+1] = interp_coeff[l];
+                        values[0] += interp_coeff[l];
                     }
                     else {
-                        values[l+1] = -interp_coeff[l];
+                        values[0] -= interp_coeff[l];
                     }
+                    interp_coeff[l] = 0;
+                    break;
                 }
             }
-            /* Otherwise. */
-            else {
-                ncols = 8;
-                cols[0] = cur_idx;
+
+            for (int l = 0; l < 8; l++) {
+                cols[l+1] = LOCL_CELL_IDX(interp_idx[l][0], interp_idx[l][1], interp_idx[l][2]);
                 if (type != 4) {
-                    values[0] = 1 + interp_coeff[idx];
+                    values[l+1] = interp_coeff[l];
                 }
                 else {
-                    values[0] = 1 - interp_coeff[idx];
-                }
-                int cnt = 1;
-                for (int l = 0; l < 8; l++) {
-                    if (l != idx) {
-                        cols[cnt] = interp_idx[l];
-                        if (type != 4) {
-                            values[cnt] = interp_coeff[l];
-                        }
-                        else {
-                            values[cnt] = -interp_coeff[l];
-                        }
-                        cnt++;
-                    }
+                    values[l+1] = -interp_coeff[l];
                 }
             }
         }
 
         /* Solid cell. */
         else if (flag[i][j][k] == FLAG_SOLID) {
-            ncols = 1;
-            cols[0] = cur_idx;
             values[0] = 1;
+        }
+
+        /* Remove zero elements. */
+        ncols = 1;
+        for (int l = 1; l < 9; l++) {
+            if (values[l] != 0) {
+                cols[ncols] = cols[l];
+                values[ncols] = values[l];
+                ncols++;
+            }
         }
 
         HYPRE_IJMatrixSetValues(A, 1, &ncols, &cur_idx, cols, values);
@@ -1313,7 +1322,7 @@ static HYPRE_IJMatrix create_matrix(IBMSolver *solver, int type) {
 static void get_interp_info(
     IBMSolver *solver,
     const int i, const int j, const int k,
-    int *restrict interp_idx, double *restrict interp_coeff
+    int interp_idx[restrict][3], double interp_coeff[restrict]
 ) {
     const int Ny = solver->Ny;
     const int Nz = solver->Nz;
@@ -1353,7 +1362,9 @@ static void get_interp_info(
           000        100
     */
     for (int l = 0; l < 8; l++) {
-        interp_idx[l] = LOCL_CELL_IDX(im + !!(l & 4), jm + !!(l & 2), km + !!(l & 1));
+        interp_idx[l][0] = im + !!(l & 4);
+        interp_idx[l][1] = jm + !!(l & 2);
+        interp_idx[l][2] = km + !!(l & 1);
     }
 
     const double xl = xc_global[im], xu = xc_global[im+1];

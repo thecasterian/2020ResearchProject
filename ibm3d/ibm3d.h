@@ -107,6 +107,10 @@ typedef struct _ibm_solver {
     /* Fluxes. */
     arr3d N1, N1_prev, N2, N2_prev, N3, N3_prev;
 
+    /* Secondary halos. */
+    arr3d vel_2nd_halo_lower;
+    arr3d vel_2nd_halo_upper;
+
     /* HYPRE matrices, vectors, solvers, and arrays. */
     HYPRE_IJMatrix     A_u1, A_u2, A_u3, A_p;
     HYPRE_ParCSRMatrix parcsr_A_u1, parcsr_A_u2, parcsr_A_u3, parcsr_A_p;

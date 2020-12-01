@@ -113,6 +113,13 @@ static inline void FaceExtrusion_cpt(
     double [][*][*]
 );
 
+/**
+ * @brief Adds two vectors.
+ *
+ * @param a First addend.
+ * @param b Second addend.
+ * @return Summation.
+ */
 Vector Vector_add(const Vector a, const Vector b) {
     Vector res;
     res.x = a.x + b.x;
@@ -121,6 +128,13 @@ Vector Vector_add(const Vector a, const Vector b) {
     return res;
 }
 
+/**
+ * @brief Subtract two vectors.
+ *
+ * @param a Minuend.
+ * @param b Subtrahend.
+ * @return Difference.
+ */
 Vector Vector_sub(const Vector a, const Vector b) {
     Vector res;
     res.x = a.x - b.x;
@@ -629,22 +643,62 @@ void Polyhedron_cpt(
         }
     }
 
-    /* Fill unset points. */
+    /* Fill rest points. */
     for (int i = 0; i < nx; i++) {
         for (int j = 0; j < ny; j++) {
             for (int k = 1; k < nz; k++) {
                 if (isnan(f[i][j][k]) && f[i][j][k-1] < 0) {
-                    for (; isnan(f[i][j][k]); k++) {
-                        f[i][j][k] = -maxd;
-                    }
+                    f[i][j][k] = -maxd;
+                }
+                else if (isnan(f[i][j][k]) && f[i][j][k-1] > 0) {
+                    f[i][j][k] = maxd;
+                }
+            }
+            for (int k = nz-2; k >= 0; k--) {
+                if (isnan(f[i][j][k]) && f[i][j][k+1] < 0) {
+                    f[i][j][k] = -maxd;
+                }
+                else if (isnan(f[i][j][k]) && f[i][j][k+1] > 0) {
+                    f[i][j][k] = maxd;
                 }
             }
         }
     }
     for (int i = 0; i < nx; i++) {
-        for (int j = 0; j < ny; j++) {
-            for (int k = 0; k < nz; k++) {
-                if (isnan(f[i][j][k])) {
+        for (int k = 0; k < nz; k++) {
+            for (int j = 1; j < ny; j++) {
+                if (isnan(f[i][j][k]) && f[i][j-1][k] < 0) {
+                    f[i][j][k] = -maxd;
+                }
+                else if (isnan(f[i][j][k]) && f[i][j-1][k] > 0) {
+                    f[i][j][k] = maxd;
+                }
+            }
+            for (int j = ny-2; j >= 0; j--) {
+                if (isnan(f[i][j][k]) && f[i][j+1][k] < 0) {
+                    f[i][j][k] = -maxd;
+                }
+                else if (isnan(f[i][j][k]) && f[i][j+1][k] > 0) {
+                    f[i][j][k] = maxd;
+                }
+            }
+        }
+    }
+    for (int j = 0; j < ny; j++) {
+        for (int k = 0; k < nz; k++) {
+            for (int i = 1; i < nx; i++) {
+                if (isnan(f[i][j][k]) && f[i-1][j][k] < 0) {
+                    f[i][j][k] = -maxd;
+                }
+                else if (isnan(f[i][j][k]) && f[i-1][j][k] > 0) {
+                    f[i][j][k] = maxd;
+                }
+            }
+            for (int i = nx-2; i >= 0; i--) {
+                if (isnan(f[i][j][k]) && f[i+1][j][k] < 0) {
+                    f[i][j][k] = -maxd;
+                }
+                else if (isnan(f[i][j][k]) && f[i+1][j][k] > 0) {
                     f[i][j][k] = maxd;
                 }
             }

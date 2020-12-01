@@ -19,7 +19,7 @@ static void interp_stag_vel(IBMSolver *);
 static void autosave(IBMSolver *);
 static void update_bc(IBMSolver *);
 static void adj_exchange(IBMSolver *);
-static void update_ghost_and_solid(IBMSolver *);
+static void update_ghost(IBMSolver *);
 
 void IBMSolver_iterate(IBMSolver *solver, int num_time_steps, bool verbose) {
     struct timespec t_start, t_end;
@@ -29,7 +29,7 @@ void IBMSolver_iterate(IBMSolver *solver, int num_time_steps, bool verbose) {
     update_bc(solver);
     adj_exchange(solver);
     interp_stag_vel(solver);
-    update_ghost_and_solid(solver);
+    update_ghost(solver);
 
     calc_N(solver);
     SWAP(solver->N1, solver->N1_prev);
@@ -1312,20 +1312,40 @@ static inline void update_next(IBMSolver *solver) {
 
     /* Calculate u_next. */
     FOR_ALL_CELL (i, j, k) {
-        u1_next[i][j][k] = u1_star[i][j][k] - dt * (p_prime[i+1][j][k] - p_prime[i-1][j][k]) / (xc[i+1] - xc[i-1]);
-        u2_next[i][j][k] = u2_star[i][j][k] - dt * (p_prime[i][j+1][k] - p_prime[i][j-1][k]) / (yc[j+1] - yc[j-1]);
-        u3_next[i][j][k] = u3_star[i][j][k] - dt * (p_prime[i][j][k+1] - p_prime[i][j][k-1]) / (zc[k+1] - zc[k-1]);
+        if (flag[i][j][k] == FLAG_FLUID) {
+            u1_next[i][j][k] = u1_star[i][j][k] - dt * (p_prime[i+1][j][k] - p_prime[i-1][j][k]) / (xc[i+1] - xc[i-1]);
+            u2_next[i][j][k] = u2_star[i][j][k] - dt * (p_prime[i][j+1][k] - p_prime[i][j-1][k]) / (yc[j+1] - yc[j-1]);
+            u3_next[i][j][k] = u3_star[i][j][k] - dt * (p_prime[i][j][k+1] - p_prime[i][j][k-1]) / (zc[k+1] - zc[k-1]);
+        }
+        else if (flag[i][j][k] == FLAG_SOLID) {
+            u1_next[i][j][k] = u2_next[i][j][k] = u3_next[i][j][k] = NAN;
+        }
     }
 
     /* Calculate U_next. */
     FOR_ALL_XSTAG (i, j, k) {
-        U1_next[i][j][k] = U1_star[i][j][k] - dt * (p_prime[i+1][j][k] - p_prime[i][j][k]) / (xc[i+1] - xc[i]);
+        if (flag[i][j][k] == FLAG_FLUID && flag[i+1][j][k] == FLAG_FLUID) {
+            U1_next[i][j][k] = U1_star[i][j][k] - dt * (p_prime[i+1][j][k] - p_prime[i][j][k]) / (xc[i+1] - xc[i]);
+        }
+        else if (flag[i][j][k] == FLAG_SOLID || flag[i+1][j][k] == FLAG_SOLID) {
+            U1_next[i][j][k] = NAN;
+        }
     }
     FOR_ALL_YSTAG (i, j, k) {
-        U2_next[i][j][k] = U2_star[i][j][k] - dt * (p_prime[i][j+1][k] - p_prime[i][j][k]) / (yc[j+1] - yc[j]);
+        if (flag[i][j][k] == FLAG_FLUID && flag[i][j+1][k] == FLAG_FLUID) {
+            U2_next[i][j][k] = U2_star[i][j][k] - dt * (p_prime[i][j+1][k] - p_prime[i][j][k]) / (yc[j+1] - yc[j]);
+        }
+        else if (flag[i][j][k] == FLAG_SOLID || flag[i][j+1][k] == FLAG_SOLID) {
+            U2_next[i][j][k] = NAN;
+        }
     }
     FOR_ALL_ZSTAG (i, j, k) {
-        U3_next[i][j][k] = U3_star[i][j][k] - dt * (p_prime[i][j][k+1] - p_prime[i][j][k]) / (zc[k+1] - zc[k]);
+        if (flag[i][j][k] == FLAG_FLUID && flag[i][j][k+1] == FLAG_FLUID) {
+            U3_next[i][j][k] = U3_star[i][j][k] - dt * (p_prime[i][j][k+1] - p_prime[i][j][k]) / (zc[k+1] - zc[k]);
+        }
+        else if (flag[i][j][k] == FLAG_SOLID || flag[i][j][k+1] == FLAG_SOLID) {
+            U3_next[i][j][k] = NAN;
+        }
     }
 
     /* Update for next time step. */
@@ -1347,7 +1367,7 @@ static inline void update_next(IBMSolver *solver) {
     adj_exchange(solver);
 
     /* Set boundary condition on obstacle surface. */
-    update_ghost_and_solid(solver);
+    update_ghost(solver);
 }
 
 static void interp_stag_vel(IBMSolver *solver) {
@@ -2012,7 +2032,7 @@ static void adj_exchange(IBMSolver *solver) {
     }
 }
 
-static void update_ghost_and_solid(IBMSolver *solver) {
+static void update_ghost(IBMSolver *solver) {
     const int Nx = solver->Nx;
     const int Ny = solver->Ny;
     const int Nz = solver->Nz;
@@ -2035,7 +2055,32 @@ static void update_ghost_and_solid(IBMSolver *solver) {
     double (*const U2)[Ny+1][Nz+2] = solver->U2;
     double (*const U3)[Ny+2][Nz+1] = solver->U3;
 
-    double (*const p)[Ny+2][Nz+2] = solver->p;
+    double (*const vel_2nd_halo_lower)[Ny+2][Nz+2] = solver->vel_2nd_halo_lower;
+    double (*const vel_2nd_halo_upper)[Ny+2][Nz+2] = solver->vel_2nd_halo_upper;
+
+    /* Exchange secondary halos. */
+    if (solver->rank != solver->num_process-1) {
+        /* Send to next process. */
+        MPI_Send(u1[Nx-1], (Ny+2)*(Nz+2), MPI_DOUBLE, solver->rank+1, 0, MPI_COMM_WORLD);
+        MPI_Send(u2[Nx-1], (Ny+2)*(Nz+2), MPI_DOUBLE, solver->rank+1, 1, MPI_COMM_WORLD);
+        MPI_Send(u3[Nx-1], (Ny+2)*(Nz+2), MPI_DOUBLE, solver->rank+1, 2, MPI_COMM_WORLD);
+    }
+    if (solver->rank != 0) {
+        /* Receive from previous process. */
+        MPI_Recv(vel_2nd_halo_lower[0], (Ny+2)*(Nz+2), MPI_DOUBLE, solver->rank-1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        MPI_Recv(vel_2nd_halo_lower[1], (Ny+2)*(Nz+2), MPI_DOUBLE, solver->rank-1, 1, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        MPI_Recv(vel_2nd_halo_lower[2], (Ny+2)*(Nz+2), MPI_DOUBLE, solver->rank-1, 2, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        /* Send to previous process. */
+        MPI_Send(u1[2], (Ny+2)*(Nz+2), MPI_DOUBLE, solver->rank-1, 0, MPI_COMM_WORLD);
+        MPI_Send(u2[2], (Ny+2)*(Nz+2), MPI_DOUBLE, solver->rank-1, 1, MPI_COMM_WORLD);
+        MPI_Send(u3[2], (Ny+2)*(Nz+2), MPI_DOUBLE, solver->rank-1, 2, MPI_COMM_WORLD);
+    }
+    if (solver->rank != solver->num_process-1) {
+        /* Receive from next process. */
+        MPI_Recv(vel_2nd_halo_upper[0], (Ny+2)*(Nz+2), MPI_DOUBLE, solver->rank+1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        MPI_Recv(vel_2nd_halo_upper[1], (Ny+2)*(Nz+2), MPI_DOUBLE, solver->rank+1, 1, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        MPI_Recv(vel_2nd_halo_upper[2], (Ny+2)*(Nz+2), MPI_DOUBLE, solver->rank+1, 2, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+    }
 
     FOR_ALL_CELL (i, j, k) {
         if (flag[i][j][k] == FLAG_GHOST) {
@@ -2078,23 +2123,36 @@ static void update_ghost_and_solid(IBMSolver *solver) {
                 int nj = jm + !!(l & 2);
                 int nk = km + !!(l & 1);
 
-                if (ni < 0 || ni > Nx+1 || nj < 0 || nj > Ny+1 || nk < 0 || nk > Nz+1) {
-                    printf("error!\n");
-                    continue;
-                }
-                if (flag[ni][nj][nk] == FLAG_SOLID) {
-                    continue;
-                }
-
-                coeff_sum += interp_coeff[l];
-
                 if (ni == i && nj == j && nk == k) {
                     center_coeff += interp_coeff[l];
+                    coeff_sum += interp_coeff[l];
+                }
+                else if (ni < 0) {
+                    if (isnan(vel_2nd_halo_lower[0][nj][nk])) {
+                        continue;
+                    }
+                    sum_u1 += vel_2nd_halo_lower[0][nj][nk] * interp_coeff[l];
+                    sum_u2 += vel_2nd_halo_lower[1][nj][nk] * interp_coeff[l];
+                    sum_u3 += vel_2nd_halo_lower[2][nj][nk] * interp_coeff[l];
+                    coeff_sum += interp_coeff[l];
+                }
+                else if (ni > Nx+1) {
+                    if (isnan(vel_2nd_halo_upper[0][nj][nk])) {
+                        continue;
+                    }
+                    sum_u1 += vel_2nd_halo_upper[0][nj][nk] * interp_coeff[l];
+                    sum_u2 += vel_2nd_halo_upper[1][nj][nk] * interp_coeff[l];
+                    sum_u3 += vel_2nd_halo_upper[2][nj][nk] * interp_coeff[l];
+                    coeff_sum += interp_coeff[l];
                 }
                 else {
+                    if (isnan(u1[ni][nj][nk])) {
+                        continue;
+                    }
                     sum_u1 += u1[ni][nj][nk] * interp_coeff[l];
                     sum_u2 += u2[ni][nj][nk] * interp_coeff[l];
                     sum_u3 += u3[ni][nj][nk] * interp_coeff[l];
+                    coeff_sum += interp_coeff[l];
                 }
             }
 
@@ -2102,33 +2160,21 @@ static void update_ghost_and_solid(IBMSolver *solver) {
             u2[i][j][k] = -sum_u2 / center_coeff / coeff_sum;
             u3[i][j][k] = -sum_u3 / center_coeff / coeff_sum;
         }
-        else if (flag[i][j][k] == FLAG_SOLID) {
-            u1[i][j][k] = u2[i][j][k] = u3[i][j][k] = p[i][j][k] = NAN;
-        }
     }
 
     FOR_ALL_XSTAG (i, j, k) {
         if ((flag[i][j][k] == FLAG_FLUID && flag[i+1][j][k] == FLAG_GHOST) || (flag[i][j][k] == FLAG_GHOST && flag[i+1][j][k] == FLAG_FLUID)) {
             U1[i][j][k] = (u1[i][j][k] * dx[i+1] + u1[i+1][j][k] * dx[i]) / (dx[i] + dx[i+1]);
         }
-        else if (flag[i][j][k] == FLAG_SOLID || flag[i+1][j][k] == FLAG_SOLID) {
-            U1[i][j][k] = NAN;
-        }
     }
     FOR_ALL_YSTAG (i, j, k) {
         if ((flag[i][j][k] == FLAG_FLUID && flag[i][j+1][k] == FLAG_GHOST) || (flag[i][j][k] == FLAG_GHOST && flag[i][j+1][k] == FLAG_FLUID)) {
             U2[i][j][k] = (u2[i][j][k] * dy[j+1] + u2[i][j+1][k] * dy[j]) / (dy[j] + dy[j+1]);
         }
-        else if (flag[i][j][k] == FLAG_SOLID || flag[i][j+1][k] == FLAG_SOLID) {
-            U2[i][j][k] = NAN;
-        }
     }
     FOR_ALL_ZSTAG (i, j, k) {
         if ((flag[i][j][k] == FLAG_FLUID && flag[i][j][k+1] == FLAG_GHOST) || (flag[i][j][k] == FLAG_GHOST && flag[i][j][k+1] == FLAG_FLUID)) {
             U3[i][j][k] = (u3[i][j][k] * dz[k+1] + u3[i][j][k+1] * dz[k]) / (dz[k] + dz[k+1]);
-        }
-        else if (flag[i][j][k] == FLAG_SOLID || flag[i][j][k+1] == FLAG_SOLID) {
-            U3[i][j][k] = NAN;
         }
     }
 }

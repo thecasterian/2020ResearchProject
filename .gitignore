@@ -14,6 +14,11 @@
 *.txt
 *.out
 *.00*
+*.png
+*.jpg
+*.avi
+*.mp4
+*.vtr
 
 # ignore latex files
 *.aux
