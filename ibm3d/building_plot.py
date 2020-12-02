@@ -61,7 +61,7 @@ pts.shape = pts.size // 3, 3
 
 # read data
 prefix = 'data/'
-postfix = ''
+postfix = '-10000'
 
 u1 = np.fromfile(f'{prefix}building3_u1{postfix}.out').reshape((Nx+2, Ny+2, Nz+2))
 u2 = np.fromfile(f'{prefix}building3_u2{postfix}.out').reshape((Nx+2, Ny+2, Nz+2))
@@ -96,7 +96,7 @@ d = mlab.pipeline.add_dataset(sg)
 # gz = mlab.pipeline.grid_plane(d)
 # gz.grid_plane.axis = 'y'
 
-cut_plane = mlab.pipeline.scalar_cut_plane(d, plane_orientation='y_axes', opacity=1)
+cut_plane = mlab.pipeline.scalar_cut_plane(d, plane_orientation='y_axes', opacity=1, vmax=1.5)
 cut_plane.implicit_plane.origin = (0, 7.5, 2)
 # cut_plane.implicit_plane.widget.enabled = False
 
