@@ -22,7 +22,7 @@ clean:
 	rm -f *.a
 	rm -f *.o
 
-$(TARGET): main.c ibm3d.a geo3d.o
+$(TARGET): $(TARGET).c ibm3d.a geo3d.o
 	$(CC) $(INCLUDE) $^ $(HYPRE) -o $@ $(LDLIBS) $(CFLAGS)
 
 ibm3d.a: ibm3d_setup.o ibm3d_fracstep.o utils.o

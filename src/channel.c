@@ -1,7 +1,6 @@
 #include <stdio.h>
 #include <math.h>
 
-#include "geo3d.h"
 #include "ibm3d.h"
 
 const int Nx = 192;
@@ -71,6 +70,8 @@ int main(int argc, char **argv) {
     );
 
     IBMSolver_assemble(solver);
+
+    printf("%d: %d, %d\n", rank, solver->ilower, solver->iupper);
 
     /* Initialize. */
     if (1) {
