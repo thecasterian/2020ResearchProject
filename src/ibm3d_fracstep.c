@@ -21,6 +21,8 @@ static void update_bc(IBMSolver *);
 static void adj_exchange(IBMSolver *);
 static void update_ghost(IBMSolver *);
 
+static double bc_val(IBMSolver *, IBMSolverDirection, double, double, double);
+
 void IBMSolver_iterate(IBMSolver *solver, int num_time_steps, bool verbose) {
     struct timespec t_start, t_end;
     long elapsed_time, hour, min, sec;
@@ -216,7 +218,7 @@ static inline void calc_u_star(
 
             /* West. */
             if (LOCL_TO_GLOB(i) == 1) {
-                switch (solver->bc_type[3]) {
+                switch (solver->bc[3].type) {
                 case BC_VELOCITY_INLET:
                     *rhs += 2*solver->bc_val[3]*kx_W[i];
                     break;
@@ -226,7 +228,7 @@ static inline void calc_u_star(
 
             /* East. */
             if (LOCL_TO_GLOB(i) == Nx_global) {
-                switch (solver->bc_type[1]) {
+                switch (solver->bc[1].type) {
                 case BC_VELOCITY_INLET:
                     *rhs += 2*solver->bc_val[1]*kx_E[i];
                 default:;
@@ -235,28 +237,28 @@ static inline void calc_u_star(
 
             /* South. */
             if (j == 1) {
-                switch (solver->bc_type[2]) {
+                switch (solver->bc[2].type) {
                 default:;
                 }
             }
 
             /* North. */
             if (j == Ny) {
-                switch (solver->bc_type[0]) {
+                switch (solver->bc[0].type) {
                 default:;
                 }
             }
 
             /* Down. */
             if (k == 1) {
-                switch (solver->bc_type[4]) {
+                switch (solver->bc[4].type) {
                 default:;
                 }
             }
 
             /* Up. */
             if (k == Nz) {
-                switch (solver->bc_type[5]) {
+                switch (solver->bc[5].type) {
                 default:;
                 }
             }
@@ -298,21 +300,21 @@ static inline void calc_u_star(
 
             /* West. */
             if (LOCL_TO_GLOB(i) == 1) {
-                switch (solver->bc_type[3]) {
+                switch (solver->bc[3].type) {
                 default:;
                 }
             }
 
             /* East. */
             if (LOCL_TO_GLOB(i) == Nx_global) {
-                switch (solver->bc_type[1]) {
+                switch (solver->bc[1].type) {
                 default:;
                 }
             }
 
             /* South. */
             if (j == 1) {
-                switch (solver->bc_type[2]) {
+                switch (solver->bc[2].type) {
                 case BC_VELOCITY_INLET:
                     *rhs += 2*solver->bc_val[2]*ky_S[j];
                     break;
@@ -322,7 +324,7 @@ static inline void calc_u_star(
 
             /* North. */
             if (j == Ny) {
-                switch (solver->bc_type[0]) {
+                switch (solver->bc[0].type) {
                 case BC_VELOCITY_INLET:
                     *rhs += 2*solver->bc_val[0]*ky_N[j];
                     break;
@@ -332,14 +334,14 @@ static inline void calc_u_star(
 
             /* Down. */
             if (k == 1) {
-                switch (solver->bc_type[4]) {
+                switch (solver->bc[4].type) {
                 default:;
                 }
             }
 
             /* Up. */
             if (k == Nz) {
-                switch (solver->bc_type[5]) {
+                switch (solver->bc[5].type) {
                 default:;
                 }
             }
@@ -381,35 +383,35 @@ static inline void calc_u_star(
 
             /* West. */
             if (LOCL_TO_GLOB(i) == 1) {
-                switch (solver->bc_type[3]) {
+                switch (solver->bc[3].type) {
                 default:;
                 }
             }
 
             /* East. */
             if (LOCL_TO_GLOB(i) == Nx_global) {
-                switch (solver->bc_type[1]) {
+                switch (solver->bc[1].type) {
                 default:;
                 }
             }
 
             /* South. */
             if (j == 1) {
-                switch (solver->bc_type[2]) {
+                switch (solver->bc[2].type) {
                 default:;
                 }
             }
 
             /* North. */
             if (j == Ny) {
-                switch (solver->bc_type[0]) {
+                switch (solver->bc[0].type) {
                 default:;
                 }
             }
 
             /* Down. */
             if (k == 1) {
-                switch (solver->bc_type[4]) {
+                switch (solver->bc[4].type) {
                 case BC_VELOCITY_INLET:
                     *rhs += 2*solver->bc_val[4]*kz_D[k];
                     break;
@@ -419,7 +421,7 @@ static inline void calc_u_star(
 
             /* Up. */
             if (k == Nz) {
-                switch (solver->bc_type[5]) {
+                switch (solver->bc[5].type) {
                 case BC_VELOCITY_INLET:
                     *rhs += 2*solver->bc_val[5]*kz_U[k];
                     break;
@@ -484,7 +486,7 @@ static inline void calc_u_star(
 
     /* West. */
     if (solver->ilower == 1) {
-        switch (solver->bc_type[3]) {
+        switch (solver->bc[3].type) {
         case BC_PRESSURE_OUTLET:
             for (int j = 1; j <= Ny; j++) {
                 for (int k = 1; k <= Nz; k++) {
@@ -500,7 +502,7 @@ static inline void calc_u_star(
 
     /* East. */
     if (solver->iupper == Nx_global) {
-        switch (solver->bc_type[1]) {
+        switch (solver->bc[1].type) {
         case BC_PRESSURE_OUTLET:
             for (int j = 1; j <= Ny; j++) {
                 for (int k = 1; k <= Nz; k++) {
@@ -515,7 +517,7 @@ static inline void calc_u_star(
     }
 
     /* South. */
-    switch (solver->bc_type[2]) {
+    switch (solver->bc[2].type) {
     case BC_PRESSURE_OUTLET:
         for (int i = 0; i <= Nx+1; i++) {
             for (int k = 1; k <= Nz; k++) {
@@ -529,7 +531,7 @@ static inline void calc_u_star(
     }
 
     /* North. */
-    switch (solver->bc_type[0]) {
+    switch (solver->bc[0].type) {
     case BC_PRESSURE_OUTLET:
         for (int i = 0; i <= Nx+1; i++) {
             for (int k = 1; k <= Nz; k++) {
@@ -543,7 +545,7 @@ static inline void calc_u_star(
     }
 
     /* Down. */
-    switch (solver->bc_type[4]) {
+    switch (solver->bc[4].type) {
     case BC_PRESSURE_OUTLET:
         for (int i = 0; i <= Nx+1; i++) {
             for (int j = 0; j <= Ny+1; j++) {
@@ -557,7 +559,7 @@ static inline void calc_u_star(
     }
 
     /* Up. */
-    switch (solver->bc_type[5]) {
+    switch (solver->bc[5].type) {
     case BC_PRESSURE_OUTLET:
         for (int i = 0; i <= Nx+1; i++) {
             for (int j = 0; j <= Ny+1; j++) {
@@ -604,7 +606,7 @@ static inline void calc_u_tilde(IBMSolver *solver) {
 
     /* West. */
     if (solver->ilower == 1) {
-        switch (solver->bc_type[3]) {
+        switch (solver->bc[3].type) {
         case BC_PRESSURE_OUTLET:
             for (int j = 1; j <= Ny; j++) {
                 for (int k = 1; k <= Nz; k++) {
@@ -641,7 +643,7 @@ static inline void calc_u_tilde(IBMSolver *solver) {
 
     /* East. */
     if (solver->iupper == Nx_global) {
-        switch (solver->bc_type[1]) {
+        switch (solver->bc[1].type) {
         case BC_PRESSURE_OUTLET:
             for (int j = 1; j <= Ny; j++) {
                 for (int k = 1; k <= Nz; k++) {
@@ -677,7 +679,7 @@ static inline void calc_u_tilde(IBMSolver *solver) {
     }
 
     /* South. */
-    switch (solver->bc_type[2]) {
+    switch (solver->bc[2].type) {
     case BC_PRESSURE_OUTLET:
         for (int i = 0; i <= Nx+1; i++) {
             for (int k = 1; k <= Nz; k++) {
@@ -701,7 +703,7 @@ static inline void calc_u_tilde(IBMSolver *solver) {
     }
 
     /* North. */
-    switch (solver->bc_type[0]) {
+    switch (solver->bc[0].type) {
     case BC_PRESSURE_OUTLET:
         for (int i = 0; i <= Nx+1; i++) {
             for (int k = 1; k <= Nz; k++) {
@@ -725,7 +727,7 @@ static inline void calc_u_tilde(IBMSolver *solver) {
     }
 
     /* Down. */
-    switch (solver->bc_type[4]) {
+    switch (solver->bc[4].type) {
     case BC_PRESSURE_OUTLET:
         for (int i = 0; i <= Nx+1; i++) {
             for (int j = 0; j <= Ny+1; j++) {
@@ -749,7 +751,7 @@ static inline void calc_u_tilde(IBMSolver *solver) {
     }
 
     /* Up. */
-    switch (solver->bc_type[5]) {
+    switch (solver->bc[5].type) {
     case BC_PRESSURE_OUTLET:
         for (int i = 0; i <= Nx+1; i++) {
             for (int j = 0; j <= Ny+1; j++) {
@@ -835,7 +837,7 @@ static inline void calc_U_star(IBMSolver *solver) {
 
     /* West. */
     if (solver->ilower == 1) {
-        switch (solver->bc_type[3]) {
+        switch (solver->bc[3].type) {
         case BC_VELOCITY_INLET:
             for (int j = 1; j <= Ny; j++) {
                 for (int k = 1; k <= Nz; k++) {
@@ -857,7 +859,7 @@ static inline void calc_U_star(IBMSolver *solver) {
 
     /* East. */
     if (solver->iupper == solver->Nx_global) {
-        switch (solver->bc_type[1]) {
+        switch (solver->bc[1].type) {
         case BC_VELOCITY_INLET:
             for (int j = 1; j <= Ny; j++) {
                 for (int k = 1; k <= Nz; k++) {
@@ -878,7 +880,7 @@ static inline void calc_U_star(IBMSolver *solver) {
     }
 
     /* South. */
-    switch (solver->bc_type[2]) {
+    switch (solver->bc[2].type) {
     case BC_VELOCITY_INLET:
         for (int i = 1; i <= Nx; i++) {
             for (int k = 1; k <= Nz; k++) {
@@ -898,7 +900,7 @@ static inline void calc_U_star(IBMSolver *solver) {
     }
 
     /* North. */
-    switch (solver->bc_type[0]) {
+    switch (solver->bc[0].type) {
     case BC_VELOCITY_INLET:
         for (int i = 1; i <= Nx; i++) {
             for (int k = 1; k <= Nz; k++) {
@@ -918,7 +920,7 @@ static inline void calc_U_star(IBMSolver *solver) {
     }
 
     /* Down. */
-    switch (solver->bc_type[4]) {
+    switch (solver->bc[4].type) {
     case BC_VELOCITY_INLET:
         for (int i = 1; i <= Nx; i++) {
             for (int j = 1; j <= Ny; j++) {
@@ -938,7 +940,7 @@ static inline void calc_U_star(IBMSolver *solver) {
     }
 
     /* Up. */
-    switch (solver->bc_type[5]) {
+    switch (solver->bc[5].type) {
     case BC_VELOCITY_INLET:
         for (int i = 1; i <= Nx; i++) {
             for (int j = 1; j <= Ny; j++) {
@@ -1063,7 +1065,7 @@ static inline void calc_p_prime(IBMSolver *solver, double *final_norm_p) {
 
     /* West. */
     if (solver->ilower == 1) {
-        switch (solver->bc_type[3]) {
+        switch (solver->bc[3].type) {
         case BC_VELOCITY_INLET:
         case BC_STATIONARY_WALL:
         case BC_FREE_SLIP_WALL:
@@ -1100,7 +1102,7 @@ static inline void calc_p_prime(IBMSolver *solver, double *final_norm_p) {
 
     /* East. */
     if (solver->iupper == Nx_global) {
-        switch (solver->bc_type[1]) {
+        switch (solver->bc[1].type) {
         case BC_VELOCITY_INLET:
         case BC_STATIONARY_WALL:
         case BC_FREE_SLIP_WALL:
@@ -1136,7 +1138,7 @@ static inline void calc_p_prime(IBMSolver *solver, double *final_norm_p) {
     }
 
     /* South. */
-    switch (solver->bc_type[2]) {
+    switch (solver->bc[2].type) {
     case BC_VELOCITY_INLET:
     case BC_STATIONARY_WALL:
     case BC_FREE_SLIP_WALL:
@@ -1165,7 +1167,7 @@ static inline void calc_p_prime(IBMSolver *solver, double *final_norm_p) {
     }
 
     /* North. */
-    switch (solver->bc_type[0]) {
+    switch (solver->bc[0].type) {
     case BC_VELOCITY_INLET:
     case BC_STATIONARY_WALL:
     case BC_FREE_SLIP_WALL:
@@ -1194,7 +1196,7 @@ static inline void calc_p_prime(IBMSolver *solver, double *final_norm_p) {
     }
 
     /* Down. */
-    switch (solver->bc_type[4]) {
+    switch (solver->bc[4].type) {
     case BC_VELOCITY_INLET:
     case BC_STATIONARY_WALL:
     case BC_FREE_SLIP_WALL:
@@ -1223,7 +1225,7 @@ static inline void calc_p_prime(IBMSolver *solver, double *final_norm_p) {
     }
 
     /* Up. */
-    switch (solver->bc_type[5]) {
+    switch (solver->bc[5].type) {
     case BC_VELOCITY_INLET:
     case BC_STATIONARY_WALL:
     case BC_FREE_SLIP_WALL:
@@ -1471,7 +1473,7 @@ static void update_bc(IBMSolver *solver) {
 
     /* West. */
     if (solver->ilower == 1) {
-        switch (solver->bc_type[3]) {
+        switch (solver->bc[3].type) {
         case BC_VELOCITY_INLET:
             for (int j = 1; j <= Ny; j++) {
                 for (int k = 1; k <= Nz; k++) {
@@ -1535,7 +1537,7 @@ static void update_bc(IBMSolver *solver) {
 
     /* East. */
     if (solver->iupper == Nx_global) {
-        switch (solver->bc_type[1]) {
+        switch (solver->bc[1].type) {
         case BC_VELOCITY_INLET:
             for (int j = 1; j <= Ny; j++) {
                 for (int k = 1; k <= Nz; k++) {
@@ -1598,7 +1600,7 @@ static void update_bc(IBMSolver *solver) {
     }
 
     /* South. */
-    switch (solver->bc_type[2]) {
+    switch (solver->bc[2].type) {
     case BC_VELOCITY_INLET:
         for (int i = 0; i <= Nx+1; i++) {
             for (int k = 1; k <= Nz; k++) {
@@ -1649,7 +1651,7 @@ static void update_bc(IBMSolver *solver) {
     }
 
     /* North. */
-    switch (solver->bc_type[0]) {
+    switch (solver->bc[0].type) {
     case BC_VELOCITY_INLET:
         for (int i = 0; i <= Nx+1; i++) {
             for (int k = 1; k <= Nz; k++) {
@@ -1700,7 +1702,7 @@ static void update_bc(IBMSolver *solver) {
     }
 
     /* Down. */
-    switch (solver->bc_type[4]) {
+    switch (solver->bc[4].type) {
     case BC_VELOCITY_INLET:
         for (int i = 0; i <= Nx+1; i++) {
             for (int j = 0; j <= Ny+1; j++) {
@@ -1751,7 +1753,7 @@ static void update_bc(IBMSolver *solver) {
     }
 
     /* Up. */
-    switch (solver->bc_type[5]) {
+    switch (solver->bc[5].type) {
     case BC_VELOCITY_INLET:
         for (int i = 0; i <= Nx+1; i++) {
             for (int j = 0; j <= Ny+1; j++) {
@@ -1805,7 +1807,7 @@ static void update_bc(IBMSolver *solver) {
 
     /* West. */
     if (solver->ilower == 1) {
-        switch (solver->bc_type[3]) {
+        switch (solver->bc[3].type) {
         case BC_VELOCITY_INLET:
         case BC_STATIONARY_WALL:
         case BC_FREE_SLIP_WALL:
@@ -1842,7 +1844,7 @@ static void update_bc(IBMSolver *solver) {
 
     /* East. */
     if (solver->iupper == Nx_global) {
-        switch (solver->bc_type[1]) {
+        switch (solver->bc[1].type) {
         case BC_VELOCITY_INLET:
         case BC_STATIONARY_WALL:
         case BC_FREE_SLIP_WALL:
@@ -1878,7 +1880,7 @@ static void update_bc(IBMSolver *solver) {
     }
 
     /* South. */
-    switch (solver->bc_type[2]) {
+    switch (solver->bc[2].type) {
     case BC_VELOCITY_INLET:
     case BC_STATIONARY_WALL:
     case BC_FREE_SLIP_WALL:
@@ -1907,7 +1909,7 @@ static void update_bc(IBMSolver *solver) {
     }
 
     /* North. */
-    switch (solver->bc_type[0]) {
+    switch (solver->bc[0].type) {
     case BC_VELOCITY_INLET:
     case BC_STATIONARY_WALL:
     case BC_FREE_SLIP_WALL:
@@ -1936,7 +1938,7 @@ static void update_bc(IBMSolver *solver) {
     }
 
     /* Down. */
-    switch (solver->bc_type[4]) {
+    switch (solver->bc[4].type) {
     case BC_VELOCITY_INLET:
     case BC_STATIONARY_WALL:
     case BC_FREE_SLIP_WALL:
@@ -1965,7 +1967,7 @@ static void update_bc(IBMSolver *solver) {
     }
 
     /* Up. */
-    switch (solver->bc_type[5]) {
+    switch (solver->bc[5].type) {
     case BC_VELOCITY_INLET:
     case BC_STATIONARY_WALL:
     case BC_FREE_SLIP_WALL:
@@ -2177,4 +2179,15 @@ static void update_ghost(IBMSolver *solver) {
             U3[i][j][k] = (u3[i][j][k] * dz[k+1] + u3[i][j][k+1] * dz[k]) / (dz[k] + dz[k+1]);
         }
     }
+}
+
+static double bc_val(
+    IBMSolver *solver,
+    IBMSolverDirection dir,
+    double x, double y, double z
+) {
+    int idx = dir_to_idx(dir);
+    return solver->bc[idx].val_type == BC_CONST
+        ? solver->bc[idx].const_value
+        : solver->bc[idx].func(solver->time, x, y, z);
 }

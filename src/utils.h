@@ -2,6 +2,7 @@
 #define UTILS_H
 
 #include <stdio.h>
+#include <ibm3d.h>
 
 #define FOR_ALL_CELL(i, j, k) \
     for (int i = 1; i <= Nx; i++) \
@@ -37,5 +38,7 @@ FILE *fopen_check(const char *restrict filename, const char *restrict modes);
 
 int lower_bound(const int, const double [], const double);
 int upper_bound(const int, const double [], const double);
+
+int dir_to_idx(IBMSolverDirection);
 
 #endif

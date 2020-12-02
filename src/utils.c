@@ -71,3 +71,29 @@ int upper_bound(const int len, const double arr[const static len], const double 
     }
     return l;
 }
+
+/**
+ * @brief Converts IBMSolverDirection (2^0 - 2^5) to array index (0 - 5).
+ *        Returns -1 if \p dir is an invalid value.
+ *
+ * @param dir IBMSolverDirection.
+ * @return Corresponding index.
+ */
+int dir_to_idx(IBMSolverDirection dir) {
+    switch (dir) {
+    case DIR_NORTH:
+        return 0;
+    case DIR_EAST:
+        return 1;
+    case DIR_SOUTH:
+        return 2;
+    case DIR_WEST:
+        return 3;
+    case DIR_DOWN:
+        return 4;
+    case DIR_UP:
+        return 5;
+    default:;
+    }
+    return -1;
+}

@@ -44,6 +44,23 @@ typedef enum _bc_type {
     BC_VELOCITY_PERIODIC,       /* Velocity periodic, pressure specified. */
 } IBMSolverBCType;
 
+typedef enum _bc_val_type {
+    BC_CONST,                   /* Set boundary value by a constant. */
+    BC_FUNC,                    /* Set boundary value by a function. */
+} IBMSolverBCValType;
+
+/* (t, x, y, z) => boundary value */
+typedef double (*IBMSolverBCValFunc)(double, double, double, double);
+
+typedef struct _bc {
+    IBMSolverBCType type;
+    IBMSolverBCValType val_type;
+    union {
+        double const_value;
+        IBMSolverBCValFunc func;
+    };
+} IBMSolverBC;
+
 enum {
     FLAG_FLUID = 1,
     FLAG_GHOST,
@@ -83,8 +100,7 @@ typedef struct _ibm_solver {
 
     /* Boundary conditions of 6 outer boundaries: north, east, south, west, up,
        and down. */
-    IBMSolverBCType bc_type[6];
-    double bc_val[6];
+    IBMSolverBC bc[6];
 
     /* Obstacle. */
     Polyhedron *poly;
@@ -131,6 +147,7 @@ typedef struct _ibm_solver {
 
     /* Iteration info. */
     int iter;
+    double time;
 
     /* Autosave. */
     const char *autosave_u1, *autosave_u2, *autosave_u3, *autosave_p;

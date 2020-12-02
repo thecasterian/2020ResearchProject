@@ -5,6 +5,7 @@
 #include "math.h"
 
 #include <string.h>
+#include <stdarg.h>
 
 /* Index of adjacent cells in 3-d cartesian coordinate. Refer the order shown
    below. */
@@ -68,10 +69,6 @@ IBMSolver *IBMSolver_new(const int num_process, const int rank) {
     solver->kx_W = solver->kx_E = NULL;
     solver->ky_S = solver->ky_N = NULL;
     solver->kz_D = solver->kz_U = NULL;
-
-    for (int i = 0; i < 6; i++) {
-        solver->bc_val[i] = NAN;
-    }
 
     return solver;
 }
@@ -219,19 +216,46 @@ void IBMSolver_set_params(IBMSolver *solver, const double Re, const double dt) {
  *
  * @param solver IBMSolver.
  * @param direction Direction of boundary.
- * @param bc_type Type of boundary.
- * @param bc_val Value used to calculate boundary condition.
+ * @param type Type of boundary.
  */
 void IBMSolver_set_bc(
     IBMSolver *solver,
     IBMSolverDirection direction,
-    IBMSolverBCType bc_type,
-    double bc_val
+    IBMSolverBCType type,
+    ...
 ) {
+    IBMSolverBCValType val_type;
+    double const_value = NAN;
+    IBMSolverBCValFunc func = NULL;
+    va_list ap;
+
+    va_start(ap, type);
+    switch (type) {
+        case BC_VELOCITY_INLET:
+        case BC_PRESSURE_OUTLET:
+        case BC_VELOCITY_PERIODIC:
+            val_type = va_arg(ap, IBMSolverBCValType);
+            if (val_type == BC_CONST) {
+                const_value = va_arg(ap, double);
+            }
+            else {
+                func = va_arg(ap, IBMSolverBCValFunc);
+            }
+        break;
+        default:;
+    }
+    va_end(ap);
+
     for (int i = 0; i < 6; i++) {
         if (direction & (1 << i)) {
-            solver->bc_type[i] = bc_type;
-            solver->bc_val[i] = bc_val;
+            solver->bc[i].type = type;
+            solver->bc[i].val_type = val_type;
+            if (val_type == BC_CONST) {
+                solver->bc[i].const_value = const_value;
+            }
+            else {
+                solver->bc[i].func = func;
+            }
         }
     }
 }
@@ -299,9 +323,9 @@ void IBMSolver_assemble(IBMSolver *solver) {
     if (
         solver->rank == 0
         && (
-            isperiodic(solver->bc_type[0]) != isperiodic(solver->bc_type[2])
-            || isperiodic(solver->bc_type[1]) != isperiodic(solver->bc_type[3])
-            || isperiodic(solver->bc_type[4]) != isperiodic(solver->bc_type[5])
+            isperiodic(solver->bc[0].type) != isperiodic(solver->bc[2].type)
+            || isperiodic(solver->bc[1].type) != isperiodic(solver->bc[3].type)
+            || isperiodic(solver->bc[4].type) != isperiodic(solver->bc[5].type)
         )
     ) {
         printf("Inconsistent periodic boundary condition\n");
@@ -310,18 +334,18 @@ void IBMSolver_assemble(IBMSolver *solver) {
 
     /* Ghost cells */
     dx_global[0]
-        = isperiodic(solver->bc_type[3]) ? dx_global[Nx_global] : dx_global[1];
+        = isperiodic(solver->bc[3].type) ? dx_global[Nx_global] : dx_global[1];
     dx_global[Nx+1]
-        = isperiodic(solver->bc_type[1]) ? dx_global[1] : dx_global[Nx];
+        = isperiodic(solver->bc[1].type) ? dx_global[1] : dx_global[Nx];
     xc_global[0] = xc_global[1] - (dx_global[0] + dx_global[1]) / 2;
     xc_global[Nx_global+1] = xc_global[Nx_global] + (dx_global[Nx_global] + dx_global[Nx_global+1]) / 2;
 
     dx[0] = dx_global[ilower-1];
     dx[Nx+1] = dx_global[iupper+1];
-    dy[0] = isperiodic(solver->bc_type[2]) ? dy[Ny] : dy[1];
-    dy[Ny+1] = isperiodic(solver->bc_type[0]) ? dy[1] : dy[Ny];
-    dz[0] = isperiodic(solver->bc_type[4]) ? dz[Nz] : dz[1];
-    dz[Nz+1] = isperiodic(solver->bc_type[5]) ? dz[1] : dz[Nz];
+    dy[0] = isperiodic(solver->bc[2].type) ? dy[Ny] : dy[1];
+    dy[Ny+1] = isperiodic(solver->bc[0].type) ? dy[1] : dy[Ny];
+    dz[0] = isperiodic(solver->bc[4].type) ? dz[Nz] : dz[1];
+    dz[Nz+1] = isperiodic(solver->bc[5].type) ? dz[1] : dz[Nz];
 
     xc[0] = xc_global[ilower-1];
     xc[Nx+1] = xc_global[iupper+1];
@@ -1023,7 +1047,7 @@ static HYPRE_IJMatrix create_matrix(IBMSolver *solver, int type) {
 
             /* West (i = 1) */
             if (LOCL_TO_GLOB(i) == 1) {
-                switch (solver->bc_type[3]) {
+                switch (solver->bc[3].type) {
                 case BC_VELOCITY_INLET:
                 case BC_STATIONARY_WALL:
                     values[4] = 0;
@@ -1058,7 +1082,7 @@ static HYPRE_IJMatrix create_matrix(IBMSolver *solver, int type) {
 
             /* East (i = Nx_global) */
             if (LOCL_TO_GLOB(i) == Nx_global) {
-                switch (solver->bc_type[1]) {
+                switch (solver->bc[1].type) {
                 case BC_VELOCITY_INLET:
                 case BC_STATIONARY_WALL:
                     values[2] = 0;
@@ -1093,7 +1117,7 @@ static HYPRE_IJMatrix create_matrix(IBMSolver *solver, int type) {
 
             /* South (j = 1) */
             if (j == 1) {
-                switch (solver->bc_type[2]) {
+                switch (solver->bc[2].type) {
                 case BC_VELOCITY_INLET:
                 case BC_STATIONARY_WALL:
                     values[3] = 0;
@@ -1128,7 +1152,7 @@ static HYPRE_IJMatrix create_matrix(IBMSolver *solver, int type) {
 
             /* North (j = Ny) */
             if (j == Ny) {
-                switch (solver->bc_type[0]) {
+                switch (solver->bc[0].type) {
                 case BC_VELOCITY_INLET:
                 case BC_STATIONARY_WALL:
                     values[1] = 0;
@@ -1163,7 +1187,7 @@ static HYPRE_IJMatrix create_matrix(IBMSolver *solver, int type) {
 
             /* Down (k = 1) */
             if (k == 1) {
-                switch (solver->bc_type[4]) {
+                switch (solver->bc[4].type) {
                 case BC_VELOCITY_INLET:
                 case BC_STATIONARY_WALL:
                     values[5] = 0;
@@ -1198,7 +1222,7 @@ static HYPRE_IJMatrix create_matrix(IBMSolver *solver, int type) {
 
             /* Up (k = Nz) */
             if (k == Nz) {
-                switch (solver->bc_type[5]) {
+                switch (solver->bc[5].type) {
                 case BC_VELOCITY_INLET:
                 case BC_STATIONARY_WALL:
                     values[6] = 0;
