@@ -27,6 +27,8 @@ void IBMSolver_iterate(IBMSolver *solver, int num_time_steps, bool verbose) {
     struct timespec t_start, t_end;
     long elapsed_time, hour, min, sec;
     double final_norm_u1, final_norm_u2, final_norm_u3, final_norm_p;
+    int i = 0;
+    double start_time = solver->time;
 
     update_bc(solver);
     adj_exchange(solver);
@@ -42,7 +44,7 @@ void IBMSolver_iterate(IBMSolver *solver, int num_time_steps, bool verbose) {
         clock_gettime(CLOCK_REALTIME, &t_start);
     }
 
-    while (solver->iter < num_time_steps) {
+    while (i < num_time_steps) {
         calc_N(solver);
         calc_u_star(solver, &final_norm_u1, &final_norm_u2, &final_norm_u3);
         calc_u_tilde(solver);
@@ -50,7 +52,9 @@ void IBMSolver_iterate(IBMSolver *solver, int num_time_steps, bool verbose) {
         calc_p_prime(solver, &final_norm_p);
         update_next(solver);
 
+        i++;
         solver->iter++;
+        solver->time = start_time + solver->dt * i;
 
         /* Print iteration results. */
         if (verbose && solver->rank == 0) {
@@ -84,7 +88,7 @@ void IBMSolver_iterate(IBMSolver *solver, int num_time_steps, bool verbose) {
         }
 
         /* Autosave. */
-        if (solver->autosave_period != 0 && solver->iter % solver->autosave_period == 0) {
+        if (solver->autosave_period > 0 && solver->iter % solver->autosave_period == 0) {
             if (solver->rank == 0) {
                 printf("\nAutosave...\n\n");
             }
@@ -203,6 +207,10 @@ static inline void calc_u_star(
     const double (*const N2_prev)[Ny+2][Nz+2] = solver->N2_prev;
     const double (*const N3_prev)[Ny+2][Nz+2] = solver->N3_prev;
 
+    const double xmin = solver->xmin, xmax = solver->xmax;
+    const double ymin = solver->ymin, ymax = solver->ymax;
+    const double zmin = solver->zmin, zmax = solver->zmax;
+
     int hypre_ierr = 0;
 
     /* u1_star. */
@@ -220,7 +228,7 @@ static inline void calc_u_star(
             if (LOCL_TO_GLOB(i) == 1) {
                 switch (solver->bc[3].type) {
                 case BC_VELOCITY_INLET:
-                    *rhs += 2*solver->bc_val[3]*kx_W[i];
+                    *rhs += 2*bc_val(solver, DIR_WEST, xmin, yc[j], zc[k])*kx_W[i];
                     break;
                 default:;
                 }
@@ -230,7 +238,7 @@ static inline void calc_u_star(
             if (LOCL_TO_GLOB(i) == Nx_global) {
                 switch (solver->bc[1].type) {
                 case BC_VELOCITY_INLET:
-                    *rhs += 2*solver->bc_val[1]*kx_E[i];
+                    *rhs += 2*bc_val(solver, DIR_EAST, xmax, yc[j], zc[k])*kx_E[i];
                 default:;
                 }
             }
@@ -316,7 +324,7 @@ static inline void calc_u_star(
             if (j == 1) {
                 switch (solver->bc[2].type) {
                 case BC_VELOCITY_INLET:
-                    *rhs += 2*solver->bc_val[2]*ky_S[j];
+                    *rhs += 2*bc_val(solver, DIR_SOUTH, xc[i], ymin, zc[k])*ky_S[j];
                     break;
                 default:;
                 }
@@ -326,7 +334,7 @@ static inline void calc_u_star(
             if (j == Ny) {
                 switch (solver->bc[0].type) {
                 case BC_VELOCITY_INLET:
-                    *rhs += 2*solver->bc_val[0]*ky_N[j];
+                    *rhs += 2*bc_val(solver, DIR_NORTH, xc[i], ymax, zc[k])*ky_N[j];
                     break;
                 default:;
                 }
@@ -413,7 +421,7 @@ static inline void calc_u_star(
             if (k == 1) {
                 switch (solver->bc[4].type) {
                 case BC_VELOCITY_INLET:
-                    *rhs += 2*solver->bc_val[4]*kz_D[k];
+                    *rhs += 2*bc_val(solver, DIR_DOWN, xc[i], yc[j], zmin)*kz_D[k];
                     break;
                 default:;
                 }
@@ -423,7 +431,7 @@ static inline void calc_u_star(
             if (k == Nz) {
                 switch (solver->bc[5].type) {
                 case BC_VELOCITY_INLET:
-                    *rhs += 2*solver->bc_val[5]*kz_U[k];
+                    *rhs += 2*bc_val(solver, DIR_UP, xc[i], yc[j], zmax)*kz_U[k];
                     break;
                 default:;
                 }
@@ -820,6 +828,10 @@ static inline void calc_U_star(IBMSolver *solver) {
 
     const double (*const p)[Ny+2][Nz+2] = solver->p;
 
+    const double xmin = solver->xmin, xmax = solver->xmax;
+    const double ymin = solver->ymin, ymax = solver->ymax;
+    const double zmin = solver->zmin, zmax = solver->zmax;
+
     FOR_ALL_XSTAG (i, j, k) {
         U1_star[i][j][k] = (u1_tilde[i][j][k]*dx[i+1] + u1_tilde[i+1][j][k]*dx[i]) / (dx[i] + dx[i+1])
             - dt * (p[i+1][j][k] - p[i][j][k]) / (xc[i+1] - xc[i]);
@@ -841,7 +853,7 @@ static inline void calc_U_star(IBMSolver *solver) {
         case BC_VELOCITY_INLET:
             for (int j = 1; j <= Ny; j++) {
                 for (int k = 1; k <= Nz; k++) {
-                    U1_star[0][j][k] = solver->bc_val[3];
+                    U1_star[0][j][k] = bc_val(solver, DIR_WEST, xmin, yc[j], zc[k]);
                 }
             }
             break;
@@ -863,7 +875,7 @@ static inline void calc_U_star(IBMSolver *solver) {
         case BC_VELOCITY_INLET:
             for (int j = 1; j <= Ny; j++) {
                 for (int k = 1; k <= Nz; k++) {
-                    U1_star[Nx][j][k] = solver->bc_val[1];
+                    U1_star[Nx][j][k] = bc_val(solver, DIR_EAST, xmax, yc[j], zc[k]);
                 }
             }
             break;
@@ -884,7 +896,7 @@ static inline void calc_U_star(IBMSolver *solver) {
     case BC_VELOCITY_INLET:
         for (int i = 1; i <= Nx; i++) {
             for (int k = 1; k <= Nz; k++) {
-                U2_star[i][0][k] = solver->bc_val[2];
+                U2_star[i][0][k] = bc_val(solver, DIR_SOUTH, xc[i], ymin, zc[k]);
             }
         }
         break;
@@ -904,7 +916,7 @@ static inline void calc_U_star(IBMSolver *solver) {
     case BC_VELOCITY_INLET:
         for (int i = 1; i <= Nx; i++) {
             for (int k = 1; k <= Nz; k++) {
-                U2_star[i][Ny][k] = solver->bc_val[0];
+                U2_star[i][Ny][k] = bc_val(solver, DIR_NORTH, xc[i], ymax, zc[k]);
             }
         }
         break;
@@ -924,7 +936,7 @@ static inline void calc_U_star(IBMSolver *solver) {
     case BC_VELOCITY_INLET:
         for (int i = 1; i <= Nx; i++) {
             for (int j = 1; j <= Ny; j++) {
-                U3_star[i][j][0] = solver->bc_val[4];
+                U3_star[i][j][0] = bc_val(solver, DIR_DOWN, xc[i], yc[j], zmin);
             }
         }
         break;
@@ -944,7 +956,7 @@ static inline void calc_U_star(IBMSolver *solver) {
     case BC_VELOCITY_INLET:
         for (int i = 1; i <= Nx; i++) {
             for (int j = 1; j <= Ny; j++) {
-                U3_star[i][j][Nz] = solver->bc_val[5];
+                U3_star[i][j][Nz] = bc_val(solver, DIR_UP, xc[i], yc[j], zmax);
             }
         }
         break;
@@ -959,6 +971,7 @@ static inline void calc_U_star(IBMSolver *solver) {
     default:;
     }
 
+    /* U_star between a fluid cell and a ghost cell. */
     FOR_ALL_XSTAG (i, j, k) {
         if ((flag[i][j][k] == FLAG_FLUID && flag[i+1][j][k] == FLAG_GHOST) || (flag[i][j][k] == FLAG_GHOST && flag[i+1][j][k] == FLAG_FLUID)) {
             U1_star[i][j][k] = (u1_star[i][j][k] * dx[i+1] + u1_star[i+1][j][k] * dx[i]) / (dx[i] + dx[i+1]);
@@ -1440,6 +1453,10 @@ static void update_bc(IBMSolver *solver) {
     double (*const u3)[Ny+2][Nz+2] = solver->u3;
     double (*const p)[Ny+2][Nz+2] = solver->p;
 
+    const double xmin = solver->xmin, xmax = solver->xmax;
+    const double ymin = solver->ymin, ymax = solver->ymax;
+    const double zmin = solver->zmin, zmax = solver->zmax;
+
     /* Exchange u_next for boundary processes. */
     if (solver->num_process > 1) {
         if (solver->rank == 0) {
@@ -1477,7 +1494,7 @@ static void update_bc(IBMSolver *solver) {
         case BC_VELOCITY_INLET:
             for (int j = 1; j <= Ny; j++) {
                 for (int k = 1; k <= Nz; k++) {
-                    u1[0][j][k] = 2*solver->bc_val[3] - u1[1][j][k];
+                    u1[0][j][k] = 2*bc_val(solver, DIR_WEST, xmin, yc[j], zc[k]) - u1[1][j][k];
                     u2[0][j][k] = -u2[1][j][k];
                     u3[0][j][k] = -u3[1][j][k];
                 }
@@ -1541,7 +1558,7 @@ static void update_bc(IBMSolver *solver) {
         case BC_VELOCITY_INLET:
             for (int j = 1; j <= Ny; j++) {
                 for (int k = 1; k <= Nz; k++) {
-                    u1[Nx+1][j][k] = 2*solver->bc_val[1] - u1[Nx][j][k];
+                    u1[Nx+1][j][k] = 2*bc_val(solver, DIR_EAST, xmax, yc[j], zc[k]) - u1[Nx][j][k];
                     u2[Nx+1][j][k] = -u2[Nx][j][k];
                     u3[Nx+1][j][k] = -u3[Nx][j][k];
                 }
@@ -1605,7 +1622,7 @@ static void update_bc(IBMSolver *solver) {
         for (int i = 0; i <= Nx+1; i++) {
             for (int k = 1; k <= Nz; k++) {
                 u1[i][0][k] = -u1[i][1][k];
-                u2[i][0][k] = 2*solver->bc_val[2] - u2[i][1][k];
+                u2[i][0][k] = 2*bc_val(solver, DIR_SOUTH, xc[i], ymin, zc[k]) - u2[i][1][k];
                 u3[i][0][k] = -u3[i][1][k];
             }
         }
@@ -1656,7 +1673,7 @@ static void update_bc(IBMSolver *solver) {
         for (int i = 0; i <= Nx+1; i++) {
             for (int k = 1; k <= Nz; k++) {
                 u1[i][Ny+1][k] = -u1[i][Ny][k];
-                u2[i][Ny+1][k] = 2*solver->bc_val[0] - u2[i][Ny][k];
+                u2[i][Ny+1][k] = 2*bc_val(solver, DIR_NORTH, xc[i], ymax, zc[k]) - u2[i][Ny][k];
                 u3[i][Ny+1][k] = -u3[i][Ny][k];
             }
         }
@@ -1708,7 +1725,7 @@ static void update_bc(IBMSolver *solver) {
             for (int j = 0; j <= Ny+1; j++) {
                 u1[i][j][0] = -u1[i][j][1];
                 u2[i][j][0] = -u2[i][j][1];
-                u3[i][j][0] = 2*solver->bc_val[4] - u3[i][j][1];
+                u3[i][j][0] = 2*bc_val(solver, DIR_DOWN, xc[i], yc[j], zmin) - u3[i][j][1];
             }
         }
         break;
@@ -1759,7 +1776,7 @@ static void update_bc(IBMSolver *solver) {
             for (int j = 0; j <= Ny+1; j++) {
                 u1[i][j][Nz+1] = -u1[i][j][Nz];
                 u2[i][j][Nz+1] = -u2[i][j][Nz];
-                u3[i][j][Nz+1] = 2*solver->bc_val[5] - u3[i][j][Nz];
+                u3[i][j][Nz+1] = 2*bc_val(solver, DIR_UP, xc[i], yc[j], zmax) - u3[i][j][Nz];
             }
         }
         break;
@@ -1821,7 +1838,7 @@ static void update_bc(IBMSolver *solver) {
         case BC_VELOCITY_PERIODIC:
             for (int j = 1; j <= Ny; j++) {
                 for (int k = 1; k <= Nz; k++) {
-                    p[0][j][k] = 2*solver->bc_val[3] - p[1][j][k];
+                    p[0][j][k] = 2*bc_val(solver, DIR_WEST, xmin, yc[j], zc[k]) - p[1][j][k];
                 }
             }
             break;
@@ -1858,7 +1875,7 @@ static void update_bc(IBMSolver *solver) {
         case BC_VELOCITY_PERIODIC:
             for (int j = 1; j <= Ny; j++) {
                 for (int k = 1; k <= Nz; k++) {
-                    p[Nx+1][j][k] = 2*solver->bc_val[1] - p[Nx][j][k];
+                    p[Nx+1][j][k] = 2*bc_val(solver, DIR_EAST, xmax, yc[j], zc[k]) - p[Nx][j][k];
                 }
             }
             break;
@@ -1894,7 +1911,7 @@ static void update_bc(IBMSolver *solver) {
     case BC_VELOCITY_PERIODIC:
         for (int i = 0; i <= Nx+1; i++) {
             for (int k = 1; k <= Nz; k++) {
-                p[i][0][k] = 2*solver->bc_val[2] - p[i][1][k];
+                p[i][0][k] = 2*bc_val(solver, DIR_SOUTH, xc[i], ymin, zc[k]) - p[i][1][k];
             }
         }
         break;
@@ -1923,7 +1940,7 @@ static void update_bc(IBMSolver *solver) {
     case BC_VELOCITY_PERIODIC:
         for (int i = 0; i <= Nx+1; i++) {
             for (int k = 1; k <= Nz; k++) {
-                p[i][Ny+1][k] = 2*solver->bc_val[0] - p[i][Ny][k];
+                p[i][Ny+1][k] = 2*bc_val(solver, DIR_NORTH, xc[i], ymax, zc[k]) - p[i][Ny][k];
             }
         }
         break;
@@ -1952,7 +1969,7 @@ static void update_bc(IBMSolver *solver) {
     case BC_VELOCITY_PERIODIC:
         for (int i = 0; i <= Nx+1; i++) {
             for (int j = 0; j <= Ny+1; j++) {
-                p[i][j][0] = 2*solver->bc_val[4] - p[i][j][1];
+                p[i][j][0] = 2*bc_val(solver, DIR_DOWN, xc[i], yc[j], zmin) - p[i][j][1];
             }
         }
         break;
@@ -1981,7 +1998,7 @@ static void update_bc(IBMSolver *solver) {
     case BC_VELOCITY_PERIODIC:
         for (int i = 0; i <= Nx+1; i++) {
             for (int j = 0; j <= Ny+1; j++) {
-                p[i][j][Nz+1] = 2*solver->bc_val[5] - p[i][j][Nz];
+                p[i][j][Nz+1] = 2*bc_val(solver, DIR_UP, xc[i], yc[j], zmax) - p[i][j][Nz];
             }
         }
         break;

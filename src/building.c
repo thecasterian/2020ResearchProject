@@ -23,6 +23,8 @@ double initfunc_u2(double, double, double);
 double initfunc_u3(double, double, double);
 double initfunc_p(double, double, double);
 
+double inlet_vel(double, double, double, double);
+
 int main(int argc, char **argv) {
     /* Number of all processes. */
     int num_process;
@@ -54,7 +56,7 @@ int main(int argc, char **argv) {
     IBMSolver_set_grid(solver, Nx, Ny, Nz, xf, yf, zf);
     IBMSolver_set_params(solver, Re, dt);
 
-    IBMSolver_set_bc(solver, DIR_WEST, BC_VELOCITY_INLET, BC_CONST, 1.);
+    IBMSolver_set_bc(solver, DIR_WEST, BC_VELOCITY_INLET, BC_FUNC, inlet_vel);
     IBMSolver_set_bc(solver, DIR_EAST, BC_PRESSURE_OUTLET, BC_CONST, 0.);
     IBMSolver_set_bc(solver, DIR_SOUTH | DIR_NORTH | DIR_UP, BC_FREE_SLIP_WALL);
     IBMSolver_set_bc(solver, DIR_DOWN, BC_STATIONARY_WALL);
@@ -93,7 +95,7 @@ int main(int argc, char **argv) {
     }
 
     /* Initialize. */
-    if (1) {
+    if (0) {
         IBMSolver_init_flow_func(
             solver,
             initfunc_u1, initfunc_u2, initfunc_u3, initfunc_p
@@ -110,7 +112,7 @@ int main(int argc, char **argv) {
     }
 
     /* Iterate. */
-    IBMSolver_iterate(solver, 10, true);
+    IBMSolver_iterate(solver, 500, true);
 
     /* Export result. */
     IBMSolver_export_results(
@@ -131,7 +133,7 @@ int main(int argc, char **argv) {
 }
 
 double initfunc_u1(double x, double y, double z) {
-    return 1;
+    return pow(z/8, 1./7);
 }
 
 double initfunc_u2(double x, double y, double z) {
@@ -144,4 +146,8 @@ double initfunc_u3(double x, double y, double z) {
 
 double initfunc_p(double x, double y, double z) {
     return 0;
+}
+
+double inlet_vel(double t, double x, double y, double z) {
+    return pow(z/8, 1./7);
 }

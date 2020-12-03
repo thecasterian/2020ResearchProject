@@ -2,7 +2,7 @@
 #define UTILS_H
 
 #include <stdio.h>
-#include <ibm3d.h>
+#include "ibm3d.h"
 
 #define FOR_ALL_CELL(i, j, k) \
     for (int i = 1; i <= Nx; i++) \

@@ -194,6 +194,14 @@ void IBMSolver_set_grid(
         solver->dz[k] = zf[k] - zf[k-1];
         solver->zc[k] = (zf[k] + zf[k-1]) / 2;
     }
+
+    /* Min and max coordinates. */
+    solver->xmin = xf[0];
+    solver->xmax = xf[Nx];
+    solver->ymin = yf[0];
+    solver->ymax = yf[Ny];
+    solver->zmin = zf[0];
+    solver->zmax = zf[Nz];
 }
 
 /**
@@ -224,7 +232,7 @@ void IBMSolver_set_bc(
     IBMSolverBCType type,
     ...
 ) {
-    IBMSolverBCValType val_type;
+    IBMSolverBCValType val_type = BC_CONST;
     double const_value = NAN;
     IBMSolverBCValFunc func = NULL;
     va_list ap;
@@ -333,19 +341,17 @@ void IBMSolver_assemble(IBMSolver *solver) {
     }
 
     /* Ghost cells */
-    dx_global[0]
-        = isperiodic(solver->bc[3].type) ? dx_global[Nx_global] : dx_global[1];
-    dx_global[Nx+1]
-        = isperiodic(solver->bc[1].type) ? dx_global[1] : dx_global[Nx];
+    dx_global[0] = dx_global[1];
+    dx_global[Nx+1] = dx_global[Nx];
     xc_global[0] = xc_global[1] - (dx_global[0] + dx_global[1]) / 2;
     xc_global[Nx_global+1] = xc_global[Nx_global] + (dx_global[Nx_global] + dx_global[Nx_global+1]) / 2;
 
     dx[0] = dx_global[ilower-1];
     dx[Nx+1] = dx_global[iupper+1];
-    dy[0] = isperiodic(solver->bc[2].type) ? dy[Ny] : dy[1];
-    dy[Ny+1] = isperiodic(solver->bc[0].type) ? dy[1] : dy[Ny];
-    dz[0] = isperiodic(solver->bc[4].type) ? dz[Nz] : dz[1];
-    dz[Nz+1] = isperiodic(solver->bc[5].type) ? dz[1] : dz[Nz];
+    dy[0] = dy[1];
+    dy[Ny+1] = dy[Ny];
+    dz[0] = dz[1];
+    dz[Nz+1] = dz[Nz];
 
     xc[0] = xc_global[ilower-1];
     xc[Nx+1] = xc_global[iupper+1];
@@ -399,6 +405,7 @@ void IBMSolver_init_flow_const(
     double (*const p)[Ny+2][Nz+2] = solver->p;
 
     solver->iter = 0;
+    solver->time = 0;
 
     for (int i = 0; i <= Nx+1; i++) {
         for (int j = 0; j <= Ny+1; j++) {
@@ -433,6 +440,7 @@ void IBMSolver_init_flow_file(
     const int Nz = solver->Nz;
 
     solver->iter = 0;
+    solver->time = 0;
 
     FILE *fp_u1 = fopen_check(filename_u1, "rb");
     FILE *fp_u2 = fopen_check(filename_u2, "rb");

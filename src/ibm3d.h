@@ -94,6 +94,8 @@ typedef struct _ibm_solver {
     double *xc, *yc, *zc;
     /* Global cell width and centroid coordinate. */
     double *dx_global, *xc_global;
+    /* Min and max coordinates. */
+    double xmin, xmax, ymin, ymax, zmin, zmax;
 
     /* Derivative coefficients. */
     double *kx_W, *kx_E, *ky_S, *ky_N, *kz_D, *kz_U;
