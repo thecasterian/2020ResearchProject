@@ -1430,7 +1430,7 @@ static void autosave(IBMSolver *solver) {
 
     snprintf(filename, 100, "%s-%05d", solver->autosave_filename, solver->iter);
 
-    IBMSolver_export_netcdf3(solver, filename);
+    IBMSolver_export_result(solver, filename);
 }
 
 static void update_bc(IBMSolver *solver) {

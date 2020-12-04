@@ -6,6 +6,7 @@
 
 #include <string.h>
 #include <stdarg.h>
+#include <netcdf.h>
 
 /* Index of adjacent cells in 3-d cartesian coordinate. Refer the order shown
    below. */
@@ -423,44 +424,173 @@ void IBMSolver_init_flow_const(
  * @brief Initializes flow with data in the given files.
  *
  * @param solver IBMSolver.
- * @param filename_u1 Name of file containing x-velocity data.
- * @param filename_u2 Name of file containing y-velocity data.
- * @param filename_u3 Name of file containing z-velocity data.
- * @param filename_p Name of file containing pressure data.
+ * @param filename Name of file.
  */
 void IBMSolver_init_flow_file(
     IBMSolver *solver,
-    const char *filename_u1,
-    const char *filename_u2,
-    const char *filename_u3,
-    const char *filename_p
+    const char *filename
 ) {
     const int Nx = solver->Nx;
     const int Ny = solver->Ny;
     const int Nz = solver->Nz;
+    const int Nx_global = solver->Nx_global;
 
-    solver->iter = 0;
-    solver->time = 0;
+    double (*const u1)[Ny+2][Nz+2] = solver->u1;
+    double (*const u2)[Ny+2][Nz+2] = solver->u2;
+    double (*const u3)[Ny+2][Nz+2] = solver->u3;
+    double (*const p)[Ny+2][Nz+2] = solver->p;
 
-    FILE *fp_u1 = fopen_check(filename_u1, "rb");
-    FILE *fp_u2 = fopen_check(filename_u2, "rb");
-    FILE *fp_u3 = fopen_check(filename_u3, "rb");
-    FILE *fp_p = fopen_check(filename_p, "rb");
+    struct time_iter {double time; int iter;};
 
-    fseek(fp_u1, sizeof(double)*(solver->ilower-1)*(Ny+2)*(Nz+2), SEEK_SET);
-    fseek(fp_u2, sizeof(double)*(solver->ilower-1)*(Ny+2)*(Nz+2), SEEK_SET);
-    fseek(fp_u3, sizeof(double)*(solver->ilower-1)*(Ny+2)*(Nz+2), SEEK_SET);
-    fseek(fp_p, sizeof(double)*(solver->ilower-1)*(Ny+2)*(Nz+2), SEEK_SET);
+    if (solver->rank == 0) {
+        /* File name with extension. */
+        char filename_ext[100];
 
-    fread(solver->u1, sizeof(double), (Nx+2)*(Ny+2)*(Nz+2), fp_u1);
-    fread(solver->u2, sizeof(double), (Nx+2)*(Ny+2)*(Nz+2), fp_u2);
-    fread(solver->u3, sizeof(double), (Nx+2)*(Ny+2)*(Nz+2), fp_u3);
-    fread(solver->p, sizeof(double), (Nx+2)*(Ny+2)*(Nz+2), fp_p);
+        /* Id of current netCDF file. */
+        int ncid;
+        /* Id of variables. */
+        int time_varid, iter_varid, u_varid, v_varid, w_varid, p_varid;
 
-    fclose(fp_u1);
-    fclose(fp_u2);
-    fclose(fp_u3);
-    fclose(fp_p);
+        /* netCDF function return value. */
+        int stat;
+
+        float (*const u_value)[Ny+2][Nx_global+2] = calloc(Nz+2, sizeof(float [Ny+2][Nx_global+2]));
+        float (*const v_value)[Ny+2][Nx_global+2] = calloc(Nz+2, sizeof(float [Ny+2][Nx_global+2]));
+        float (*const w_value)[Ny+2][Nx_global+2] = calloc(Nz+2, sizeof(float [Ny+2][Nx_global+2]));
+        float (*const p_value)[Ny+2][Nx_global+2] = calloc(Nz+2, sizeof(float [Ny+2][Nx_global+2]));
+
+        double (*const u1_global)[Ny+2][Nz+2] = calloc(Nx_global+2, sizeof(double [Ny+2][Nz+2]));
+        double (*const u2_global)[Ny+2][Nz+2] = calloc(Nx_global+2, sizeof(double [Ny+2][Nz+2]));
+        double (*const u3_global)[Ny+2][Nz+2] = calloc(Nx_global+2, sizeof(double [Ny+2][Nz+2]));
+        double (*const p_global)[Ny+2][Nz+2] = calloc(Nx_global+2, sizeof(double [Ny+2][Nz+2]));
+
+        /* Struct containing time and iter. */
+        struct time_iter time_iter;
+
+        /* Concatenate extension. */
+        snprintf(filename_ext, 100, "%s.nc", filename);
+
+        /* Open file. */
+        stat = nc_open(filename_ext, NC_NOWRITE, &ncid);
+        if (stat != NC_NOERR) {
+            printf("cannot open file %s\n", filename);
+            goto error;
+        }
+
+        /* Get variable id. */
+        stat = nc_inq_varid(ncid, "time", &time_varid);
+        if (stat != NC_NOERR) {
+            printf("varible 'time' not found\n");
+            goto error;
+        }
+        stat = nc_inq_varid(ncid, "iter", &iter_varid);
+        if (stat != NC_NOERR) {
+            printf("variable 'iter' not found\n");
+            goto error;
+        }
+        stat = nc_inq_varid(ncid, "u", &u_varid);
+        if (stat != NC_NOERR) {
+            printf("variable 'u' not found\n");
+            goto error;
+        }
+        stat = nc_inq_varid(ncid, "v", &v_varid);
+        if (stat != NC_NOERR) {
+            printf("variable 'v' not found\n");
+            goto error;
+        }
+        stat = nc_inq_varid(ncid, "w", &w_varid);
+        if (stat != NC_NOERR) {
+            printf("variable 'w' not found\n");
+            goto error;
+        }
+        stat = nc_inq_varid(ncid, "p", &p_varid);
+        if (stat != NC_NOERR) {
+            printf("variable 'p' not found\n");
+            goto error;
+        }
+
+        /* Read values. */
+        nc_get_var_double(ncid, time_varid, &solver->time);
+        nc_get_var_int(ncid, iter_varid, &solver->iter);
+        nc_get_var_float(ncid, u_varid, (float *)u_value);
+        nc_get_var_float(ncid, v_varid, (float *)v_value);
+        nc_get_var_float(ncid, w_varid, (float *)w_value);
+        nc_get_var_float(ncid, p_varid, (float *)p_value);
+
+        /* Close file. */
+        nc_close(ncid);
+
+        /* Convert column-major order to row-major order. */
+        for (int i = 0; i <= Nx_global+1; i++) {
+            for (int j = 0; j <= Ny+1; j++) {
+                for (int k = 0; k <= Nz+1; k++) {
+                    u1_global[i][j][k] = u_value[k][j][i];
+                    u2_global[i][j][k] = v_value[k][j][i];
+                    u3_global[i][j][k] = w_value[k][j][i];
+                    p_global[i][j][k] = p_value[k][j][i];
+                }
+            }
+        }
+
+        free(u_value);
+        free(v_value);
+        free(w_value);
+        free(p_value);
+
+        /* Data to process 0. */
+        memcpy(u1, u1_global, sizeof(double)*(Nx+2)*(Ny+2)*(Nz+2));
+        memcpy(u2, u2_global, sizeof(double)*(Nx+2)*(Ny+2)*(Nz+2));
+        memcpy(u3, u3_global, sizeof(double)*(Nx+2)*(Ny+2)*(Nz+2));
+        memcpy(p, p_global, sizeof(double)*(Nx+2)*(Ny+2)*(Nz+2));
+
+        /* Set time and iter. */
+        time_iter.time = solver->time;
+        time_iter.iter = solver->iter;
+
+        /* Send to other processes. */
+        for (int r = 1; r < solver->num_process; r++) {
+            const int ilower_r = r * Nx_global / solver->num_process + 1;
+            const int iupper_r = (r+1) * Nx_global / solver->num_process;
+            const int Nx_r = iupper_r - ilower_r + 1;
+
+            MPI_Send(u1_global[ilower_r-1], (Nx_r+2)*(Ny+2)*(Nz+2), MPI_DOUBLE, r, 0, MPI_COMM_WORLD);
+            MPI_Send(u2_global[ilower_r-1], (Nx_r+2)*(Ny+2)*(Nz+2), MPI_DOUBLE, r, 1, MPI_COMM_WORLD);
+            MPI_Send(u3_global[ilower_r-1], (Nx_r+2)*(Ny+2)*(Nz+2), MPI_DOUBLE, r, 2, MPI_COMM_WORLD);
+            MPI_Send(p_global[ilower_r-1], (Nx_r+2)*(Ny+2)*(Nz+2), MPI_DOUBLE, r, 3, MPI_COMM_WORLD);
+            MPI_Send(&time_iter, 1, MPI_DOUBLE_INT, r, 4, MPI_COMM_WORLD);
+        }
+
+        free(u1_global);
+        free(u2_global);
+        free(u3_global);
+        free(p_global);
+
+        return;
+
+error:
+        free(u_value);
+        free(v_value);
+        free(w_value);
+        free(p_value);
+        free(u1_global);
+        free(u2_global);
+        free(u3_global);
+        free(p_global);
+    }
+    else {
+        struct time_iter time_iter;
+
+        /* Receive from process 0. */
+        MPI_Recv(u1, (Nx+2)*(Ny+2)*(Nz+2), MPI_DOUBLE, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        MPI_Recv(u2, (Nx+2)*(Ny+2)*(Nz+2), MPI_DOUBLE, 0, 1, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        MPI_Recv(u3, (Nx+2)*(Ny+2)*(Nz+2), MPI_DOUBLE, 0, 2, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        MPI_Recv(p, (Nx+2)*(Ny+2)*(Nz+2), MPI_DOUBLE, 0, 3, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        MPI_Recv(&time_iter, 1, MPI_DOUBLE_INT, 0, 4, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+
+        /* Set time and iter. */
+        solver->time = time_iter.time;
+        solver->iter = time_iter.iter;
+    }
 }
 
 void IBMSolver_init_flow_func(

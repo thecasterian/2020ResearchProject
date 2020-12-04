@@ -8,8 +8,10 @@
 #define Ny 126
 #define Nz 103
 
+#define PATH "/home/jeongukim/data"
+
 const double Re = 500;
-const double dt = 0.005;
+const double dt = 0.01;
 
 const double PI = 3.1415926535897932;
 
@@ -65,7 +67,7 @@ int main(int argc, char **argv) {
 
     IBMSolver_set_linear_solver(solver, SOLVER_BiCGSTAB, PRECOND_AMG, 1e-6);
 
-    IBMSolver_set_autosave(solver, "/home/jeonukim/data/building", 10);
+    IBMSolver_set_autosave(solver, PATH "/building", 0);
 
     IBMSolver_assemble(solver);
 
@@ -88,27 +90,21 @@ int main(int argc, char **argv) {
     }
 
     /* Initialize. */
-    if (1) {
+    if (0) {
         IBMSolver_init_flow_func(
             solver,
             initfunc_u1, initfunc_u2, initfunc_u3, initfunc_p
         );
     }
     else {
-        IBMSolver_init_flow_file(
-            solver,
-            "../data/building_u1.out",
-            "../data/building_u2.out",
-            "../data/building_u3.out",
-            "../data/building_p.out"
-        );
+        IBMSolver_init_flow_file(solver, PATH "/building");
     }
 
     /* Iterate. */
-    IBMSolver_iterate(solver, 20000, true);
+    IBMSolver_iterate(solver, 50, true);
 
     /* Export result. */
-    IBMSolver_export_netcdf3(solver, "/home/jeonukim/data/building");
+    IBMSolver_export_result(solver, PATH "/building");
 
     /* Finalize. */
     IBMSolver_destroy(solver);
