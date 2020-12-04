@@ -11,9 +11,6 @@
 
 static const double PI = 3.141592653589793;
 
-#define max(a, b) ({typeof(a) _a = a; typeof(b) _b = b; _a > _b ? _a : _b;})
-#define min(a, b) ({typeof(a) _a = a; typeof(b) _b = b; _a < _b ? _a : _b;})
-
 /* Vertex of polyhedron. */
 typedef struct _vertex {
     Vector coord;           /* Coordinates. */

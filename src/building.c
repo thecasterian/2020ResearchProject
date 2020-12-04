@@ -65,14 +65,7 @@ int main(int argc, char **argv) {
 
     IBMSolver_set_linear_solver(solver, SOLVER_BiCGSTAB, PRECOND_AMG, 1e-6);
 
-    IBMSolver_set_autosave(
-        solver,
-        "../data/building3_u1",
-        "../data/building3_u2",
-        "../data/building3_u3",
-        "../data/building3_p",
-        0
-    );
+    IBMSolver_set_autosave(solver, "/home/jeonukim/data/building", 10);
 
     IBMSolver_assemble(solver);
 
@@ -95,7 +88,7 @@ int main(int argc, char **argv) {
     }
 
     /* Initialize. */
-    if (0) {
+    if (1) {
         IBMSolver_init_flow_func(
             solver,
             initfunc_u1, initfunc_u2, initfunc_u3, initfunc_p
@@ -104,24 +97,18 @@ int main(int argc, char **argv) {
     else {
         IBMSolver_init_flow_file(
             solver,
-            "../data/building3_u1.out",
-            "../data/building3_u2.out",
-            "../data/building3_u3.out",
-            "../data/building3_p.out"
+            "../data/building_u1.out",
+            "../data/building_u2.out",
+            "../data/building_u3.out",
+            "../data/building_p.out"
         );
     }
 
     /* Iterate. */
-    IBMSolver_iterate(solver, 500, true);
+    IBMSolver_iterate(solver, 20000, true);
 
     /* Export result. */
-    IBMSolver_export_results(
-        solver,
-        "../data/building3_u1",
-        "../data/building3_u2",
-        "../data/building3_u3",
-        "../data/building3_p"
-    );
+    IBMSolver_export_netcdf3(solver, "/home/jeonukim/data/building");
 
     /* Finalize. */
     IBMSolver_destroy(solver);

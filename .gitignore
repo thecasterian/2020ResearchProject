@@ -7,9 +7,6 @@
 *.exe
 !Makefile
 
-# ignore vscode folder
-.vscode
-
 # ignore txt and output file
 *.txt
 *.out
@@ -19,11 +16,6 @@
 *.avi
 *.mp4
 *.vtr
-
-# ignore latex files
-*.aux
-*.log
-*.synctex.gz
 
 # test
 *test*

@@ -152,11 +152,12 @@ typedef struct _ibm_solver {
     double time;
 
     /* Autosave. */
-    const char *autosave_u1, *autosave_u2, *autosave_u3, *autosave_p;
+    const char *autosave_filename;
     int autosave_period;
 } IBMSolver;
 
 #include "ibm3d_setup.h"
 #include "ibm3d_fracstep.h"
+#include "ibm3d_export.h"
 
 #endif

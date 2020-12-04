@@ -21,6 +21,9 @@
         for (int j = 1; j <= Ny; j++) \
             for (int k = 0; k <= Nz; k++)
 
+#define max(a, b) ({typeof(a) _a = a; typeof(b) _b = b; _a > _b ? _a : _b;})
+#define min(a, b) ({typeof(a) _a = a; typeof(b) _b = b; _a < _b ? _a : _b;})
+
 /* Convert local index to global index. */
 #define LOCL_TO_GLOB(i) ((i) + solver->ilower - 1)
 /* Convert global index to local index. */

@@ -8,7 +8,7 @@ ifeq ($(UNAME), Darwin)
 	LDLIBS = -lm -lglib-2.0 -L/usr/local/Cellar/glib/2.66.0/lib -L/usr/local/opt/gettext/lib -lintl
 else
 	INCLUDE = -I/usr/local/include -I/usr/include/glib-2.0
-	LDLIBS = -lm -lglib-2.0
+	LDLIBS = -lm -lglib-2.0 -lnetcdf
 endif
 
 HYPRE = /usr/local/lib/libHYPRE.a
@@ -25,13 +25,16 @@ clean:
 $(TARGET): $(TARGET).c ibm3d.a geo3d.o
 	$(CC) $(INCLUDE) $^ $(HYPRE) -o $@ $(LDLIBS) $(CFLAGS)
 
-ibm3d.a: ibm3d_setup.o ibm3d_fracstep.o utils.o
+ibm3d.a: ibm3d_setup.o ibm3d_fracstep.o ibm3d_export.o utils.o
 	ar rcs $@ $^
 
 ibm3d_setup.o: ibm3d_setup.c ibm3d_setup.h
 	$(CC) $(INCLUDE) -c $< $(LDLIBS) $(CFLAGS)
 
 ibm3d_fracstep.o: ibm3d_fracstep.c ibm3d_fracstep.h
+	$(CC) $(INCLUDE) -c $< $(LDLIBS) $(CFLAGS)
+
+ibm3d_export.o: ibm3d_export.c ibm3d_export.h
 	$(CC) $(INCLUDE) -c $< $(LDLIBS) $(CFLAGS)
 
 geo3d.o: geo3d.c geo3d.h

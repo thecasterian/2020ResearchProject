@@ -342,7 +342,7 @@ void IBMSolver_assemble(IBMSolver *solver) {
 
     /* Ghost cells */
     dx_global[0] = dx_global[1];
-    dx_global[Nx+1] = dx_global[Nx];
+    dx_global[Nx_global+1] = dx_global[Nx_global];
     xc_global[0] = xc_global[1] - (dx_global[0] + dx_global[1]) / 2;
     xc_global[Nx_global+1] = xc_global[Nx_global] + (dx_global[Nx_global] + dx_global[Nx_global+1]) / 2;
 
@@ -493,166 +493,11 @@ void IBMSolver_init_flow_func(
 
 void IBMSolver_set_autosave(
     IBMSolver *solver,
-    const char *filename_u1,
-    const char *filename_u2,
-    const char *filename_u3,
-    const char *filename_p,
+    const char *filename,
     int period
 ) {
-    solver->autosave_u1 = filename_u1;
-    solver->autosave_u2 = filename_u2;
-    solver->autosave_u3 = filename_u3;
-    solver->autosave_p = filename_p;
+    solver->autosave_filename = filename;
     solver->autosave_period = period;
-}
-
-void IBMSolver_export_results(
-    IBMSolver *solver,
-    const char *filename_u1,
-    const char *filename_u2,
-    const char *filename_u3,
-    const char *filename_p
-) {
-    const int Nx = solver->Nx;
-    const int Ny = solver->Ny;
-    const int Nz = solver->Nz;
-    const int Nx_global = solver->Nx_global;
-
-    const double (*const u1)[Ny+2][Nz+2] = solver->u1;
-    const double (*const u2)[Ny+2][Nz+2] = solver->u2;
-    const double (*const u3)[Ny+2][Nz+2] = solver->u3;
-    const double (*const p)[Ny+2][Nz+2] = solver->p;
-
-    char ext_u1[100], ext_u2[100], ext_u3[100], ext_p[100];
-
-    /* Concatenate extension. */
-    snprintf(ext_u1, 100, "%s.out", filename_u1);
-    snprintf(ext_u2, 100, "%s.out", filename_u2);
-    snprintf(ext_u3, 100, "%s.out", filename_u3);
-    snprintf(ext_p, 100, "%s.out", filename_p);
-
-    if (solver->rank == 0) {
-        double (*const u1_global)[Ny+2][Nz+2] = calloc(Nx_global+2, sizeof(double [Ny+2][Nz+2]));
-        double (*const u2_global)[Ny+2][Nz+2] = calloc(Nx_global+2, sizeof(double [Ny+2][Nz+2]));
-        double (*const u3_global)[Ny+2][Nz+2] = calloc(Nx_global+2, sizeof(double [Ny+2][Nz+2]));
-        double (*const p_global)[Ny+2][Nz+2] = calloc(Nx_global+2, sizeof(double [Ny+2][Nz+2]));
-
-        memcpy(u1_global, u1, sizeof(double)*(Nx+2)*(Ny+2)*(Nz+2));
-        memcpy(u2_global, u2, sizeof(double)*(Nx+2)*(Ny+2)*(Nz+2));
-        memcpy(u3_global, u3, sizeof(double)*(Nx+2)*(Ny+2)*(Nz+2));
-        memcpy(p_global, p, sizeof(double)*(Nx+2)*(Ny+2)*(Nz+2));
-
-        /* Receive from other processes. */
-        for (int r = 1; r < solver->num_process; r++) {
-            const int ilower_r = r * Nx_global / solver->num_process + 1;
-            const int iupper_r = (r+1) * Nx_global / solver->num_process;
-            const int Nx_r = iupper_r - ilower_r + 1;
-
-            MPI_Recv(u1_global[ilower_r], (Nx_r+1)*(Ny+2)*(Nz+2), MPI_DOUBLE, r, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-            MPI_Recv(u2_global[ilower_r], (Nx_r+1)*(Ny+2)*(Nz+2), MPI_DOUBLE, r, 1, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-            MPI_Recv(u3_global[ilower_r], (Nx_r+1)*(Ny+2)*(Nz+2), MPI_DOUBLE, r, 2, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-            MPI_Recv(p_global[ilower_r], (Nx_r+1)*(Ny+2)*(Nz+2), MPI_DOUBLE, r, 3, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-        }
-
-        FILE *fp_u1 = fopen_check(ext_u1, "wb");
-        FILE *fp_u2 = fopen_check(ext_u2, "wb");
-        FILE *fp_u3 = fopen_check(ext_u3, "wb");
-        FILE *fp_p = fopen_check(ext_p, "wb");
-
-        fwrite(u1_global, sizeof(double), (Nx_global+2)*(Ny+2)*(Nz+2), fp_u1);
-        fwrite(u2_global, sizeof(double), (Nx_global+2)*(Ny+2)*(Nz+2), fp_u2);
-        fwrite(u3_global, sizeof(double), (Nx_global+2)*(Ny+2)*(Nz+2), fp_u3);
-        fwrite(p_global, sizeof(double), (Nx_global+2)*(Ny+2)*(Nz+2), fp_p);
-
-        fclose(fp_u1);
-        fclose(fp_u2);
-        fclose(fp_u3);
-        fclose(fp_p);
-
-        free(u1_global);
-        free(u2_global);
-        free(u3_global);
-        free(p_global);
-    }
-    else {
-        /* Send to process 0. */
-        MPI_Send(u1[1], (Nx+1)*(Ny+2)*(Nz+2), MPI_DOUBLE, 0, 0, MPI_COMM_WORLD);
-        MPI_Send(u2[1], (Nx+1)*(Ny+2)*(Nz+2), MPI_DOUBLE, 0, 1, MPI_COMM_WORLD);
-        MPI_Send(u3[1], (Nx+1)*(Ny+2)*(Nz+2), MPI_DOUBLE, 0, 2, MPI_COMM_WORLD);
-        MPI_Send(p[1], (Nx+1)*(Ny+2)*(Nz+2), MPI_DOUBLE, 0, 3, MPI_COMM_WORLD);
-    }
-}
-
-void IBMSolver_export_lvset(IBMSolver *solver, const char *filename) {
-    const int Nx = solver->Nx;
-    const int Ny = solver->Ny;
-    const int Nz = solver->Nz;
-    const int Nx_global = solver->Nx_global;
-
-    const double (*const lvset)[Ny+2][Nz+2] = solver->lvset;
-
-    if (solver->rank == 0) {
-        double (*const lvset_global)[Ny+2][Nz+2] = calloc(Nx_global+2, sizeof(double [Ny+2][Nz+2]));
-
-        memcpy(lvset_global, lvset, sizeof(double)*(Nx+2)*(Ny+2)*(Nz+2));
-
-        /* Receive from other processes. */
-        for (int r = 1; r < solver->num_process; r++) {
-            const int ilower_r = r * Nx_global / solver->num_process + 1;
-            const int iupper_r = (r+1) * Nx_global / solver->num_process;
-            const int Nx_r = iupper_r - ilower_r + 1;
-
-            MPI_Recv(lvset_global[ilower_r], (Nx_r+1)*(Ny+2)*(Nz+2), MPI_DOUBLE, r, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-        }
-
-        FILE *fp = fopen_check(filename, "wb");
-
-        fwrite(lvset_global, sizeof(double), (Nx_global+2)*(Ny+2)*(Nz+2), fp);
-
-        fclose(fp);
-
-        free(lvset_global);
-    }
-    else {
-        /* Send to process 0. */
-        MPI_Send(lvset[1], (Nx+1)*(Ny+2)*(Nz+2), MPI_DOUBLE, 0, 0, MPI_COMM_WORLD);
-    }
-}
-
-void IBMSolver_export_flag(IBMSolver *solver, const char *filename) {
-    const int Nx = solver->Nx;
-    const int Ny = solver->Ny;
-    const int Nz = solver->Nz;
-    const int Nx_global = solver->Nx_global;
-
-    const int (*const flag)[Ny+2][Nz+2] = solver->flag;
-
-    if (solver->rank == 0) {
-        int (*const flag_global)[Ny+2][Nz+2] = calloc(Nx_global+2, sizeof(int [Ny+2][Nz+2]));
-
-        memcpy(flag_global, flag, sizeof(int)*(Nx+2)*(Ny+2)*(Nz+2));
-
-        /* Receive from other processes. */
-        for (int r = 1; r < solver->num_process; r++) {
-            const int ilower_r = r * Nx_global / solver->num_process + 1;
-            const int iupper_r = (r+1) * Nx_global / solver->num_process;
-            const int Nx_r = iupper_r - ilower_r + 1;
-
-            MPI_Recv(flag_global[ilower_r], (Nx_r+1)*(Ny+2)*(Nz+2), MPI_INT, r, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-        }
-
-        FILE *fp = fopen_check(filename, "wb");
-
-        fwrite(flag_global, sizeof(int), (Nx_global+2)*(Ny+2)*(Nz+2), fp);
-
-        fclose(fp);
-
-        free(flag_global);
-    }
-    else {
-        /* Send to process 0. */
-        MPI_Send(flag[1], (Nx+1)*(Ny+2)*(Nz+2), MPI_INT, 0, 0, MPI_COMM_WORLD);
-    }
 }
 
 static void alloc_arrays(IBMSolver *solver) {

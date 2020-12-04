@@ -18,17 +18,12 @@ void IBMSolver_set_params(IBMSolver *, const double, const double);
 void IBMSolver_set_bc(IBMSolver *, IBMSolverDirection, IBMSolverBCType, ...);
 void IBMSolver_set_obstacle(IBMSolver *, Polyhedron *);
 void IBMSolver_set_linear_solver(IBMSolver *, IBMSolverLinearSolverType, IBMSolverPrecondType, const double);
+void IBMSolver_set_autosave(IBMSolver *, const char *, int);
 
 void IBMSolver_assemble(IBMSolver *);
 
 void IBMSolver_init_flow_const(IBMSolver *, const double, const double, const double, const double);
 void IBMSolver_init_flow_file(IBMSolver *, const char *, const char *, const char *, const char *);
 void IBMSolver_init_flow_func(IBMSolver *, IBMSolverInitFunc, IBMSolverInitFunc, IBMSolverInitFunc, IBMSolverInitFunc);
-
-void IBMSolver_set_autosave(IBMSolver *, const char *, const char *, const char *, const char *, int);
-void IBMSolver_export_results(IBMSolver *, const char *, const char *, const char *, const char *);
-
-void IBMSolver_export_lvset(IBMSolver *, const char *);
-void IBMSolver_export_flag(IBMSolver *, const char *);
 
 #endif

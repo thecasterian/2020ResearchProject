@@ -1426,16 +1426,11 @@ static void interp_stag_vel(IBMSolver *solver) {
 }
 
 static void autosave(IBMSolver *solver) {
-    char filename_u1[100], filename_u2[100], filename_u3[100], filename_p[100];
+    char filename[100];
 
-    snprintf(filename_u1, 100, "%s-%05d", solver->autosave_u1, solver->iter);
-    snprintf(filename_u2, 100, "%s-%05d", solver->autosave_u2, solver->iter);
-    snprintf(filename_u3, 100, "%s-%05d", solver->autosave_u3, solver->iter);
-    snprintf(filename_p, 100, "%s-%05d", solver->autosave_p, solver->iter);
+    snprintf(filename, 100, "%s-%05d", solver->autosave_filename, solver->iter);
 
-    IBMSolver_export_results(
-        solver, filename_u1, filename_u2, filename_u3, filename_p
-    );
+    IBMSolver_export_netcdf3(solver, filename);
 }
 
 static void update_bc(IBMSolver *solver) {
