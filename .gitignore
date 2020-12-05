@@ -16,6 +16,7 @@
 *.avi
 *.mp4
 *.vtr
+*.nc
 
 # test
 *test*

@@ -7,6 +7,8 @@ const int Nx = 192;
 const int Ny = 160;
 const int Nz = 129;
 
+#define PATH "/home/jeonukim/data/channel"
+
 const double Re = 3300;
 const double dt = 0.005;
 
@@ -54,24 +56,18 @@ int main(int argc, char **argv) {
     IBMSolver_set_grid(solver, Nx, Ny, Nz, xf, yf, zf);
     IBMSolver_set_params(solver, Re, dt);
 
-    IBMSolver_set_bc(solver, DIR_WEST, BC_VELOCITY_PERIODIC, 8*PI/Re);
-    IBMSolver_set_bc(solver, DIR_EAST, BC_VELOCITY_PERIODIC, 0);
-    IBMSolver_set_bc(solver, DIR_SOUTH | DIR_NORTH, BC_ALL_PERIODIC, 0);
-    IBMSolver_set_bc(solver, DIR_DOWN | DIR_UP, BC_STATIONARY_WALL, 0);
+    IBMSolver_set_bc(solver, DIR_WEST, BC_VELOCITY_PERIODIC, BC_CONST, 8*PI/Re);
+    IBMSolver_set_bc(solver, DIR_EAST, BC_VELOCITY_PERIODIC, BC_CONST, 0.);
+    IBMSolver_set_bc(solver, DIR_SOUTH | DIR_NORTH, BC_ALL_PERIODIC);
+    IBMSolver_set_bc(solver, DIR_DOWN | DIR_UP, BC_STATIONARY_WALL);
 
     IBMSolver_set_obstacle(solver, NULL);
 
     IBMSolver_set_linear_solver(solver, SOLVER_BiCGSTAB, PRECOND_AMG, 1e-6);
 
-    IBMSolver_set_autosave(
-        solver,
-        "data/channel_u1", "data/channel_u2", "data/channel_u3", "data/channel_p",
-        200
-    );
+    IBMSolver_set_autosave(solver, PATH "/channel", 100);
 
     IBMSolver_assemble(solver);
-
-    printf("%d: %d, %d\n", rank, solver->ilower, solver->iupper);
 
     /* Initialize. */
     if (1) {
@@ -81,20 +77,11 @@ int main(int argc, char **argv) {
         );
     }
     else {
-        IBMSolver_init_flow_file(
-            solver,
-            "data/channel_u1.out", "data/channel_u2.out", "data/channel_u3.out", "data/channel_p.out"
-        );
+        IBMSolver_init_flow_file(solver, PATH "/channel-00600");
     }
 
     /* Iterate. */
-    IBMSolver_iterate(solver, 10, true);
-
-    /* Export result. */
-    IBMSolver_export_results(
-        solver,
-        "data/channel_u1", "data/channel_u2", "data/channel_u3", "data/channel_p"
-    );
+    IBMSolver_iterate(solver, 20000, true);
 
     /* Finalize. */
     IBMSolver_destroy(solver);

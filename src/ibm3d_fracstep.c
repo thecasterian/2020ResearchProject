@@ -23,6 +23,13 @@ static void update_ghost(IBMSolver *);
 
 static double bc_val(IBMSolver *, IBMSolverDirection, double, double, double);
 
+/**
+ * @brief Iterate solver for \p num_time_steps steps.
+ *
+ * @param solver IBMSolver.
+ * @param num_time_steps Number of time steps to iterate.
+ * @param verbose Print iteration info? (T/F)
+ */
 void IBMSolver_iterate(IBMSolver *solver, int num_time_steps, bool verbose) {
     struct timespec t_start, t_end;
     long elapsed_time, hour, min, sec;

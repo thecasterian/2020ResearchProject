@@ -594,14 +594,7 @@ void IBMSolver_init_flow_file(
         return;
 
 error:
-        free(u_value);
-        free(v_value);
-        free(w_value);
-        free(p_value);
-        free(u1_global);
-        free(u2_global);
-        free(u3_global);
-        free(p_global);
+        MPI_Abort(MPI_COMM_WORLD, -1);
     }
     else {
         struct time_iter time_iter;
@@ -741,8 +734,13 @@ static void calc_lvset_flag(IBMSolver *solver) {
 
     /* No obstacle: every cell is fluid cell. */
     if (solver->poly == NULL) {
-        FOR_ALL_CELL (i, j, k) {
-            flag[i][j][k] = FLAG_FLUID;
+        for (int i = 0; i <= Nx+1; i++) {
+            for (int j = 0; j <= Ny+1; j++) {
+                for (int k = 0; k <= Nz+1; k++) {
+                    lvset[i][j][k] = .5;
+                    flag[i][j][k] = FLAG_FLUID;
+                }
+            }
         }
         return;
     }
@@ -934,7 +932,7 @@ static void build_hypre(IBMSolver *solver) {
         HYPRE_BoomerAMGSetAggNumLevels(solver->precond_p, 1);
         HYPRE_BoomerAMGSetNumSweeps(solver->precond_p, 1);
         HYPRE_BoomerAMGSetRelaxType(solver->precond_p, 6);
-        HYPRE_BoomerAMGSetPrintLevel(solver->precond_p, 1);
+        // HYPRE_BoomerAMGSetPrintLevel(solver->precond_p, 1);
 
         switch (solver->linear_solver_type) {
         case SOLVER_PCG:
