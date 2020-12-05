@@ -12,6 +12,8 @@
 
 typedef void *arr3d;
 typedef void *arr4d;
+
+/* (x, y, z) => init value. */
 typedef double (*IBMSolverInitFunc)(double, double, double);
 
 typedef enum _linear_solver_type {

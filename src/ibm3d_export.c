@@ -7,6 +7,12 @@
 
 #include "utils.h"
 
+/**
+ * @brief Exports result in netCDF CF format.
+ *
+ * @param solver IBMSolver.
+ * @param filename File name without an extension.
+ */
 void IBMSolver_export_result(IBMSolver *solver, const char *filename) {
     const int Nx = solver->Nx;
     const int Ny = solver->Ny;
@@ -33,11 +39,11 @@ void IBMSolver_export_result(IBMSolver *solver, const char *filename) {
         int dimids[4];
 
         /* Value of variables. */
-        double time_value[1] = {solver->time};
-        double *const x_value = solver->xc_global;
-        double *const y_value = solver->yc;
-        double *const z_value = solver->zc;
-        int iter_value[1] = {solver->iter};
+        const double time_value[1] = {solver->time};
+        const double *const x_value = solver->xc_global;
+        const double *const y_value = solver->yc;
+        const double *const z_value = solver->zc;
+        const int iter_value[1] = {solver->iter};
 
         float (*const u_value)[Ny+2][Nx_global+2] = calloc(Nz+2, sizeof(float [Ny+2][Nx_global+2]));
         float (*const v_value)[Ny+2][Nx_global+2] = calloc(Nz+2, sizeof(float [Ny+2][Nx_global+2]));
@@ -211,53 +217,54 @@ error:
     }
 }
 
-void IBMSolver_export_lvset(IBMSolver *solver, const char *filename) {
+/**
+ * @brief Export level set function and flag in netCDF CF format for debug
+ *        purpose.
+ *
+ * @param solver IBMSolver.
+ * @param filename File name without an extension.
+ */
+void IBMSolver_export_lvset_flag(IBMSolver *solver, const char *filename) {
     const int Nx = solver->Nx;
     const int Ny = solver->Ny;
     const int Nz = solver->Nz;
     const int Nx_global = solver->Nx_global;
 
     const double (*const lvset)[Ny+2][Nz+2] = solver->lvset;
-
-    if (solver->rank == 0) {
-        double (*const lvset_global)[Ny+2][Nz+2] = calloc(Nx_global+2, sizeof(double [Ny+2][Nz+2]));
-
-        memcpy(lvset_global, lvset, sizeof(double)*(Nx+2)*(Ny+2)*(Nz+2));
-
-        /* Receive from other processes. */
-        for (int r = 1; r < solver->num_process; r++) {
-            const int ilower_r = r * Nx_global / solver->num_process + 1;
-            const int iupper_r = (r+1) * Nx_global / solver->num_process;
-            const int Nx_r = iupper_r - ilower_r + 1;
-
-            MPI_Recv(lvset_global[ilower_r], (Nx_r+1)*(Ny+2)*(Nz+2), MPI_DOUBLE, r, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-        }
-
-        FILE *fp = fopen_check(filename, "wb");
-
-        fwrite(lvset_global, sizeof(double), (Nx_global+2)*(Ny+2)*(Nz+2), fp);
-
-        fclose(fp);
-
-        free(lvset_global);
-    }
-    else {
-        /* Send to process 0. */
-        MPI_Send(lvset[1], (Nx+1)*(Ny+2)*(Nz+2), MPI_DOUBLE, 0, 0, MPI_COMM_WORLD);
-    }
-}
-
-void IBMSolver_export_flag(IBMSolver *solver, const char *filename) {
-    const int Nx = solver->Nx;
-    const int Ny = solver->Ny;
-    const int Nz = solver->Nz;
-    const int Nx_global = solver->Nx_global;
-
     const int (*const flag)[Ny+2][Nz+2] = solver->flag;
 
     if (solver->rank == 0) {
+        /* File name with extension. */
+        char filename_ext[100];
+
+        /* Id of current netCDF file. */
+        int ncid;
+        /* Id of dimensions. */
+        int x_dimid, y_dimid, z_dimid;
+        /* Id of variables. */
+        int x_varid, y_varid, z_varid, lvset_varid, flag_varid;
+        /* Array of dimension ids. */
+        int dimids[3];
+
+        /* Value of variables. */
+        const double *const x_value = solver->xc_global;
+        const double *const y_value = solver->yc;
+        const double *const z_value = solver->zc;
+
+        float (*const lvset_value)[Ny+2][Nx_global+2] = calloc(Nz+2, sizeof(float [Ny+2][Nx_global+2]));
+        signed char (*const flag_value)[Ny+2][Nx_global+2] = calloc(Nz+2, sizeof(signed char [Ny+2][Nx_global+2]));
+
+        double (*const lvset_global)[Ny+2][Nz+2] = calloc(Nx_global+2, sizeof(double [Ny+2][Nz+2]));
         int (*const flag_global)[Ny+2][Nz+2] = calloc(Nx_global+2, sizeof(int [Ny+2][Nz+2]));
 
+        /* netCDF function return value. */
+        int stat;
+
+        /* Concatenate extension. */
+        snprintf(filename_ext, 100, "%s.nc", filename);
+
+        /* Data from process 0. */
+        memcpy(lvset_global, lvset, sizeof(double)*(Nx+2)*(Ny+2)*(Nz+2));
         memcpy(flag_global, flag, sizeof(int)*(Nx+2)*(Ny+2)*(Nz+2));
 
         /* Receive from other processes. */
@@ -266,19 +273,73 @@ void IBMSolver_export_flag(IBMSolver *solver, const char *filename) {
             const int iupper_r = (r+1) * Nx_global / solver->num_process;
             const int Nx_r = iupper_r - ilower_r + 1;
 
-            MPI_Recv(flag_global[ilower_r], (Nx_r+1)*(Ny+2)*(Nz+2), MPI_INT, r, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            MPI_Recv(lvset_global[ilower_r], (Nx_r+1)*(Ny+2)*(Nz+2), MPI_DOUBLE, r, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            MPI_Recv(flag_global[ilower_r], (Nx_r+1)*(Ny+2)*(Nz+2), MPI_INT, r, 1, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
         }
 
-        FILE *fp = fopen_check(filename, "wb");
+        /* Convert row-major order to column-major order. */
+        for (int i = 0; i <= Nx_global+1; i++) {
+            for (int j = 0; j <= Ny+1; j++) {
+                for (int k = 0; k <= Nz+1; k++) {
+                    lvset_value[k][j][i] = lvset_global[i][j][k];
+                    flag_value[k][j][i] = flag_global[i][j][k];
+                }
+            }
+        }
 
-        fwrite(flag_global, sizeof(int), (Nx_global+2)*(Ny+2)*(Nz+2), fp);
-
-        fclose(fp);
-
+        free(lvset_global);
         free(flag_global);
+
+        /* Create file. */
+        stat = nc_create(filename_ext, NC_CLOBBER, &ncid);
+        if (stat != NC_NOERR) {
+            fprintf(stderr, "error: cannot open file %s\n", filename_ext);
+            goto error;
+        }
+
+        /* Define dimensions. */
+        nc_def_dim(ncid, "x", Nx_global+2, &x_dimid);
+        nc_def_dim(ncid, "y", Ny+2, &y_dimid);
+        nc_def_dim(ncid, "z", Nz+2, &z_dimid);
+
+        /* Define variables. */
+        nc_def_var(ncid, "x", NC_DOUBLE, 1, &x_dimid, &x_varid);
+        nc_put_att_text(ncid, x_varid, "axis", 1, "X");
+        nc_put_att_text(ncid, x_varid, "units", 6, "meters");
+
+        nc_def_var(ncid, "y", NC_DOUBLE, 1, &y_dimid, &y_varid);
+        nc_put_att_text(ncid, y_varid, "axis", 1, "Y");
+        nc_put_att_text(ncid, y_varid, "units", 6, "meters");
+
+        nc_def_var(ncid, "z", NC_DOUBLE, 1, &z_dimid, &z_varid);
+        nc_put_att_text(ncid, z_varid, "axis", 1, "Z");
+        nc_put_att_text(ncid, z_varid, "units", 6, "meters");
+
+        dimids[0] = z_dimid;
+        dimids[1] = y_dimid;
+        dimids[2] = x_dimid;
+
+        nc_def_var(ncid, "lvset", NC_FLOAT, 3, dimids, &lvset_varid);
+        nc_def_var(ncid, "flag", NC_BYTE, 3, dimids, &flag_varid);
+
+        /* End of definitions. */
+        nc_enddef(ncid);
+
+        /* Write values. */
+        nc_put_var_double(ncid, x_varid, x_value);
+        nc_put_var_double(ncid, y_varid, y_value);
+        nc_put_var_double(ncid, z_varid, z_value);
+
+        nc_put_var_float(ncid, lvset_varid, (float *)lvset_value);
+        nc_put_var_schar(ncid, flag_varid, (signed char *)flag_value);
+
+error:
+        free(lvset_value);
+        free(flag_value);
     }
     else {
         /* Send to process 0. */
-        MPI_Send(flag[1], (Nx+1)*(Ny+2)*(Nz+2), MPI_INT, 0, 0, MPI_COMM_WORLD);
+        MPI_Send(lvset[1], (Nx+1)*(Ny+2)*(Nz+2), MPI_DOUBLE, 0, 0, MPI_COMM_WORLD);
+        MPI_Send(flag[1], (Nx+1)*(Ny+2)*(Nz+2), MPI_INT, 0, 1, MPI_COMM_WORLD);
     }
 }

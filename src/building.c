@@ -71,6 +71,8 @@ int main(int argc, char **argv) {
 
     IBMSolver_assemble(solver);
 
+    IBMSolver_export_lvset_flag(solver, PATH "/lvset_flag");
+
     /* Print statistics and problem info. */
     if (rank == 1) {
         /* Mesh statistics */

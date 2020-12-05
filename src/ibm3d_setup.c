@@ -41,8 +41,8 @@ static bool isperiodic(IBMSolverBCType);
  * @brief Makes new IBMSolver. It is dynamically allocated, so its memory must
  *        be freed using IBMSolver_destroy().
  *
- * @param[in] num_process Number of all MPI process in MPI_COMM_WORLD.
- * @param[in] rank Rank of current process in MPI_COMM_WORLD.
+ * @param num_process Number of all MPI process in MPI_COMM_WORLD.
+ * @param rank Rank of current process in MPI_COMM_WORLD.
  *
  * @return New IBMSolver.
  */
@@ -77,7 +77,7 @@ IBMSolver *IBMSolver_new(const int num_process, const int rank) {
 /**
  * @brief Destroys IBMSolver, freeing all its memory in use.
  *
- * @param[in] solver IBMSolver to destroy.
+ * @param solver IBMSolver to destroy.
  */
 void IBMSolver_destroy(IBMSolver *solver) {
     free(solver->dx); free(solver->dy); free(solver->dz);
@@ -146,7 +146,7 @@ void IBMSolver_destroy(IBMSolver *solver) {
 }
 
 /**
- * @brief Sets grid informations in IBMSolver.
+ * @brief Sets grid informations of the calculation domain.
  *
  * @param solver IBMSolver.
  * @param Nx Number of cells in x-direction.
@@ -221,7 +221,12 @@ void IBMSolver_set_params(IBMSolver *solver, const double Re, const double dt) {
 /**
  * @brief Sets boundary condition of 6 cell boundaries in IBMSolver. Multiple
  *        boundary directions can be provided at once using bitwise-or operator
- *        (|), e.g., DIR_WEST | DIR_EAST.
+ *        (|), e.g., DIR_WEST | DIR_EAST. Some boundary types require boundary
+ *        value informations. It can be provided as a constant or a function.
+ *        For the first case, two additional arguments BC_CONST and the constant
+ *        value required. For the second case, two additional arguments BC_FUNC
+ *        and the function required. The function takes four arguments t, x, y,
+ *        and z in turn and returns the boundary value.
  *
  * @param solver IBMSolver.
  * @param direction Direction of boundary.
@@ -301,8 +306,29 @@ void IBMSolver_set_linear_solver(
 }
 
 /**
+ * @brief Sets autosave file name and period. \p solver automatically exports
+ *        the result in netCDF CF format every \p period iterations. Actual
+ *        name of an autosaved file is \p filename followed by iteration number
+ *        and extension. Non-positive value for \p period disables the autosave.
+ *        If the autosave is not set manually, \p period is 0, i.e., autosave
+ *        is disabled.
+ *
+ * @param solver IBMSolver.
+ * @param filename Autosave file name without iteration nubmer and extension.
+ * @param period Autosave period.
+ */
+void IBMSolver_set_autosave(
+    IBMSolver *solver,
+    const char *filename,
+    int period
+) {
+    solver->autosave_filename = filename;
+    solver->autosave_period = period;
+}
+
+/**
  * @brief Assembles IBMSolver. Must be called after all IBMSolver_set_XXX()
- *        functions are called.
+ *        functions are called. Collective.
  *
  * @param solver IBMSolver.
  */
@@ -421,10 +447,10 @@ void IBMSolver_init_flow_const(
 }
 
 /**
- * @brief Initializes flow with data in the given files.
+ * @brief Initializes flow with data in the given netCDF CF file. Collective.
  *
  * @param solver IBMSolver.
- * @param filename Name of file.
+ * @param filename File name without an extension.
  */
 void IBMSolver_init_flow_file(
     IBMSolver *solver,
@@ -593,6 +619,17 @@ error:
     }
 }
 
+/**
+ * @brief Initializes flow with functions. Each function takes three arguments
+ *        x, y, and z in turn and returns the value of u1, u2, u3, or p for each
+ *        point.
+ *
+ * @param solver IBMSolver.
+ * @param initfunc_u1 Initialization function for u1.
+ * @param initfunc_u2 Initialization function for u2.
+ * @param initfunc_u3 Initialization function for u3.
+ * @param initfunc_p Initialization function for p.
+ */
 void IBMSolver_init_flow_func(
     IBMSolver *solver,
     IBMSolverInitFunc initfunc_u1,
@@ -619,15 +656,6 @@ void IBMSolver_init_flow_func(
         u3[i][j][k] = initfunc_u3(xc[i], yc[j], zc[k]);
         p[i][j][k] = initfunc_p(xc[i], yc[j], zc[k]);
     }
-}
-
-void IBMSolver_set_autosave(
-    IBMSolver *solver,
-    const char *filename,
-    int period
-) {
-    solver->autosave_filename = filename;
-    solver->autosave_period = period;
 }
 
 static void alloc_arrays(IBMSolver *solver) {

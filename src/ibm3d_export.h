@@ -5,7 +5,6 @@
 
 void IBMSolver_export_result(IBMSolver *, const char *);
 
-void IBMSolver_export_lvset(IBMSolver *, const char *);
-void IBMSolver_export_flag(IBMSolver *, const char *);
+void IBMSolver_export_lvset_flag(IBMSolver *, const char *);
 
 #endif
