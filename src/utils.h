@@ -4,6 +4,11 @@
 #include <stdio.h>
 #include "ibm3d.h"
 
+/* Access to an element of an 1d coallocated array. */
+#define ce1(a, i) ((a)[(i+2)])
+/* Access to an element of an 3d coallocated grid. */
+#define ce3(a, i, j, k) ((a)[(Ny+4)*(Nz+4)*((i)+2) + (Nz+4)*((j)+2) + (k)+2])
+
 #define FOR_ALL_CELL(i, j, k) \
     for (int i = 1; i <= Nx; i++) \
         for (int j = 1; j <= Ny; j++) \

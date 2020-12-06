@@ -46,14 +46,34 @@ static bool isperiodic(IBMSolverBCType);
  *
  * @return New IBMSolver.
  */
-IBMSolver *IBMSolver_new(const int num_process, const int rank) {
+IBMSolver *IBMSolver_new(
+    const int num_process, const int rank,
+    const int Px, const int Py, const int Pz
+) {
     IBMSolver *solver = calloc(1, sizeof(IBMSolver));
+
+    if (rank < 0 || rank > num_process) {
+        printf("Invalid rank: %d\n", rank);
+        MPI_Abort(MPI_COMM_WORLD, -1);
+    }
+    if (Px * Py * Pz != num_process && rank == 0) {
+        printf("Number of processes does not match\n");
+        MPI_Abort(MPI_COMM_WORLD, -1);
+    }
 
     solver->num_process = num_process;
     solver->rank = rank;
+    solver->Px = Px;
+    solver->Py = Py;
+    solver->Pz = Pz;
+    solver->ri = rank / (Py * Pz);
+    solver->rj = rank % (Py * Pz) / Pz;
+    solver->rk = rank % Pz;
 
     solver->dx = solver->dy = solver->dz = NULL;
     solver->xc = solver->yc = solver->zc = NULL;
+    solver->dx_global = solver->dy_global = solver->dz_global = NULL;
+    solver->xc_global = solver->yc_global = solver->zc_global = NULL;
     solver->flag = NULL;
     solver->lvset = NULL;
     solver->u1 = solver->u1_next = solver->u1_star = solver->u1_tilde = NULL;
@@ -66,7 +86,6 @@ IBMSolver *IBMSolver_new(const int num_process, const int rank) {
     solver->N1 = solver->N1_prev = NULL;
     solver->N2 = solver->N2_prev = NULL;
     solver->N3 = solver->N3_prev = NULL;
-    solver->vel_2nd_halo_lower = solver->vel_2nd_halo_upper = NULL;
     solver->kx_W = solver->kx_E = NULL;
     solver->ky_S = solver->ky_N = NULL;
     solver->kz_D = solver->kz_U = NULL;
@@ -82,7 +101,8 @@ IBMSolver *IBMSolver_new(const int num_process, const int rank) {
 void IBMSolver_destroy(IBMSolver *solver) {
     free(solver->dx); free(solver->dy); free(solver->dz);
     free(solver->xc); free(solver->yc); free(solver->zc);
-    free(solver->dx_global); free(solver->xc_global);
+    free(solver->dx_global); free(solver->dy_global); free(solver->dz_global);
+    free(solver->xc_global); free(solver->yc_global); free(solver->zc_global);
 
     free(solver->flag); free(solver->lvset);
 
@@ -161,48 +181,64 @@ void IBMSolver_destroy(IBMSolver *solver) {
  */
 void IBMSolver_set_grid(
     IBMSolver *solver,
-    const int Nx, const int Ny, const int Nz,
+    const int Nx_global, const int Ny_global, const int Nz_global,
     const double *restrict xf,
     const double *restrict yf,
     const double *restrict zf
 ) {
-    solver->Nx_global = Nx;
-    solver->Ny = Ny;
-    solver->Nz = Nz;
+    solver->Nx_global = Nx_global;
+    solver->Ny_global = Ny_global;
+    solver->Nz_global = Nz_global;
 
-    solver->ilower = solver->rank * Nx / solver->num_process + 1;
-    solver->iupper = (solver->rank+1) * Nx / solver->num_process;
+    solver->ilower = solver->ri * Nx_global / solver->Px;
+    solver->jlower = solver->rj * Ny_global / solver->Py;
+    solver->klower = solver->rk * Nz_global / solver->Pz;
+
+    solver->iupper = (solver->ri+1) * Nx_global / solver->Px - 1;
+    solver->jupper = (solver->rj+1) * Ny_global / solver->Py - 1;
+    solver->kupper = (solver->rk+1) * Nz_global / solver->Pz - 1;
+
     solver->Nx = solver->iupper - solver->ilower + 1;
+    solver->Ny = solver->jupper - solver->jlower + 1;
+    solver->Nz = solver->kupper - solver->klower + 1;
 
     /* Allocate arrays. */
     alloc_arrays(solver);
 
     /* Cell widths and centroid coordinates. */
-    for (int i = 1; i <= solver->Nx_global; i++) {
-        solver->dx_global[i] = xf[i] - xf[i-1];
-        solver->xc_global[i] = (xf[i] + xf[i-1]) / 2;
+    for (int i = 0; i <= Nx_global; i++) {
+        ce1(solver->dx_global, i) = xf[i+1] - xf[i];
+        ce1(solver->xc_global, i) = (xf[i+1] + xf[i]) / 2;
+    }
+    for (int j = 0; j <= Ny_global; j++) {
+        ce1(solver->dy_global, j) = yf[j+1] - yf[j];
+        ce1(solver->yc_global, j) = (yf[j+1] + yf[j]) / 2;
+    }
+    for (int k = 0; k <= Nz_global; k++) {
+        ce1(solver->dz_global, k) = zf[k+1] - zf[k];
+        ce1(solver->zc_global, k) = (zf[k+1] + zf[k]) / 2;
     }
 
-    for (int i = 1; i <= solver->Nx; i++) {
-        solver->dx[i] = xf[LOCL_TO_GLOB(i)] - xf[LOCL_TO_GLOB(i)-1];
-        solver->xc[i] = (xf[LOCL_TO_GLOB(i)] + xf[LOCL_TO_GLOB(i)-1]) / 2;
+    for (int i = 0; i <= solver->Nx; i++) {
+        ce1(solver->dx, i) = ce1(solver->dx_global, i + solver->ilower);
+        ce1(solver->xc, i) = ce1(solver->xc_global, i + solver->ilower);
     }
-    for (int j = 1; j <= Ny; j++) {
-        solver->dy[j] = yf[j] - yf[j-1];
-        solver->yc[j] = (yf[j] + yf[j-1]) / 2;
+    for (int j = 0; j <= solver->Ny; j++) {
+        ce1(solver->dy, j) = ce1(solver->dy_global, j + solver->jlower);
+        ce1(solver->yc, j) = ce1(solver->yc_global, j + solver->jlower);
     }
-    for (int k = 1; k <= Nz; k++) {
-        solver->dz[k] = zf[k] - zf[k-1];
-        solver->zc[k] = (zf[k] + zf[k-1]) / 2;
+    for (int k = 0; k <= solver->Nz; k++) {
+        ce1(solver->dz, k) = ce1(solver->dz_global, k + solver->klower);
+        ce1(solver->zc, k) = ce1(solver->zc_global, k + solver->klower);
     }
 
     /* Min and max coordinates. */
     solver->xmin = xf[0];
-    solver->xmax = xf[Nx];
+    solver->xmax = xf[Nx_global];
     solver->ymin = yf[0];
-    solver->ymax = yf[Ny];
+    solver->ymax = yf[Ny_global];
     solver->zmin = zf[0];
-    solver->zmax = zf[Nz];
+    solver->zmax = zf[Nz_global];
 }
 
 /**
@@ -337,15 +373,16 @@ void IBMSolver_assemble(IBMSolver *solver) {
     const int Ny = solver->Ny;
     const int Nz = solver->Nz;
     const int Nx_global = solver->Nx_global;
-
-    const int ilower = solver->ilower;
-    const int iupper = solver->iupper;
-
-    const double Re = solver->Re;
-    const double dt = solver->dt;
+    const int Ny_global = solver->Ny_global;
+    const int Nz_global = solver->Nz_global;
 
     double *const dx_global = solver->dx_global;
+    double *const dy_global = solver->dy_global;
+    double *const dz_global = solver->dz_global;
+
     double *const xc_global = solver->xc_global;
+    double *const yc_global = solver->yc_global;
+    double *const zc_global = solver->zc_global;
 
     double *const dx = solver->dx;
     double *const dy = solver->dy;
@@ -368,37 +405,102 @@ void IBMSolver_assemble(IBMSolver *solver) {
     }
 
     /* Ghost cells */
-    dx_global[0] = dx_global[1];
-    dx_global[Nx_global+1] = dx_global[Nx_global];
-    xc_global[0] = xc_global[1] - (dx_global[0] + dx_global[1]) / 2;
-    xc_global[Nx_global+1] = xc_global[Nx_global] + (dx_global[Nx_global] + dx_global[Nx_global+1]) / 2;
+    ce1(dx_global, -1) = isperiodic(solver->bc[3].type)
+        ? ce1(dx_global, Nx_global-1)
+        : ce1(dx_global, 0);
+    ce1(dx_global, -2) = isperiodic(solver->bc[3].type)
+        ? ce1(dx_global, Nx_global-2)
+        : ce1(dx_global, 1);
+    ce1(dx_global, Nx_global) = isperiodic(solver->bc[1].type)
+        ? ce1(dx_global, 0)
+        : ce1(dx_global, Nx_global-1);
+    ce1(dx_global, Nx_global+1) = isperiodic(solver->bc[1].type)
+        ? ce1(dx_global, 1)
+        : ce1(dx_global, Nx_global-2);
 
-    dx[0] = dx_global[ilower-1];
-    dx[Nx+1] = dx_global[iupper+1];
-    dy[0] = dy[1];
-    dy[Ny+1] = dy[Ny];
-    dz[0] = dz[1];
-    dz[Nz+1] = dz[Nz];
+    ce1(dy_global, -1) = isperiodic(solver->bc[2].type)
+        ? ce1(dy_global, Ny_global-1)
+        : ce1(dy_global, 0);
+    ce1(dy_global, -2) = isperiodic(solver->bc[2].type)
+        ? ce1(dy_global, Ny_global-2)
+        : ce1(dy_global, 1);
+    ce1(dy_global, Ny_global) = isperiodic(solver->bc[0].type)
+        ? ce1(dy_global, 0)
+        : ce1(dy_global, Ny_global-1);
+    ce1(dy_global, Ny_global+1) = isperiodic(solver->bc[0].type)
+        ? ce1(dy_global, 1)
+        : ce1(dy_global, Ny_global-2);
 
-    xc[0] = xc_global[ilower-1];
-    xc[Nx+1] = xc_global[iupper+1];
-    yc[0] = yc[1] - (dy[0] + dy[1]) / 2;
-    yc[Ny+1] = yc[Ny] + (dy[Ny] + dy[Ny+1]) / 2;
-    zc[0] = zc[1] - (dz[0] + dz[1]) / 2;
-    zc[Nz+1] = zc[Nz] + (dz[Nz] + dz[Nz+1]) / 2;
+    ce1(dz_global, -1) = isperiodic(solver->bc[4].type)
+        ? ce1(dz_global, Nz_global-1)
+        : ce1(dz_global, 0);
+    ce1(dz_global, -2) = isperiodic(solver->bc[4].type)
+        ? ce1(dz_global, Nz_global-2)
+        : ce1(dz_global, 1);
+    ce1(dz_global, Nz_global) = isperiodic(solver->bc[5].type)
+        ? ce1(dz_global, 0)
+        : ce1(dz_global, Nz_global-1);
+    ce1(dz_global, Nz_global+1) = isperiodic(solver->bc[5].type)
+        ? ce1(dz_global, 1)
+        : ce1(dz_global, Nz_global-2);
+
+    ce1(xc_global, -1) = ce1(xc_global, 0) - (ce1(dx_global, -1) + ce1(dx_global, 0)) / 2;
+    ce1(xc_global, -2) = ce1(xc_global, -1) - (ce1(dx_global, -2) + ce1(dx_global, -1)) / 2;
+    ce1(xc_global, Nx_global+1) = ce1(xc_global, Nx_global) + (ce1(dx_global, Nx_global-1) + ce1(dx_global, Nx_global)) / 2;
+    ce1(xc_global, Nx_global+2) = ce1(xc_global, Nx_global+1) + (ce1(dx_global, Nx_global) + ce1(dx_global, Nx_global+1)) / 2;
+
+    ce1(yc_global, -1) = ce1(yc_global, 0) - (ce1(dy_global, -1) + ce1(dy_global, 0)) / 2;
+    ce1(yc_global, -2) = ce1(yc_global, -1) - (ce1(dy_global, -2) + ce1(dy_global, -1)) / 2;
+    ce1(yc_global, Ny_global+1) = ce1(yc_global, Ny_global) + (ce1(dy_global, Ny_global-1) + ce1(dy_global, Ny_global)) / 2;
+    ce1(yc_global, Ny_global+2) = ce1(yc_global, Ny_global+1) + (ce1(dy_global, Ny_global) + ce1(dy_global, Ny_global+1)) / 2;
+
+    ce1(zc_global, -1) = ce1(zc_global, 0) - (ce1(dz_global, -1) + ce1(dz_global, 0)) / 2;
+    ce1(zc_global, -2) = ce1(zc_global, -1) - (ce1(dz_global, -2) + ce1(dz_global, -1)) / 2;
+    ce1(zc_global, Nz_global+1) = ce1(zc_global, Nz_global) + (ce1(dz_global, Nz_global-1) + ce1(dz_global, Nz_global)) / 2;
+    ce1(zc_global, Nz_global+2) = ce1(zc_global, Nz_global+1) + (ce1(dz_global, Nz_global) + ce1(dz_global, Nz_global+1)) / 2;
+
+    ce1(dx, -1) = ce1(dx_global, solver->ilower-1);
+    ce1(dx, -2) = ce1(dx_global, solver->ilower-2);
+    ce1(dx, Nx) = ce1(dx_global, solver->ilower+Nx);
+    ce1(dx, Nx+1) = ce1(dx_global, solver->ilower+Nx+1);
+
+    ce1(dy, -1) = ce1(dy_global, solver->jlower-1);
+    ce1(dy, -2) = ce1(dy_global, solver->jlower-2);
+    ce1(dy, Ny) = ce1(dy_global, solver->jlower+Ny);
+    ce1(dy, Ny+1) = ce1(dy_global, solver->jlower+Ny+1);
+
+    ce1(dz, -1) = ce1(dz_global, solver->klower-1);
+    ce1(dz, -2) = ce1(dz_global, solver->klower-2);
+    ce1(dz, Nz) = ce1(dz_global, solver->klower+Nz);
+    ce1(dz, Nz+1) = ce1(dz_global, solver->klower+Nz+1);
+
+    ce1(xc, -1) = ce1(xc_global, solver->ilower-1);
+    ce1(xc, -2) = ce1(xc_global, solver->ilower-2);
+    ce1(xc, Nx) = ce1(xc_global, solver->ilower+Nx);
+    ce1(xc, Nx+1) = ce1(xc_global, solver->ilower+Nx+1);
+
+    ce1(yc, -1) = ce1(yc_global, solver->jlower-1);
+    ce1(yc, -2) = ce1(yc_global, solver->jlower-2);
+    ce1(yc, Ny) = ce1(yc_global, solver->jlower+Ny);
+    ce1(yc, Ny+1) = ce1(yc_global, solver->jlower+Ny+1);
+
+    ce1(zc, -1) = ce1(zc_global, solver->klower-1);
+    ce1(zc, -2) = ce1(zc_global, solver->klower-2);
+    ce1(zc, Nz) = ce1(zc_global, solver->klower+Nz);
+    ce1(zc, Nz+1) = ce1(zc_global, solver->klower+Nz+1);
 
     /* Calculate second order derivative coefficients */
-    for (int i = 1; i <= Nx; i++) {
-        solver->kx_W[i] = dt / (2*Re * (xc[i] - xc[i-1])*dx[i]);
-        solver->kx_E[i] = dt / (2*Re * (xc[i+1] - xc[i])*dx[i]);
+    for (int i = 0; i < Nx; i++) {
+        ce1(solver->kx_W, i) = solver->dt / (2*solver->Re * (ce1(xc, i) - ce1(xc, i-1))*ce1(dx, i));
+        ce1(solver->kx_E, i) = solver->dt / (2*solver->Re * (ce1(xc, i+1) - ce1(xc, i))*ce1(dx, i));
     }
-    for (int j = 1; j <= Ny; j++) {
-        solver->ky_S[j] = dt / (2*Re * (yc[j] - yc[j-1])*dy[j]);
-        solver->ky_N[j] = dt / (2*Re * (yc[j+1] - yc[j])*dy[j]);
+    for (int j = 0; j < Ny; j++) {
+        ce1(solver->ky_S, j) = solver->dt / (2*solver->Re * (ce1(yc, j) - ce1(yc, j-1))*ce1(dy, j));
+        ce1(solver->ky_N, j) = solver->dt / (2*solver->Re * (ce1(yc, j+1) - ce1(yc, j))*ce1(dy, j));
     }
-    for (int k = 1; k <= Nz; k++) {
-        solver->kz_D[k] = dt / (2*Re * (zc[k] - zc[k-1])*dz[k]);
-        solver->kz_U[k] = dt / (2*Re * (zc[k+1] - zc[k])*dz[k]);
+    for (int k = 0; k < Nz; k++) {
+        ce1(solver->kz_D, k) = solver->dt / (2*solver->Re * (ce1(zc, k) - ce1(zc, k-1))*ce1(dz, k));
+        ce1(solver->kz_U, k) = solver->dt / (2*solver->Re * (ce1(zc, k+1) - ce1(zc, k))*ce1(dz, k));
     }
 
     /* Calculate level set function and flag. */
@@ -610,6 +712,13 @@ error:
         solver->time = time_iter.time;
         solver->iter = time_iter.iter;
     }
+
+    srand(0);
+    FOR_ALL_CELL (i, j, k) {
+        u1[i][j][k] += (double)rand() / RAND_MAX * 0.02 - 0.01;
+        u2[i][j][k] += (double)rand() / RAND_MAX * 0.02 - 0.01;
+        u3[i][j][k] += (double)rand() / RAND_MAX * 0.02 - 0.01;
+    }
 }
 
 /**
@@ -656,72 +765,72 @@ static void alloc_arrays(IBMSolver *solver) {
     const int Ny = solver->Ny;
     const int Nz = solver->Nz;
     const int Nx_global = solver->Nx_global;
+    const int Ny_global = solver->Ny_global;
+    const int Nz_global = solver->Nz_global;
 
-    /* dx_global and xc_global contain global info. Others contain only local
-       info. */
+    solver->dx = calloc(Nx+4, sizeof(double));
+    solver->dy = calloc(Ny+4, sizeof(double));
+    solver->dz = calloc(Nz+4, sizeof(double));
+    solver->xc = calloc(Nx+4, sizeof(double));
+    solver->yc = calloc(Ny+4, sizeof(double));
+    solver->zc = calloc(Nz+4, sizeof(double));
 
-    solver->dx = calloc(Nx+2, sizeof(double));
-    solver->dy = calloc(Ny+2, sizeof(double));
-    solver->dz = calloc(Nz+2, sizeof(double));
-    solver->xc = calloc(Nx+2, sizeof(double));
-    solver->yc = calloc(Ny+2, sizeof(double));
-    solver->zc = calloc(Nz+2, sizeof(double));
+    solver->dx_global = calloc(Nx_global+4, sizeof(double));
+    solver->dy_global = calloc(Ny_global+4, sizeof(double));
+    solver->dz_global = calloc(Nz_global+4, sizeof(double));
+    solver->xc_global = calloc(Nx_global+4, sizeof(double));
+    solver->yc_global = calloc(Ny_global+4, sizeof(double));
+    solver->zc_global = calloc(Nz_global+4, sizeof(double));
 
-    solver->dx_global = calloc(Nx_global+2, sizeof(double));
-    solver->xc_global = calloc(Nx_global+2, sizeof(double));
+    solver->flag = calloc((Nx+4)*(Ny+4)*(Nz+4), sizeof(int));
+    solver->lvset = calloc((Nx+4)*(Ny+4)*(Nz+4), sizeof(double));
 
-    solver->flag = calloc(Nx+2, sizeof(int [Ny+2][Nz+2]));
-    solver->lvset = calloc(Nx+2, sizeof(double [Ny+2][Nz+2]));
+    solver->u1       = calloc((Nx+4)*(Ny+4)*(Nz+4), sizeof(double));
+    solver->u1_next  = calloc((Nx+4)*(Ny+4)*(Nz+4), sizeof(double));
+    solver->u1_star  = calloc((Nx+4)*(Ny+4)*(Nz+4), sizeof(double));
+    solver->u1_tilde = calloc((Nx+4)*(Ny+4)*(Nz+4), sizeof(double));
+    solver->u2       = calloc((Nx+4)*(Ny+4)*(Nz+4), sizeof(double));
+    solver->u2_next  = calloc((Nx+4)*(Ny+4)*(Nz+4), sizeof(double));
+    solver->u2_star  = calloc((Nx+4)*(Ny+4)*(Nz+4), sizeof(double));
+    solver->u2_tilde = calloc((Nx+4)*(Ny+4)*(Nz+4), sizeof(double));
+    solver->u3       = calloc((Nx+4)*(Ny+4)*(Nz+4), sizeof(double));
+    solver->u3_next  = calloc((Nx+4)*(Ny+4)*(Nz+4), sizeof(double));
+    solver->u3_star  = calloc((Nx+4)*(Ny+4)*(Nz+4), sizeof(double));
+    solver->u3_tilde = calloc((Nx+4)*(Ny+4)*(Nz+4), sizeof(double));
 
-    solver->u1       = calloc(Nx+2, sizeof(double [Ny+2][Nz+2]));
-    solver->u1_next  = calloc(Nx+2, sizeof(double [Ny+2][Nz+2]));
-    solver->u1_star  = calloc(Nx+2, sizeof(double [Ny+2][Nz+2]));
-    solver->u1_tilde = calloc(Nx+2, sizeof(double [Ny+2][Nz+2]));
-    solver->u2       = calloc(Nx+2, sizeof(double [Ny+2][Nz+2]));
-    solver->u2_next  = calloc(Nx+2, sizeof(double [Ny+2][Nz+2]));
-    solver->u2_star  = calloc(Nx+2, sizeof(double [Ny+2][Nz+2]));
-    solver->u2_tilde = calloc(Nx+2, sizeof(double [Ny+2][Nz+2]));
-    solver->u3       = calloc(Nx+2, sizeof(double [Ny+2][Nz+2]));
-    solver->u3_next  = calloc(Nx+2, sizeof(double [Ny+2][Nz+2]));
-    solver->u3_star  = calloc(Nx+2, sizeof(double [Ny+2][Nz+2]));
-    solver->u3_tilde = calloc(Nx+2, sizeof(double [Ny+2][Nz+2]));
+    solver->U1      = calloc((Nx+3)*(Ny+4)*(Nz+4), sizeof(double));
+    solver->U1_next = calloc((Nx+3)*(Ny+4)*(Nz+4), sizeof(double));
+    solver->U1_star = calloc((Nx+3)*(Ny+4)*(Nz+4), sizeof(double));
+    solver->U2      = calloc((Nx+4)*(Ny+3)*(Nz+4), sizeof(double));
+    solver->U2_next = calloc((Nx+4)*(Ny+3)*(Nz+4), sizeof(double));
+    solver->U2_star = calloc((Nx+4)*(Ny+3)*(Nz+4), sizeof(double));
+    solver->U3      = calloc((Nx+4)*(Ny+4)*(Nz+3), sizeof(double));
+    solver->U3_next = calloc((Nx+4)*(Ny+4)*(Nz+3), sizeof(double));
+    solver->U3_star = calloc((Nx+4)*(Ny+4)*(Nz+3), sizeof(double));
 
-    solver->U1      = calloc(Nx+1, sizeof(double [Ny+2][Nz+2]));
-    solver->U1_next = calloc(Nx+1, sizeof(double [Ny+2][Nz+2]));
-    solver->U1_star = calloc(Nx+1, sizeof(double [Ny+2][Nz+2]));
-    solver->U2      = calloc(Nx+2, sizeof(double [Ny+1][Nz+2]));
-    solver->U2_next = calloc(Nx+2, sizeof(double [Ny+1][Nz+2]));
-    solver->U2_star = calloc(Nx+2, sizeof(double [Ny+1][Nz+2]));
-    solver->U3      = calloc(Nx+2, sizeof(double [Ny+2][Nz+1]));
-    solver->U3_next = calloc(Nx+2, sizeof(double [Ny+2][Nz+1]));
-    solver->U3_star = calloc(Nx+2, sizeof(double [Ny+2][Nz+1]));
+    solver->p       = calloc((Nx+4)*(Ny+4)*(Nz+4), sizeof(double));
+    solver->p_next  = calloc((Nx+4)*(Ny+4)*(Nz+4), sizeof(double));
+    solver->p_prime = calloc((Nx+4)*(Ny+4)*(Nz+4), sizeof(double));
 
-    solver->p       = calloc(Nx+2, sizeof(double [Ny+2][Nz+2]));
-    solver->p_next  = calloc(Nx+2, sizeof(double [Ny+2][Nz+2]));
-    solver->p_prime = calloc(Nx+2, sizeof(double [Ny+2][Nz+2]));
+    solver->N1      = calloc((Nx+4)*(Ny+4)*(Nz+4), sizeof(double));
+    solver->N1_prev = calloc((Nx+4)*(Ny+4)*(Nz+4), sizeof(double));
+    solver->N2      = calloc((Nx+4)*(Ny+4)*(Nz+4), sizeof(double));
+    solver->N2_prev = calloc((Nx+4)*(Ny+4)*(Nz+4), sizeof(double));
+    solver->N3      = calloc((Nx+4)*(Ny+4)*(Nz+4), sizeof(double));
+    solver->N3_prev = calloc((Nx+4)*(Ny+4)*(Nz+4), sizeof(double));
 
-    solver->N1      = calloc(Nx+2, sizeof(double [Ny+2][Nz+2]));
-    solver->N1_prev = calloc(Nx+2, sizeof(double [Ny+2][Nz+2]));
-    solver->N2      = calloc(Nx+2, sizeof(double [Ny+2][Nz+2]));
-    solver->N2_prev = calloc(Nx+2, sizeof(double [Ny+2][Nz+2]));
-    solver->N3      = calloc(Nx+2, sizeof(double [Ny+2][Nz+2]));
-    solver->N3_prev = calloc(Nx+2, sizeof(double [Ny+2][Nz+2]));
+    solver->kx_W = calloc(Nx+4, sizeof(double));
+    solver->kx_E = calloc(Nx+4, sizeof(double));
+    solver->ky_S = calloc(Ny+4, sizeof(double));
+    solver->ky_N = calloc(Ny+4, sizeof(double));
+    solver->kz_D = calloc(Nz+4, sizeof(double));
+    solver->kz_U = calloc(Nz+4, sizeof(double));
 
-    if (solver->rank != 0) {
-        solver->vel_2nd_halo_lower = calloc(3, sizeof(double [Ny+2][Nz+2]));
-    }
-    if (solver->rank != solver->num_process - 1) {
-        solver->vel_2nd_halo_upper = calloc(3, sizeof(double [Ny+2][Nz+2]));
-    }
+    solver->p_coeffsum = calloc((Nx+4)*(Ny+4)*(Nz+4), sizeof(double));
 
-    solver->kx_W = calloc(Nx+2, sizeof(double));
-    solver->kx_E = calloc(Nx+2, sizeof(double));
-    solver->ky_S = calloc(Ny+2, sizeof(double));
-    solver->ky_N = calloc(Ny+2, sizeof(double));
-    solver->kz_D = calloc(Nz+2, sizeof(double));
-    solver->kz_U = calloc(Nz+2, sizeof(double));
-
-    solver->p_coeffsum = calloc(Nx+2, sizeof(double [Ny+2][Nz+2]));
+    solver->x_exchg = calloc(2*(Ny+4)*(Nz+4), sizeof(double));
+    solver->y_exchg = calloc(2*(Nx+4)*(Nz+4), sizeof(double));
+    solver->z_exchg = calloc(2*(Nx+4)*(Ny+4), sizeof(double));
 }
 
 static void calc_lvset_flag(IBMSolver *solver) {
@@ -729,16 +838,19 @@ static void calc_lvset_flag(IBMSolver *solver) {
     const int Ny = solver->Ny;
     const int Nz = solver->Nz;
 
-    int (*flag)[Ny+2][Nz+2] = solver->flag;
-    double (*const lvset)[Ny+2][Nz+2] = solver->lvset;
+    int *x_exchg = calloc((Ny+4)*(Nz+4), sizeof(int));
+    int *y_exchg = calloc((Nx+4)*(Nz+4), sizeof(int));
+    int *z_exchg = calloc((Nx+4)*(Ny+4), sizeof(int));
+
+    int cnt;
 
     /* No obstacle: every cell is fluid cell. */
     if (solver->poly == NULL) {
-        for (int i = 0; i <= Nx+1; i++) {
-            for (int j = 0; j <= Ny+1; j++) {
-                for (int k = 0; k <= Nz+1; k++) {
-                    lvset[i][j][k] = .5;
-                    flag[i][j][k] = FLAG_FLUID;
+        for (int i = -2; i < Nx+2; i++) {
+            for (int j = -2; j < Ny+2; j++) {
+                for (int k = -2; k < Nz+2; k++) {
+                    ce3(solver->lvset, i, j, k) = .5;
+                    ce3(solver->flag, i, j, k) = FLAG_FLUID;
                 }
             }
         }
@@ -748,9 +860,9 @@ static void calc_lvset_flag(IBMSolver *solver) {
     /* Calculate level set function. */
     Polyhedron_cpt(
         solver->poly,
-        Nx+2, Ny+2, Nz+2,
+        Nx+4, Ny+4, Nz+4,
         solver->xc, solver->yc, solver->zc,
-        lvset, .5
+        solver->lvset, .5
     );
 
     /* Calculate flag.
@@ -758,41 +870,131 @@ static void calc_lvset_flag(IBMSolver *solver) {
        * Level set function if negative and at
          least one adjacent cell is fluid cell.   => ghost cell
        * Otherwise.                               => solid cell */
-    for (int i = 0; i <= Nx+1; i++) {
-        for (int j = 0; j <= Ny+1; j++) {
-            for (int k = 0; k <= Nz+1; k++) {
-                if (lvset[i][j][k] >= 0) {
-                    flag[i][j][k] = FLAG_FLUID;
+    for (int i = -2; i < Nx+2; i++) {
+        for (int j = -2; j < Ny+2; j++) {
+            for (int k = -2; k < Nz+2; k++) {
+                if (ce3(solver->lvset, i, j, k) >= 0) {
+                    ce3(solver->flag, i, j, k) = FLAG_FLUID;
                 }
                 else {
                     bool is_ghost_cell = false;
                     for (int l = 0; l < 6; l++) {
                         int ni = i + adj[l][0], nj = j + adj[l][1], nk = k + adj[l][2];
-                        if (ni < 0 || ni > Nx+1 || nj < 0 || nj > Ny+1 || nk < 0 || nk > Nz+1) {
+                        if (ni < -2 || ni > Nx+2 || nj < -2 || nj > Ny+2 || nk < -2 || nk > Nz+2) {
                             continue;
                         }
-                        is_ghost_cell = is_ghost_cell || (lvset[ni][nj][nk] >= 0);
+                        is_ghost_cell = is_ghost_cell || ce3(solver->lvset, ni, nj, nk) >= 0;
                     }
-                    flag[i][j][k] = is_ghost_cell ? FLAG_GHOST : FLAG_SOLID;
+                    ce3(solver->flag, i, j, k) = is_ghost_cell ? FLAG_GHOST : FLAG_SOLID;
                 }
             }
         }
     }
 
     /* Exchange flag between the adjacent processes. */
-    if (solver->rank != solver->num_process-1) {
-        /* Send to next process. */
-        MPI_Send(flag[Nx], (Ny+2)*(Nz+2), MPI_INT, solver->rank+1, 0, MPI_COMM_WORLD);
+    if (solver->ri != solver->Px-1) {
+        cnt = 0;
+        for (int j = -2; j < Ny+2; j++) {
+            for (int k = -2; k < Nz+2; k++) {
+                x_exchg[cnt++] = ce3(solver->flag, Nx-2, j, k);
+            }
+        }
+        MPI_Send(x_exchg, (Ny+4)*(Nz+4), MPI_INT, solver->rank + solver->Py*solver->Pz, 0, MPI_COMM_WORLD);
     }
-    if (solver->rank != 0) {
-        /* Receive from previous process. */
-        MPI_Recv(flag[0], (Ny+2)*(Nz+2), MPI_INT, solver->rank-1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-        /* Send to previous process. */
-        MPI_Send(flag[1], (Ny+2)*(Nz+2), MPI_INT, solver->rank-1, 0, MPI_COMM_WORLD);
+    else if (solver->ri != 0) {
+        MPI_Recv(x_exchg, (Ny+4)*(Nz+4), MPI_INT, solver->rank - solver->Py*solver->Pz, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        cnt = 0;
+        for (int j = -2; j < Ny+2; j++) {
+            for (int k = -2; k < Nz+2; k++) {
+                ce3(solver->flag, -2, j, k) = x_exchg[cnt++];
+            }
+        }
+        cnt = 0;
+        for (int j = -2; j < Ny+2; j++) {
+            for (int k = -2; k < Nz+2; k++) {
+                x_exchg[cnt++] = ce3(solver->flag, 1, j, k);
+            }
+        }
+        MPI_Send(x_exchg, (Ny+4)*(Nz+4), MPI_INT, solver->rank - solver->Py*solver->Pz, 0, MPI_COMM_WORLD);
     }
-    if (solver->rank != solver->num_process-1) {
-        /* Receive from next process. */
-        MPI_Recv(flag[Nx+1], (Ny+2)*(Nz+2), MPI_INT, solver->rank+1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+    else if (solver->ri != solver->Px-1) {
+        MPI_Recv(x_exchg, (Ny+4)*(Nz+4), MPI_INT, solver->rank + solver->Py*solver->Pz, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        cnt = 0;
+        for (int j = -2; j < Ny+2; j++) {
+            for (int k = -2; k < Nz+2; k++) {
+                ce3(solver->flag, Nx+1, j, k) = x_exchg[cnt++];
+            }
+        }
+    }
+
+    if (solver->rj != solver->Py-1) {
+        cnt = 0;
+        for (int i = -2; i < Nx+2; i++) {
+            for (int k = -2; k < Nz+2; k++) {
+                y_exchg[cnt++] = ce3(solver->flag, i, Ny-2, k);
+            }
+        }
+        MPI_Send(y_exchg, (Nx+4)*(Nz+4), MPI_INT, solver->rank + solver->Pz, 0, MPI_COMM_WORLD);
+    }
+    else if (solver->rj != 0) {
+        MPI_Recv(y_exchg, (Nx+4)*(Nz+4), MPI_INT, solver->rank - solver->Pz, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        cnt = 0;
+        for (int i = -2; i < Nx+2; i++) {
+            for (int k = -2; k < Nz+2; k++) {
+                ce3(solver->flag, i, -2, k) = y_exchg[cnt++];
+            }
+        }
+        cnt = 0;
+        for (int i = -2; i < Nx+2; i++) {
+            for (int k = -2; k < Nz+2; k++) {
+                y_exchg[cnt++] = ce3(solver->flag, i, 1, k);
+            }
+        }
+        MPI_Send(y_exchg, (Nx+4)*(Nz+4), MPI_INT, solver->rank - solver->Pz, 0, MPI_COMM_WORLD);
+    }
+    else if (solver->rj != solver->Py-1) {
+        MPI_Recv(y_exchg, (Nx+4)*(Nz+4), MPI_INT, solver->rank + solver->Pz, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        cnt = 0;
+        for (int i = -2; i < Nx+2; i++) {
+            for (int k = -2; k < Nz+2; k++) {
+                ce3(solver->flag, i, Nx+1, k) = y_exchg[cnt++];
+            }
+        }
+    }
+
+    if (solver->rk != solver->Pz-1) {
+        cnt = 0;
+        for (int i = -2; i < Nx+2; i++) {
+            for (int j = -2; j < Ny+2; j++) {
+                z_exchg[cnt++] = ce3(solver->flag, i, j, Nz-2);
+            }
+        }
+        MPI_Send(z_exchg, (Nx+4)*(Ny+4), MPI_INT, solver->rank + 1, 0, MPI_COMM_WORLD);
+    }
+    else if (solver->rk != 0) {
+        MPI_Recv(z_exchg, (Nx+4)*(Ny+4), MPI_INT, solver->rank - 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        cnt = 0;
+        for (int i = -2; i < Nx+2; i++) {
+            for (int j = -2; j < Ny+2; j++) {
+                ce3(solver->flag, i, j, -2) = z_exchg[cnt++];
+            }
+        }
+        cnt = 0;
+        for (int i = -2; i < Nx+2; i++) {
+            for (int j = -2; j < Ny+2; j++) {
+                z_exchg[cnt++] = ce3(solver->flag, i, j, 1);
+            }
+        }
+        MPI_Send(z_exchg, (Nx+4)*(Ny+4), MPI_INT, solver->rank - 1, 0, MPI_COMM_WORLD);
+    }
+    else if (solver->rk != solver->Pz-1) {
+        MPI_Recv(z_exchg, (Nx+4)*(Ny+4), MPI_INT, solver->rank + 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        cnt = 0;
+        for (int i = -2; i < Nx+2; i++) {
+            for (int j = -2; j < Ny+2; j++) {
+                ce3(solver->flag, i, j, Nz+1) = z_exchg[cnt++];
+            }
+        }
     }
 }
 
@@ -1000,6 +1202,8 @@ static HYPRE_IJMatrix create_matrix(IBMSolver *solver, int type) {
     const int Ny = solver->Ny;
     const int Nz = solver->Nz;
     const int Nx_global = solver->Nx_global;
+    const int Ny_global = solver->Ny_global;
+    const int Nz_global = solver->Nz_global;
 
     const double *kx_W = solver->kx_W;
     const double *kx_E = solver->kx_E;
@@ -1012,9 +1216,7 @@ static HYPRE_IJMatrix create_matrix(IBMSolver *solver, int type) {
     const double *yc = solver->yc;
     const double *zc = solver->zc;
 
-    const int (*flag)[Ny+2][Nz+2] = solver->flag;
-
-    double (*p_coeffsum)[Ny+2][Nz+2] = solver->p_coeffsum;
+    // TODO: Fix global cell index
 
     HYPRE_IJMatrix A;
 

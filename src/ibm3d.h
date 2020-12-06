@@ -10,9 +10,6 @@
 
 #include "geo3d.h"
 
-typedef void *arr3d;
-typedef void *arr4d;
-
 /* (x, y, z) => init value. */
 typedef double (*IBMSolverInitFunc)(double, double, double);
 
@@ -70,20 +67,24 @@ enum {
 };
 
 typedef struct _ibm_solver {
+    /* Number of all process. */
+    int num_process;
+    /* Number of processes in each direction. */
+    int Px, Py, Pz;
     /* Rank of current process. */
     int rank;
-    /* Number of all processes. */
-    int num_process;
+    /* Rank of current process in each direction. */
+    int ri, rj, rk;
 
-    /* Grid dimensions. */
-    int Nx_global, Ny, Nz;
+    /* Global grid dimensions. */
+    int Nx_global, Ny_global, Nz_global;
+    /* Local grid dimensions of current process. */
+    int Nx, Ny, Nz;
 
-    /* Min x-index of current process. */
-    int ilower;
-    /* Max x-index of current process. */
-    int iupper;
-    /* Number of x-index of current process. */
-    int Nx;
+    /* Min indices of current process. */
+    int ilower, jlower, klower;
+    /* Max indices of current process. */
+    int iupper, jupper, kupper;
 
     /* Reynolds number. */
     double Re;
@@ -94,8 +95,9 @@ typedef struct _ibm_solver {
     double *dx, *dy, *dz;
     /* Cell centeroid coordinates. (local) */
     double *xc, *yc, *zc;
-    /* Global cell width and centroid coordinate. */
-    double *dx_global, *xc_global;
+    /* Global cell widths and centroid coordinates. */
+    double *dx_global, *dy_global, *dz_global;
+    double *xc_global, *yc_global, *zc_global;
     /* Min and max coordinates. */
     double xmin, xmax, ymin, ymax, zmin, zmax;
 
@@ -109,27 +111,23 @@ typedef struct _ibm_solver {
     /* Obstacle. */
     Polyhedron *poly;
     /* Flag of each cell (1: fluid cell, 2: ghost cell, 0: solid cell) */
-    arr3d flag;
+    double *flag;
     /* Level set function. */
-    arr3d lvset;
+    double *lvset;
 
     /* Velocities and pressure. */
-    arr3d u1, u1_next, u1_star, u1_tilde;
-    arr3d u2, u2_next, u2_star, u2_tilde;
-    arr3d u3, u3_next, u3_star, u3_tilde;
+    double *u1, *u1_next, *u1_star, *u1_tilde;
+    double *u2, *u2_next, *u2_star, *u2_tilde;
+    double *u3, *u3_next, *u3_star, *u3_tilde;
 
-    arr3d U1, U1_next, U1_star;
-    arr3d U2, U2_next, U2_star;
-    arr3d U3, U3_next, U3_star;
+    double *U1, *U1_next, *U1_star;
+    double *U2, *U2_next, *U2_star;
+    double *U3, *U3_next, *U3_star;
 
-    arr3d p, p_next, p_prime;
+    double *p, *p_next, *p_prime;
 
     /* Fluxes. */
-    arr3d N1, N1_prev, N2, N2_prev, N3, N3_prev;
-
-    /* Secondary halos. */
-    arr3d vel_2nd_halo_lower;
-    arr3d vel_2nd_halo_upper;
+    double *N1, *N1_prev, *N2, *N2_prev, *N3, *N3_prev;
 
     /* HYPRE matrices, vectors, solvers, and arrays. */
     HYPRE_IJMatrix     A_u1, A_u2, A_u3, A_p;
@@ -144,10 +142,13 @@ typedef struct _ibm_solver {
     HYPRE_Solver linear_solver_p, precond_p;
     double tol;
 
-    arr3d p_coeffsum;
+    double *p_coeffsum;
 
     int *vector_rows;
     double *vector_values, *vector_zeros, *vector_res;
+
+    /* Temporary array for exchange. */
+    double *x_exchg, *y_exchg, *z_exchg;
 
     /* Iteration info. */
     int iter;
