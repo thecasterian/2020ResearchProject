@@ -3,7 +3,7 @@
 
 #include "ibm3d.h"
 
-IBMSolver *IBMSolver_new(const int, const int);
+IBMSolver *IBMSolver_new(const int, const int, const int, const int, const int);
 void IBMSolver_destroy(IBMSolver *);
 
 void IBMSolver_set_grid(

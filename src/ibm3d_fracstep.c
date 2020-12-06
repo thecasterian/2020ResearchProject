@@ -2076,33 +2076,6 @@ static void update_ghost(IBMSolver *solver) {
     double (*const U2)[Ny+1][Nz+2] = solver->U2;
     double (*const U3)[Ny+2][Nz+1] = solver->U3;
 
-    double (*const vel_2nd_halo_lower)[Ny+2][Nz+2] = solver->vel_2nd_halo_lower;
-    double (*const vel_2nd_halo_upper)[Ny+2][Nz+2] = solver->vel_2nd_halo_upper;
-
-    /* Exchange secondary halos. */
-    if (solver->rank != solver->num_process-1) {
-        /* Send to next process. */
-        MPI_Send(u1[Nx-1], (Ny+2)*(Nz+2), MPI_DOUBLE, solver->rank+1, 0, MPI_COMM_WORLD);
-        MPI_Send(u2[Nx-1], (Ny+2)*(Nz+2), MPI_DOUBLE, solver->rank+1, 1, MPI_COMM_WORLD);
-        MPI_Send(u3[Nx-1], (Ny+2)*(Nz+2), MPI_DOUBLE, solver->rank+1, 2, MPI_COMM_WORLD);
-    }
-    if (solver->rank != 0) {
-        /* Receive from previous process. */
-        MPI_Recv(vel_2nd_halo_lower[0], (Ny+2)*(Nz+2), MPI_DOUBLE, solver->rank-1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-        MPI_Recv(vel_2nd_halo_lower[1], (Ny+2)*(Nz+2), MPI_DOUBLE, solver->rank-1, 1, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-        MPI_Recv(vel_2nd_halo_lower[2], (Ny+2)*(Nz+2), MPI_DOUBLE, solver->rank-1, 2, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-        /* Send to previous process. */
-        MPI_Send(u1[2], (Ny+2)*(Nz+2), MPI_DOUBLE, solver->rank-1, 0, MPI_COMM_WORLD);
-        MPI_Send(u2[2], (Ny+2)*(Nz+2), MPI_DOUBLE, solver->rank-1, 1, MPI_COMM_WORLD);
-        MPI_Send(u3[2], (Ny+2)*(Nz+2), MPI_DOUBLE, solver->rank-1, 2, MPI_COMM_WORLD);
-    }
-    if (solver->rank != solver->num_process-1) {
-        /* Receive from next process. */
-        MPI_Recv(vel_2nd_halo_upper[0], (Ny+2)*(Nz+2), MPI_DOUBLE, solver->rank+1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-        MPI_Recv(vel_2nd_halo_upper[1], (Ny+2)*(Nz+2), MPI_DOUBLE, solver->rank+1, 1, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-        MPI_Recv(vel_2nd_halo_upper[2], (Ny+2)*(Nz+2), MPI_DOUBLE, solver->rank+1, 2, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-    }
-
     FOR_ALL_CELL (i, j, k) {
         if (flag[i][j][k] == FLAG_GHOST) {
             Vector n, m;
@@ -2146,24 +2119,6 @@ static void update_ghost(IBMSolver *solver) {
 
                 if (ni == i && nj == j && nk == k) {
                     center_coeff += interp_coeff[l];
-                    coeff_sum += interp_coeff[l];
-                }
-                else if (ni < 0) {
-                    if (isnan(vel_2nd_halo_lower[0][nj][nk])) {
-                        continue;
-                    }
-                    sum_u1 += vel_2nd_halo_lower[0][nj][nk] * interp_coeff[l];
-                    sum_u2 += vel_2nd_halo_lower[1][nj][nk] * interp_coeff[l];
-                    sum_u3 += vel_2nd_halo_lower[2][nj][nk] * interp_coeff[l];
-                    coeff_sum += interp_coeff[l];
-                }
-                else if (ni > Nx+1) {
-                    if (isnan(vel_2nd_halo_upper[0][nj][nk])) {
-                        continue;
-                    }
-                    sum_u1 += vel_2nd_halo_upper[0][nj][nk] * interp_coeff[l];
-                    sum_u2 += vel_2nd_halo_upper[1][nj][nk] * interp_coeff[l];
-                    sum_u3 += vel_2nd_halo_upper[2][nj][nk] * interp_coeff[l];
                     coeff_sum += interp_coeff[l];
                 }
                 else {

@@ -22,10 +22,10 @@ clean:
 	rm -f *.a
 	rm -f *.o
 
-$(TARGET): $(TARGET).c ibm3d.a geo3d.o
+$(TARGET): $(TARGET).c ibm3d.a
 	$(CC) $(INCLUDE) $^ $(HYPRE) -o $@ $(LDLIBS) $(CFLAGS)
 
-ibm3d.a: ibm3d_setup.o ibm3d_fracstep.o ibm3d_export.o utils.o
+ibm3d.a: ibm3d_setup.o ibm3d_fracstep.o ibm3d_export.o utils.o geo3d.o
 	ar rcs $@ $^
 
 ibm3d_setup.o: ibm3d_setup.c ibm3d_setup.h
@@ -43,11 +43,11 @@ geo3d.o: geo3d.c geo3d.h
 utils.o: utils.c utils.h
 	$(CC) $(INCLUDE) -c $< $(LDLIBS) $(CFLAGS)
 
-test: test.c geo3d.o
-	$(CC) $(INCLUDE) geo3d.o test.c -o test $(LDLIBS) $(CFLAGS)
-
-channel: channel.c ibm3d.a geo3d.o
+test: test.c ibm3d.a
 	$(CC) $(INCLUDE) $^ $(HYPRE) -o $@ $(LDLIBS) $(CFLAGS)
 
-building: building.c ibm3d.a geo3d.o
+channel: channel.c ibm3d.a
+	$(CC) $(INCLUDE) $^ $(HYPRE) -o $@ $(LDLIBS) $(CFLAGS)
+
+building: building.c ibm3d.a
 	$(CC) $(INCLUDE) $^ $(HYPRE) -o $@ $(LDLIBS) $(CFLAGS)

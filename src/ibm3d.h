@@ -86,10 +86,27 @@ typedef struct _ibm_solver {
     /* Max indices of current process. */
     int iupper, jupper, kupper;
 
+    /* Local grid dimensions including outer cells. */
+    int Nx_out, Ny_out, Nz_out;
+    /* Min and max indices including outer cells, starting at 0. */
+    int *ilower_out, *jlower_out, *klower_out;
+    int *iupper_out, *jupper_out, *kupper_out;
+
+    /* First and last cell index. */
+    int *idx_first, *idx_last;
+
     /* Reynolds number. */
     double Re;
     /* Delta t. */
     double dt;
+
+    /* Iteration info. */
+    int iter;
+    double time;
+
+    /* Autosave. */
+    const char *autosave_filename;
+    int autosave_period;
 
     /* Cell widths. (local) */
     double *dx, *dy, *dz;
@@ -149,14 +166,6 @@ typedef struct _ibm_solver {
 
     /* Temporary array for exchange. */
     double *x_exchg, *y_exchg, *z_exchg;
-
-    /* Iteration info. */
-    int iter;
-    double time;
-
-    /* Autosave. */
-    const char *autosave_filename;
-    int autosave_period;
 } IBMSolver;
 
 #include "ibm3d_setup.h"

@@ -70,6 +70,16 @@ IBMSolver *IBMSolver_new(
     solver->rj = rank % (Py * Pz) / Pz;
     solver->rk = rank % Pz;
 
+    solver->ilower_out = calloc(Px, sizeof(int));
+    solver->jlower_out = calloc(Py, sizeof(int));
+    solver->klower_out = calloc(Pz, sizeof(int));
+    solver->iupper_out = calloc(Px, sizeof(int));
+    solver->jupper_out = calloc(Py, sizeof(int));
+    solver->kupper_out = calloc(Pz, sizeof(int));
+
+    solver->idx_first = calloc(num_process, sizeof(int));
+    solver->idx_last = calloc(num_process, sizeof(int));
+
     solver->dx = solver->dy = solver->dz = NULL;
     solver->xc = solver->yc = solver->zc = NULL;
     solver->dx_global = solver->dy_global = solver->dz_global = NULL;
@@ -190,17 +200,50 @@ void IBMSolver_set_grid(
     solver->Ny_global = Ny_global;
     solver->Nz_global = Nz_global;
 
-    solver->ilower = solver->ri * Nx_global / solver->Px;
-    solver->jlower = solver->rj * Ny_global / solver->Py;
-    solver->klower = solver->rk * Nz_global / solver->Pz;
+    for (int ri = 0; ri < solver->Px; ri++) {
+        solver->ilower_out[ri] = ri * (Nx_global+4) / solver->Px;
+        solver->iupper_out[ri] = (ri+1) * (Nx_global+4) / solver->Px - 1;
+    }
+    for (int rj = 0; rj < solver->Py; rj++) {
+        solver->jlower_out[rj] = rj * (Ny_global+4) / solver->Py;
+        solver->jupper_out[rj] = (rj+1) * (Ny_global+4) / solver->Py - 1;
+    }
+    for (int rk = 0; rk < solver->Pz; rk++) {
+        solver->klower_out[rk] = rk * (Nz_global+4) / solver->Pz;
+        solver->kupper_out[rk] = (rk+1) * (Nz_global+4) / solver->Pz - 1;
+    }
 
-    solver->iupper = (solver->ri+1) * Nx_global / solver->Px - 1;
-    solver->jupper = (solver->rj+1) * Ny_global / solver->Py - 1;
-    solver->kupper = (solver->rk+1) * Nz_global / solver->Pz - 1;
+    const int ilower_out = solver->ilower_out[solver->ri];
+    const int jlower_out = solver->jlower_out[solver->rj];
+    const int klower_out = solver->klower_out[solver->rk];
+
+    const int iupper_out = solver->iupper_out[solver->ri];
+    const int jupper_out = solver->jupper_out[solver->rj];
+    const int kupper_out = solver->kupper_out[solver->rk];
+
+    solver->Nx_out = iupper_out - ilower_out + 1;
+    solver->Ny_out = jupper_out - jlower_out + 1;
+    solver->Nz_out = kupper_out - klower_out + 1;
+
+    solver->ilower = min(max(ilower_out-2, 0), Nx_global-1);
+    solver->jlower = min(max(jlower_out-2, 0), Ny_global-1);
+    solver->klower = min(max(klower_out-2, 0), Nz_global-1);
+
+    solver->iupper = min(max(iupper_out-2, 0), Nx_global-1);
+    solver->jupper = min(max(jupper_out-2, 0), Ny_global-1);
+    solver->kupper = min(max(kupper_out-2, 0), Nz_global-1);
 
     solver->Nx = solver->iupper - solver->ilower + 1;
     solver->Ny = solver->jupper - solver->jlower + 1;
     solver->Nz = solver->kupper - solver->klower + 1;
+
+    solver->idx_first = ilower_out * (Ny_global+4)*(Nz_global+4)
+        + jlower_out * (iupper_out-ilower_out+1)*(Nz_global+4)
+        + klower_out * (iupper_out-ilower_out+1)*(jupper_out-jlower_out+1);
+    solver->idx_last = solver->idx_first
+        + (iupper_out-ilower_out+1)*(jupper_out-jlower_out+1)*(kupper_out-klower_out+1) - 1;
+
+    printf("%d: %d %d, total %d\n", solver->rank, solver->idx_first, solver->idx_last, solver->idx_last - solver->idx_first + 1);
 
     /* Allocate arrays. */
     alloc_arrays(solver);
@@ -1216,15 +1259,16 @@ static HYPRE_IJMatrix create_matrix(IBMSolver *solver, int type) {
     const double *yc = solver->yc;
     const double *zc = solver->zc;
 
-    // TODO: Fix global cell index
-
     HYPRE_IJMatrix A;
+
+    // TODO: Fix global cell index
 
     HYPRE_IJMatrixCreate(
         MPI_COMM_WORLD,
-        GLOB_CELL_IDX(1, 1, 1), GLOB_CELL_IDX(Nx, Ny, Nz),
-        GLOB_CELL_IDX(1, 1, 1), GLOB_CELL_IDX(Nx, Ny, Nz),
-        &A);
+        solver->idx_first, solver->idx_last,
+        solver->idx_first, solver->idx_last,
+        &A
+    );
     HYPRE_IJMatrixSetObjectType(A, HYPRE_PARCSR);
     HYPRE_IJMatrixInitialize(A);
 
@@ -1235,7 +1279,7 @@ static HYPRE_IJMatrix create_matrix(IBMSolver *solver, int type) {
         double values[9] = {0};
 
         /* Fluid cell. */
-        if (flag[i][j][k] == FLAG_FLUID) {
+        if (ce3(solver->flag, i, j, k) == FLAG_FLUID) {
             cols[0] = cur_idx;
             for (int l = 0; l < 6; l++) {
                 cols[l+1] = GLOB_CELL_IDX(i+adj[l][0], j+adj[l][1], k+adj[l][2]);
@@ -1625,4 +1669,8 @@ static bool isperiodic(IBMSolverBCType type) {
     default:
         return false;
     }
+}
+
+static int cell_idx(IBMSolver *solver, int i, int j, int k) {
+
 }
