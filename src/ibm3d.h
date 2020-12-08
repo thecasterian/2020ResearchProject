@@ -88,12 +88,14 @@ typedef struct _ibm_solver {
 
     /* Local grid dimensions including outer cells. */
     int Nx_out, Ny_out, Nz_out;
-    /* Min and max indices including outer cells, starting at 0. */
-    int *ilower_out, *jlower_out, *klower_out;
-    int *iupper_out, *jupper_out, *kupper_out;
+    /* Min and max indices including outer cells. */
+    int ilower_out, jlower_out, klower_out;
+    int iupper_out, jupper_out, kupper_out;
 
     /* First and last cell index. */
-    int *idx_first, *idx_last;
+    int idx_first, idx_last;
+    /* Cell indices. */
+    int *cell_idx, *cell_idx_periodic;
 
     /* Reynolds number. */
     double Re;
@@ -128,7 +130,7 @@ typedef struct _ibm_solver {
     /* Obstacle. */
     Polyhedron *poly;
     /* Flag of each cell (1: fluid cell, 2: ghost cell, 0: solid cell) */
-    double *flag;
+    int *flag;
     /* Level set function. */
     double *lvset;
 
@@ -169,6 +171,7 @@ typedef struct _ibm_solver {
 } IBMSolver;
 
 #include "ibm3d_setup.h"
+#include "ibm3d_init.h"
 #include "ibm3d_fracstep.h"
 #include "ibm3d_export.h"
 

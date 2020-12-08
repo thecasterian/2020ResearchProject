@@ -4,6 +4,8 @@
 #include "geo3d.h"
 #include "ibm3d.h"
 
+#define PATH "/home/jeonukim/data/sphere"
+
 int main(int argc, char **argv) {
     /*===== Initialize program and parse arguments. ==========================*/
     /*----- Initialize MPI. --------------------------------------------------*/
@@ -50,15 +52,10 @@ int main(int argc, char **argv) {
 
     /* Initialize velocities and pressure from file? (T/F) */
     int init_using_file;
-    /* Names of velocity input files for initialization. */
-    char init_file_u1[100], init_file_u2[100], init_file_u3[100];
-    /* Names of pressure input file for initialization. */
-    char init_file_p[100];
-
-    /* Name of velocity output files for result export */
-    char output_file_u1[100], output_file_u2[100], output_file_u3[100];
-    /* Name of pressure output file for result export */
-    char output_file_p[100];
+    /* Input file Name for initialization. */
+    char init_file[50];
+    /* Output file Name for result export */
+    char output_file[50];
 
     /*===== Read input file. =================================================*/
 
@@ -101,18 +98,12 @@ int main(int argc, char **argv) {
     fscanf(fp_in, "%*s %lf", &Re);
     fscanf(fp_in, "%*s %lf %*s %d", &dt, &num_time_steps);
 
-    /* Read initialization file names */
+    /* Initialize with file? */
     fscanf(fp_in, "%*s %d", &init_using_file);
-    fscanf(fp_in, "%*s %s", init_file_u1);
-    fscanf(fp_in, "%*s %s", init_file_u2);
-    fscanf(fp_in, "%*s %s", init_file_u3);
-    fscanf(fp_in, "%*s %s", init_file_p);
-
-    /* Read output file names */
-    fscanf(fp_in, "%*s %s", output_file_u1);
-    fscanf(fp_in, "%*s %s", output_file_u2);
-    fscanf(fp_in, "%*s %s", output_file_u3);
-    fscanf(fp_in, "%*s %s", output_file_p);
+    /* Read initialization file name */
+    fscanf(fp_in, "%*s %s", init_file);
+    /* Read output file name */
+    fscanf(fp_in, "%*s %s", output_file);
 
     fclose(fp_in);
     fclose(fp_poly);
@@ -138,7 +129,7 @@ int main(int argc, char **argv) {
 
     /*===== Set solver. ======================================================*/
 
-    IBMSolver *solver = IBMSolver_new(num_process, rank);
+    IBMSolver *solver = IBMSolver_new(num_process, rank, 4, 2, 2);
 
     IBMSolver_set_grid(solver, Nx, Ny, Nz, xf, yf, zf);
     IBMSolver_set_params(solver, Re, dt);
@@ -151,18 +142,9 @@ int main(int argc, char **argv) {
 
     IBMSolver_set_linear_solver(solver, SOLVER_BiCGSTAB, PRECOND_AMG, 1e-6);
 
-    IBMSolver_set_autosave(
-        solver,
-        "data/sphere_u1",
-        "data/sphere_u2",
-        "data/sphere_u3",
-        "data/sphere_p",
-        10
-    );
+    IBMSolver_set_autosave(solver, output_file, 10);
 
     IBMSolver_assemble(solver);
-
-    IBMSolver_export_flag(solver, "data/flag.out");
 
     Polyhedron_destroy(poly);
 
@@ -172,15 +154,13 @@ int main(int argc, char **argv) {
         IBMSolver_init_flow_const(solver, 1, 0, 0, 0);
     }
     else {
-        IBMSolver_init_flow_file(
-            solver,
-            init_file_u1, init_file_u2, init_file_u3, init_file_p
-        );
+        IBMSolver_init_flow_file(solver, init_file);
     }
 
     if (rank == 0) {
         printf("\nInitialization done\n");
     }
+    goto end;
 
     /*===== Run. =============================================================*/
 
@@ -188,13 +168,11 @@ int main(int argc, char **argv) {
 
     /*===== Export results. ==================================================*/
 
-    IBMSolver_export_results(
-        solver,
-        output_file_u1, output_file_u2, output_file_u3, output_file_p
-    );
+    IBMSolver_export_result(solver, output_file);
 
     /*===== Free memory and finalize. ========================================*/
 
+end:
     free(xf); free(yf); free(zf);
     IBMSolver_destroy(solver);
 

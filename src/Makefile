@@ -14,6 +14,7 @@ endif
 HYPRE = /usr/local/lib/libHYPRE.a
 
 TARGET = main
+OBJS = ibm3d_setup.o ibm3d_init.o ibm3d_fracstep.o ibm3d_export.o utils.o geo3d.o
 
 all: $(TARGET)
 
@@ -22,32 +23,17 @@ clean:
 	rm -f *.a
 	rm -f *.o
 
-$(TARGET): $(TARGET).c ibm3d.a
+$(TARGET): $(TARGET).c $(OBJS)
 	$(CC) $(INCLUDE) $^ $(HYPRE) -o $@ $(LDLIBS) $(CFLAGS)
 
-ibm3d.a: ibm3d_setup.o ibm3d_fracstep.o ibm3d_export.o utils.o geo3d.o
-	ar rcs $@ $^
-
-ibm3d_setup.o: ibm3d_setup.c ibm3d_setup.h
+%.o: %.c %.h
 	$(CC) $(INCLUDE) -c $< $(LDLIBS) $(CFLAGS)
 
-ibm3d_fracstep.o: ibm3d_fracstep.c ibm3d_fracstep.h
-	$(CC) $(INCLUDE) -c $< $(LDLIBS) $(CFLAGS)
-
-ibm3d_export.o: ibm3d_export.c ibm3d_export.h
-	$(CC) $(INCLUDE) -c $< $(LDLIBS) $(CFLAGS)
-
-geo3d.o: geo3d.c geo3d.h
-	$(CC) $(INCLUDE) -c $< $(LDLIBS) $(CFLAGS)
-
-utils.o: utils.c utils.h
-	$(CC) $(INCLUDE) -c $< $(LDLIBS) $(CFLAGS)
-
-test: test.c ibm3d.a
+test: test.c $(OBJS)
 	$(CC) $(INCLUDE) $^ $(HYPRE) -o $@ $(LDLIBS) $(CFLAGS)
 
-channel: channel.c ibm3d.a
+channel: channel.c $(OBJS)
 	$(CC) $(INCLUDE) $^ $(HYPRE) -o $@ $(LDLIBS) $(CFLAGS)
 
-building: building.c ibm3d.a
+building: building.c $(OBJS)
 	$(CC) $(INCLUDE) $^ $(HYPRE) -o $@ $(LDLIBS) $(CFLAGS)

@@ -51,7 +51,7 @@ int main(int argc, char **argv) {
         zf[k] = -cos(PI * k / Nz);
     }
 
-    solver = IBMSolver_new(num_process, rank);
+    solver = IBMSolver_new(num_process, rank, 4, 2, 2);
 
     IBMSolver_set_grid(solver, Nx, Ny, Nz, xf, yf, zf);
     IBMSolver_set_params(solver, Re, dt);
@@ -77,7 +77,7 @@ int main(int argc, char **argv) {
         );
     }
     else {
-        IBMSolver_init_flow_file(solver, PATH "/channel-00600");
+        IBMSolver_init_flow_file(solver, PATH "/channel-16700");
     }
 
     /* Iterate. */

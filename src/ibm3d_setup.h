@@ -22,8 +22,4 @@ void IBMSolver_set_autosave(IBMSolver *, const char *, int);
 
 void IBMSolver_assemble(IBMSolver *);
 
-void IBMSolver_init_flow_const(IBMSolver *, const double, const double, const double, const double);
-void IBMSolver_init_flow_file(IBMSolver *, const char *);
-void IBMSolver_init_flow_func(IBMSolver *, IBMSolverInitFunc, IBMSolverInitFunc, IBMSolverInitFunc, IBMSolverInitFunc);
-
 #endif

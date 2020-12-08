@@ -6,7 +6,6 @@
 
 #include <string.h>
 #include <stdarg.h>
-#include <netcdf.h>
 
 /* Index of adjacent cells in 3-d cartesian coordinate. Refer the order shown
    below. */
@@ -26,6 +25,7 @@ static const int adj[6][3] = {
 */
 
 static void alloc_arrays(IBMSolver *);
+static void calc_cell_idx(IBMSolver *);
 static void calc_lvset_flag(IBMSolver *);
 static void build_hypre(IBMSolver *);
 static HYPRE_IJMatrix create_matrix(IBMSolver *, int);
@@ -69,16 +69,6 @@ IBMSolver *IBMSolver_new(
     solver->ri = rank / (Py * Pz);
     solver->rj = rank % (Py * Pz) / Pz;
     solver->rk = rank % Pz;
-
-    solver->ilower_out = calloc(Px, sizeof(int));
-    solver->jlower_out = calloc(Py, sizeof(int));
-    solver->klower_out = calloc(Pz, sizeof(int));
-    solver->iupper_out = calloc(Px, sizeof(int));
-    solver->jupper_out = calloc(Py, sizeof(int));
-    solver->kupper_out = calloc(Pz, sizeof(int));
-
-    solver->idx_first = calloc(num_process, sizeof(int));
-    solver->idx_last = calloc(num_process, sizeof(int));
 
     solver->dx = solver->dy = solver->dz = NULL;
     solver->xc = solver->yc = solver->zc = NULL;
@@ -179,15 +169,15 @@ void IBMSolver_destroy(IBMSolver *solver) {
  * @brief Sets grid informations of the calculation domain.
  *
  * @param solver IBMSolver.
- * @param Nx Number of cells in x-direction.
- * @param Ny Number of cells in y-direction.
- * @param Nz Number of cells in z-direction.
+ * @param Nx_global Total number of cells in x-direction.
+ * @param Ny_global Total number of cells in y-direction.
+ * @param Nz_global Total number of cells in z-direction.
  * @param xf Array of x-coordinates of cell faces in increasing order.
  * @param yf Array of y-coordinates of cell faces in increasing order.
  * @param zf Array of z-coordinates of cell faces in increasing order.
  *
- * @remark Length of \p xf, \p yf, and \p zf must be Nx+1, Ny+1, and Nz+1,
- *         respectively.
+ * @remark Length of \p xf, \p yf, and \p zf must be Nx_global+1, Ny_global+1,
+ *         and Nz_global+1, respectively.
  */
 void IBMSolver_set_grid(
     IBMSolver *solver,
@@ -200,79 +190,67 @@ void IBMSolver_set_grid(
     solver->Ny_global = Ny_global;
     solver->Nz_global = Nz_global;
 
-    for (int ri = 0; ri < solver->Px; ri++) {
-        solver->ilower_out[ri] = ri * (Nx_global+4) / solver->Px;
-        solver->iupper_out[ri] = (ri+1) * (Nx_global+4) / solver->Px - 1;
-    }
-    for (int rj = 0; rj < solver->Py; rj++) {
-        solver->jlower_out[rj] = rj * (Ny_global+4) / solver->Py;
-        solver->jupper_out[rj] = (rj+1) * (Ny_global+4) / solver->Py - 1;
-    }
-    for (int rk = 0; rk < solver->Pz; rk++) {
-        solver->klower_out[rk] = rk * (Nz_global+4) / solver->Pz;
-        solver->kupper_out[rk] = (rk+1) * (Nz_global+4) / solver->Pz - 1;
-    }
+    solver->ilower_out = solver->ri * (Nx_global+4) / solver->Px - 2;
+    solver->jlower_out = solver->rj * (Ny_global+4) / solver->Py - 2;
+    solver->klower_out = solver->rk * (Nz_global+4) / solver->Pz - 2;
 
-    const int ilower_out = solver->ilower_out[solver->ri];
-    const int jlower_out = solver->jlower_out[solver->rj];
-    const int klower_out = solver->klower_out[solver->rk];
+    solver->iupper_out = (solver->ri+1) * (Nx_global+4) / solver->Px - 2;
+    solver->jupper_out = (solver->rj+1) * (Ny_global+4) / solver->Py - 2;
+    solver->kupper_out = (solver->rk+1) * (Nz_global+4) / solver->Pz - 2;
 
-    const int iupper_out = solver->iupper_out[solver->ri];
-    const int jupper_out = solver->jupper_out[solver->rj];
-    const int kupper_out = solver->kupper_out[solver->rk];
+    solver->Nx_out = solver->iupper_out - solver->ilower_out;
+    solver->Ny_out = solver->jupper_out - solver->jlower_out;
+    solver->Nz_out = solver->kupper_out - solver->klower_out;
 
-    solver->Nx_out = iupper_out - ilower_out + 1;
-    solver->Ny_out = jupper_out - jlower_out + 1;
-    solver->Nz_out = kupper_out - klower_out + 1;
+    solver->ilower = max(solver->ilower_out, 0);
+    solver->jlower = max(solver->jlower_out, 0);
+    solver->klower = max(solver->klower_out, 0);
 
-    solver->ilower = min(max(ilower_out-2, 0), Nx_global-1);
-    solver->jlower = min(max(jlower_out-2, 0), Ny_global-1);
-    solver->klower = min(max(klower_out-2, 0), Nz_global-1);
+    solver->iupper = min(solver->iupper_out, Nx_global);
+    solver->jupper = min(solver->jupper_out, Ny_global);
+    solver->kupper = min(solver->kupper_out, Nz_global);
 
-    solver->iupper = min(max(iupper_out-2, 0), Nx_global-1);
-    solver->jupper = min(max(jupper_out-2, 0), Ny_global-1);
-    solver->kupper = min(max(kupper_out-2, 0), Nz_global-1);
+    solver->Nx = solver->iupper - solver->ilower;
+    solver->Ny = solver->jupper - solver->jlower;
+    solver->Nz = solver->kupper - solver->klower;
 
-    solver->Nx = solver->iupper - solver->ilower + 1;
-    solver->Ny = solver->jupper - solver->jlower + 1;
-    solver->Nz = solver->kupper - solver->klower + 1;
-
-    solver->idx_first = ilower_out * (Ny_global+4)*(Nz_global+4)
-        + jlower_out * (iupper_out-ilower_out+1)*(Nz_global+4)
-        + klower_out * (iupper_out-ilower_out+1)*(jupper_out-jlower_out+1);
+    solver->idx_first = (solver->ilower_out+2) * (Ny_global+4)*(Nz_global+4)
+        + (solver->jlower_out+2) * (solver->Nx_out)*(Nz_global+4)
+        + (solver->klower_out+2) * (solver->Nx_out)*(solver->Ny_out);
     solver->idx_last = solver->idx_first
-        + (iupper_out-ilower_out+1)*(jupper_out-jlower_out+1)*(kupper_out-klower_out+1) - 1;
-
-    printf("%d: %d %d, total %d\n", solver->rank, solver->idx_first, solver->idx_last, solver->idx_last - solver->idx_first + 1);
+        + solver->Nx_out*solver->Ny_out*solver->Nz_out;
 
     /* Allocate arrays. */
     alloc_arrays(solver);
 
+    /* Calculate cell indices. */
+    calc_cell_idx(solver);
+
     /* Cell widths and centroid coordinates. */
-    for (int i = 0; i <= Nx_global; i++) {
-        ce1(solver->dx_global, i) = xf[i+1] - xf[i];
-        ce1(solver->xc_global, i) = (xf[i+1] + xf[i]) / 2;
+    for (int i = 0; i < Nx_global; i++) {
+        c1e(solver->dx_global, i) = xf[i+1] - xf[i];
+        c1e(solver->xc_global, i) = (xf[i+1] + xf[i]) / 2;
     }
-    for (int j = 0; j <= Ny_global; j++) {
-        ce1(solver->dy_global, j) = yf[j+1] - yf[j];
-        ce1(solver->yc_global, j) = (yf[j+1] + yf[j]) / 2;
+    for (int j = 0; j < Ny_global; j++) {
+        c1e(solver->dy_global, j) = yf[j+1] - yf[j];
+        c1e(solver->yc_global, j) = (yf[j+1] + yf[j]) / 2;
     }
-    for (int k = 0; k <= Nz_global; k++) {
-        ce1(solver->dz_global, k) = zf[k+1] - zf[k];
-        ce1(solver->zc_global, k) = (zf[k+1] + zf[k]) / 2;
+    for (int k = 0; k < Nz_global; k++) {
+        c1e(solver->dz_global, k) = zf[k+1] - zf[k];
+        c1e(solver->zc_global, k) = (zf[k+1] + zf[k]) / 2;
     }
 
-    for (int i = 0; i <= solver->Nx; i++) {
-        ce1(solver->dx, i) = ce1(solver->dx_global, i + solver->ilower);
-        ce1(solver->xc, i) = ce1(solver->xc_global, i + solver->ilower);
+    for (int i = 0; i < solver->Nx; i++) {
+        c1e(solver->dx, i) = c1e(solver->dx_global, i + solver->ilower);
+        c1e(solver->xc, i) = c1e(solver->xc_global, i + solver->ilower);
     }
-    for (int j = 0; j <= solver->Ny; j++) {
-        ce1(solver->dy, j) = ce1(solver->dy_global, j + solver->jlower);
-        ce1(solver->yc, j) = ce1(solver->yc_global, j + solver->jlower);
+    for (int j = 0; j < solver->Ny; j++) {
+        c1e(solver->dy, j) = c1e(solver->dy_global, j + solver->jlower);
+        c1e(solver->yc, j) = c1e(solver->yc_global, j + solver->jlower);
     }
-    for (int k = 0; k <= solver->Nz; k++) {
-        ce1(solver->dz, k) = ce1(solver->dz_global, k + solver->klower);
-        ce1(solver->zc, k) = ce1(solver->zc_global, k + solver->klower);
+    for (int k = 0; k < solver->Nz; k++) {
+        c1e(solver->dz, k) = c1e(solver->dz_global, k + solver->klower);
+        c1e(solver->zc, k) = c1e(solver->zc_global, k + solver->klower);
     }
 
     /* Min and max coordinates. */
@@ -448,102 +426,102 @@ void IBMSolver_assemble(IBMSolver *solver) {
     }
 
     /* Ghost cells */
-    ce1(dx_global, -1) = isperiodic(solver->bc[3].type)
-        ? ce1(dx_global, Nx_global-1)
-        : ce1(dx_global, 0);
-    ce1(dx_global, -2) = isperiodic(solver->bc[3].type)
-        ? ce1(dx_global, Nx_global-2)
-        : ce1(dx_global, 1);
-    ce1(dx_global, Nx_global) = isperiodic(solver->bc[1].type)
-        ? ce1(dx_global, 0)
-        : ce1(dx_global, Nx_global-1);
-    ce1(dx_global, Nx_global+1) = isperiodic(solver->bc[1].type)
-        ? ce1(dx_global, 1)
-        : ce1(dx_global, Nx_global-2);
+    c1e(dx_global, -1) = isperiodic(solver->bc[3].type)
+        ? c1e(dx_global, Nx_global-1)
+        : c1e(dx_global, 0);
+    c1e(dx_global, -2) = isperiodic(solver->bc[3].type)
+        ? c1e(dx_global, Nx_global-2)
+        : c1e(dx_global, 1);
+    c1e(dx_global, Nx_global) = isperiodic(solver->bc[1].type)
+        ? c1e(dx_global, 0)
+        : c1e(dx_global, Nx_global-1);
+    c1e(dx_global, Nx_global+1) = isperiodic(solver->bc[1].type)
+        ? c1e(dx_global, 1)
+        : c1e(dx_global, Nx_global-2);
 
-    ce1(dy_global, -1) = isperiodic(solver->bc[2].type)
-        ? ce1(dy_global, Ny_global-1)
-        : ce1(dy_global, 0);
-    ce1(dy_global, -2) = isperiodic(solver->bc[2].type)
-        ? ce1(dy_global, Ny_global-2)
-        : ce1(dy_global, 1);
-    ce1(dy_global, Ny_global) = isperiodic(solver->bc[0].type)
-        ? ce1(dy_global, 0)
-        : ce1(dy_global, Ny_global-1);
-    ce1(dy_global, Ny_global+1) = isperiodic(solver->bc[0].type)
-        ? ce1(dy_global, 1)
-        : ce1(dy_global, Ny_global-2);
+    c1e(dy_global, -1) = isperiodic(solver->bc[2].type)
+        ? c1e(dy_global, Ny_global-1)
+        : c1e(dy_global, 0);
+    c1e(dy_global, -2) = isperiodic(solver->bc[2].type)
+        ? c1e(dy_global, Ny_global-2)
+        : c1e(dy_global, 1);
+    c1e(dy_global, Ny_global) = isperiodic(solver->bc[0].type)
+        ? c1e(dy_global, 0)
+        : c1e(dy_global, Ny_global-1);
+    c1e(dy_global, Ny_global+1) = isperiodic(solver->bc[0].type)
+        ? c1e(dy_global, 1)
+        : c1e(dy_global, Ny_global-2);
 
-    ce1(dz_global, -1) = isperiodic(solver->bc[4].type)
-        ? ce1(dz_global, Nz_global-1)
-        : ce1(dz_global, 0);
-    ce1(dz_global, -2) = isperiodic(solver->bc[4].type)
-        ? ce1(dz_global, Nz_global-2)
-        : ce1(dz_global, 1);
-    ce1(dz_global, Nz_global) = isperiodic(solver->bc[5].type)
-        ? ce1(dz_global, 0)
-        : ce1(dz_global, Nz_global-1);
-    ce1(dz_global, Nz_global+1) = isperiodic(solver->bc[5].type)
-        ? ce1(dz_global, 1)
-        : ce1(dz_global, Nz_global-2);
+    c1e(dz_global, -1) = isperiodic(solver->bc[4].type)
+        ? c1e(dz_global, Nz_global-1)
+        : c1e(dz_global, 0);
+    c1e(dz_global, -2) = isperiodic(solver->bc[4].type)
+        ? c1e(dz_global, Nz_global-2)
+        : c1e(dz_global, 1);
+    c1e(dz_global, Nz_global) = isperiodic(solver->bc[5].type)
+        ? c1e(dz_global, 0)
+        : c1e(dz_global, Nz_global-1);
+    c1e(dz_global, Nz_global+1) = isperiodic(solver->bc[5].type)
+        ? c1e(dz_global, 1)
+        : c1e(dz_global, Nz_global-2);
 
-    ce1(xc_global, -1) = ce1(xc_global, 0) - (ce1(dx_global, -1) + ce1(dx_global, 0)) / 2;
-    ce1(xc_global, -2) = ce1(xc_global, -1) - (ce1(dx_global, -2) + ce1(dx_global, -1)) / 2;
-    ce1(xc_global, Nx_global+1) = ce1(xc_global, Nx_global) + (ce1(dx_global, Nx_global-1) + ce1(dx_global, Nx_global)) / 2;
-    ce1(xc_global, Nx_global+2) = ce1(xc_global, Nx_global+1) + (ce1(dx_global, Nx_global) + ce1(dx_global, Nx_global+1)) / 2;
+    c1e(xc_global, -1) = c1e(xc_global, 0) - (c1e(dx_global, -1) + c1e(dx_global, 0)) / 2;
+    c1e(xc_global, -2) = c1e(xc_global, -1) - (c1e(dx_global, -2) + c1e(dx_global, -1)) / 2;
+    c1e(xc_global, Nx_global+1) = c1e(xc_global, Nx_global) + (c1e(dx_global, Nx_global-1) + c1e(dx_global, Nx_global)) / 2;
+    c1e(xc_global, Nx_global+2) = c1e(xc_global, Nx_global+1) + (c1e(dx_global, Nx_global) + c1e(dx_global, Nx_global+1)) / 2;
 
-    ce1(yc_global, -1) = ce1(yc_global, 0) - (ce1(dy_global, -1) + ce1(dy_global, 0)) / 2;
-    ce1(yc_global, -2) = ce1(yc_global, -1) - (ce1(dy_global, -2) + ce1(dy_global, -1)) / 2;
-    ce1(yc_global, Ny_global+1) = ce1(yc_global, Ny_global) + (ce1(dy_global, Ny_global-1) + ce1(dy_global, Ny_global)) / 2;
-    ce1(yc_global, Ny_global+2) = ce1(yc_global, Ny_global+1) + (ce1(dy_global, Ny_global) + ce1(dy_global, Ny_global+1)) / 2;
+    c1e(yc_global, -1) = c1e(yc_global, 0) - (c1e(dy_global, -1) + c1e(dy_global, 0)) / 2;
+    c1e(yc_global, -2) = c1e(yc_global, -1) - (c1e(dy_global, -2) + c1e(dy_global, -1)) / 2;
+    c1e(yc_global, Ny_global+1) = c1e(yc_global, Ny_global) + (c1e(dy_global, Ny_global-1) + c1e(dy_global, Ny_global)) / 2;
+    c1e(yc_global, Ny_global+2) = c1e(yc_global, Ny_global+1) + (c1e(dy_global, Ny_global) + c1e(dy_global, Ny_global+1)) / 2;
 
-    ce1(zc_global, -1) = ce1(zc_global, 0) - (ce1(dz_global, -1) + ce1(dz_global, 0)) / 2;
-    ce1(zc_global, -2) = ce1(zc_global, -1) - (ce1(dz_global, -2) + ce1(dz_global, -1)) / 2;
-    ce1(zc_global, Nz_global+1) = ce1(zc_global, Nz_global) + (ce1(dz_global, Nz_global-1) + ce1(dz_global, Nz_global)) / 2;
-    ce1(zc_global, Nz_global+2) = ce1(zc_global, Nz_global+1) + (ce1(dz_global, Nz_global) + ce1(dz_global, Nz_global+1)) / 2;
+    c1e(zc_global, -1) = c1e(zc_global, 0) - (c1e(dz_global, -1) + c1e(dz_global, 0)) / 2;
+    c1e(zc_global, -2) = c1e(zc_global, -1) - (c1e(dz_global, -2) + c1e(dz_global, -1)) / 2;
+    c1e(zc_global, Nz_global+1) = c1e(zc_global, Nz_global) + (c1e(dz_global, Nz_global-1) + c1e(dz_global, Nz_global)) / 2;
+    c1e(zc_global, Nz_global+2) = c1e(zc_global, Nz_global+1) + (c1e(dz_global, Nz_global) + c1e(dz_global, Nz_global+1)) / 2;
 
-    ce1(dx, -1) = ce1(dx_global, solver->ilower-1);
-    ce1(dx, -2) = ce1(dx_global, solver->ilower-2);
-    ce1(dx, Nx) = ce1(dx_global, solver->ilower+Nx);
-    ce1(dx, Nx+1) = ce1(dx_global, solver->ilower+Nx+1);
+    c1e(dx, -1) = c1e(dx_global, solver->ilower-1);
+    c1e(dx, -2) = c1e(dx_global, solver->ilower-2);
+    c1e(dx, Nx) = c1e(dx_global, solver->ilower+Nx);
+    c1e(dx, Nx+1) = c1e(dx_global, solver->ilower+Nx+1);
 
-    ce1(dy, -1) = ce1(dy_global, solver->jlower-1);
-    ce1(dy, -2) = ce1(dy_global, solver->jlower-2);
-    ce1(dy, Ny) = ce1(dy_global, solver->jlower+Ny);
-    ce1(dy, Ny+1) = ce1(dy_global, solver->jlower+Ny+1);
+    c1e(dy, -1) = c1e(dy_global, solver->jlower-1);
+    c1e(dy, -2) = c1e(dy_global, solver->jlower-2);
+    c1e(dy, Ny) = c1e(dy_global, solver->jlower+Ny);
+    c1e(dy, Ny+1) = c1e(dy_global, solver->jlower+Ny+1);
 
-    ce1(dz, -1) = ce1(dz_global, solver->klower-1);
-    ce1(dz, -2) = ce1(dz_global, solver->klower-2);
-    ce1(dz, Nz) = ce1(dz_global, solver->klower+Nz);
-    ce1(dz, Nz+1) = ce1(dz_global, solver->klower+Nz+1);
+    c1e(dz, -1) = c1e(dz_global, solver->klower-1);
+    c1e(dz, -2) = c1e(dz_global, solver->klower-2);
+    c1e(dz, Nz) = c1e(dz_global, solver->klower+Nz);
+    c1e(dz, Nz+1) = c1e(dz_global, solver->klower+Nz+1);
 
-    ce1(xc, -1) = ce1(xc_global, solver->ilower-1);
-    ce1(xc, -2) = ce1(xc_global, solver->ilower-2);
-    ce1(xc, Nx) = ce1(xc_global, solver->ilower+Nx);
-    ce1(xc, Nx+1) = ce1(xc_global, solver->ilower+Nx+1);
+    c1e(xc, -1) = c1e(xc_global, solver->ilower-1);
+    c1e(xc, -2) = c1e(xc_global, solver->ilower-2);
+    c1e(xc, Nx) = c1e(xc_global, solver->ilower+Nx);
+    c1e(xc, Nx+1) = c1e(xc_global, solver->ilower+Nx+1);
 
-    ce1(yc, -1) = ce1(yc_global, solver->jlower-1);
-    ce1(yc, -2) = ce1(yc_global, solver->jlower-2);
-    ce1(yc, Ny) = ce1(yc_global, solver->jlower+Ny);
-    ce1(yc, Ny+1) = ce1(yc_global, solver->jlower+Ny+1);
+    c1e(yc, -1) = c1e(yc_global, solver->jlower-1);
+    c1e(yc, -2) = c1e(yc_global, solver->jlower-2);
+    c1e(yc, Ny) = c1e(yc_global, solver->jlower+Ny);
+    c1e(yc, Ny+1) = c1e(yc_global, solver->jlower+Ny+1);
 
-    ce1(zc, -1) = ce1(zc_global, solver->klower-1);
-    ce1(zc, -2) = ce1(zc_global, solver->klower-2);
-    ce1(zc, Nz) = ce1(zc_global, solver->klower+Nz);
-    ce1(zc, Nz+1) = ce1(zc_global, solver->klower+Nz+1);
+    c1e(zc, -1) = c1e(zc_global, solver->klower-1);
+    c1e(zc, -2) = c1e(zc_global, solver->klower-2);
+    c1e(zc, Nz) = c1e(zc_global, solver->klower+Nz);
+    c1e(zc, Nz+1) = c1e(zc_global, solver->klower+Nz+1);
 
     /* Calculate second order derivative coefficients */
     for (int i = 0; i < Nx; i++) {
-        ce1(solver->kx_W, i) = solver->dt / (2*solver->Re * (ce1(xc, i) - ce1(xc, i-1))*ce1(dx, i));
-        ce1(solver->kx_E, i) = solver->dt / (2*solver->Re * (ce1(xc, i+1) - ce1(xc, i))*ce1(dx, i));
+        c1e(solver->kx_W, i) = solver->dt / (2*solver->Re * (c1e(xc, i) - c1e(xc, i-1))*c1e(dx, i));
+        c1e(solver->kx_E, i) = solver->dt / (2*solver->Re * (c1e(xc, i+1) - c1e(xc, i))*c1e(dx, i));
     }
     for (int j = 0; j < Ny; j++) {
-        ce1(solver->ky_S, j) = solver->dt / (2*solver->Re * (ce1(yc, j) - ce1(yc, j-1))*ce1(dy, j));
-        ce1(solver->ky_N, j) = solver->dt / (2*solver->Re * (ce1(yc, j+1) - ce1(yc, j))*ce1(dy, j));
+        c1e(solver->ky_S, j) = solver->dt / (2*solver->Re * (c1e(yc, j) - c1e(yc, j-1))*c1e(dy, j));
+        c1e(solver->ky_N, j) = solver->dt / (2*solver->Re * (c1e(yc, j+1) - c1e(yc, j))*c1e(dy, j));
     }
     for (int k = 0; k < Nz; k++) {
-        ce1(solver->kz_D, k) = solver->dt / (2*solver->Re * (ce1(zc, k) - ce1(zc, k-1))*ce1(dz, k));
-        ce1(solver->kz_U, k) = solver->dt / (2*solver->Re * (ce1(zc, k+1) - ce1(zc, k))*ce1(dz, k));
+        c1e(solver->kz_D, k) = solver->dt / (2*solver->Re * (c1e(zc, k) - c1e(zc, k-1))*c1e(dz, k));
+        c1e(solver->kz_U, k) = solver->dt / (2*solver->Re * (c1e(zc, k+1) - c1e(zc, k))*c1e(dz, k));
     }
 
     /* Calculate level set function and flag. */
@@ -553,256 +531,6 @@ void IBMSolver_assemble(IBMSolver *solver) {
     build_hypre(solver);
 }
 
-/**
- * @brief Initializes flow with constant values.
- *
- * @param solver IBMSolver.
- * @param value_u1 Initial value of x-velocity.
- * @param value_u2 Initial value of y-velocity.
- * @param value_u3 Initial value of z-velocity.
- * @param value_p Initial value of pressure.
- */
-void IBMSolver_init_flow_const(
-    IBMSolver *solver,
-    const double value_u1, const double value_u2, const double value_u3,
-    const double value_p
-) {
-    const int Nx = solver->Nx;
-    const int Ny = solver->Ny;
-    const int Nz = solver->Nz;
-
-    double (*const u1)[Ny+2][Nz+2] = solver->u1;
-    double (*const u2)[Ny+2][Nz+2] = solver->u2;
-    double (*const u3)[Ny+2][Nz+2] = solver->u3;
-    double (*const p)[Ny+2][Nz+2] = solver->p;
-
-    solver->iter = 0;
-    solver->time = 0;
-
-    for (int i = 0; i <= Nx+1; i++) {
-        for (int j = 0; j <= Ny+1; j++) {
-            for (int k = 0; k <= Nz+1; k++) {
-                u1[i][j][k] = value_u1;
-                u2[i][j][k] = value_u2;
-                u3[i][j][k] = value_u3;
-                p[i][j][k] = value_p;
-            }
-        }
-    }
-}
-
-/**
- * @brief Initializes flow with data in the given netCDF CF file. Collective.
- *
- * @param solver IBMSolver.
- * @param filename File name without an extension.
- */
-void IBMSolver_init_flow_file(
-    IBMSolver *solver,
-    const char *filename
-) {
-    const int Nx = solver->Nx;
-    const int Ny = solver->Ny;
-    const int Nz = solver->Nz;
-    const int Nx_global = solver->Nx_global;
-
-    double (*const u1)[Ny+2][Nz+2] = solver->u1;
-    double (*const u2)[Ny+2][Nz+2] = solver->u2;
-    double (*const u3)[Ny+2][Nz+2] = solver->u3;
-    double (*const p)[Ny+2][Nz+2] = solver->p;
-
-    struct time_iter {double time; int iter;};
-
-    if (solver->rank == 0) {
-        /* File name with extension. */
-        char filename_ext[100];
-
-        /* Id of current netCDF file. */
-        int ncid;
-        /* Id of variables. */
-        int time_varid, iter_varid, u_varid, v_varid, w_varid, p_varid;
-
-        /* netCDF function return value. */
-        int stat;
-
-        float (*const u_value)[Ny+2][Nx_global+2] = calloc(Nz+2, sizeof(float [Ny+2][Nx_global+2]));
-        float (*const v_value)[Ny+2][Nx_global+2] = calloc(Nz+2, sizeof(float [Ny+2][Nx_global+2]));
-        float (*const w_value)[Ny+2][Nx_global+2] = calloc(Nz+2, sizeof(float [Ny+2][Nx_global+2]));
-        float (*const p_value)[Ny+2][Nx_global+2] = calloc(Nz+2, sizeof(float [Ny+2][Nx_global+2]));
-
-        double (*const u1_global)[Ny+2][Nz+2] = calloc(Nx_global+2, sizeof(double [Ny+2][Nz+2]));
-        double (*const u2_global)[Ny+2][Nz+2] = calloc(Nx_global+2, sizeof(double [Ny+2][Nz+2]));
-        double (*const u3_global)[Ny+2][Nz+2] = calloc(Nx_global+2, sizeof(double [Ny+2][Nz+2]));
-        double (*const p_global)[Ny+2][Nz+2] = calloc(Nx_global+2, sizeof(double [Ny+2][Nz+2]));
-
-        /* Struct containing time and iter. */
-        struct time_iter time_iter;
-
-        /* Concatenate extension. */
-        snprintf(filename_ext, 100, "%s.nc", filename);
-
-        /* Open file. */
-        stat = nc_open(filename_ext, NC_NOWRITE, &ncid);
-        if (stat != NC_NOERR) {
-            printf("cannot open file %s\n", filename);
-            goto error;
-        }
-
-        /* Get variable id. */
-        stat = nc_inq_varid(ncid, "time", &time_varid);
-        if (stat != NC_NOERR) {
-            printf("varible 'time' not found\n");
-            goto error;
-        }
-        stat = nc_inq_varid(ncid, "iter", &iter_varid);
-        if (stat != NC_NOERR) {
-            printf("variable 'iter' not found\n");
-            goto error;
-        }
-        stat = nc_inq_varid(ncid, "u", &u_varid);
-        if (stat != NC_NOERR) {
-            printf("variable 'u' not found\n");
-            goto error;
-        }
-        stat = nc_inq_varid(ncid, "v", &v_varid);
-        if (stat != NC_NOERR) {
-            printf("variable 'v' not found\n");
-            goto error;
-        }
-        stat = nc_inq_varid(ncid, "w", &w_varid);
-        if (stat != NC_NOERR) {
-            printf("variable 'w' not found\n");
-            goto error;
-        }
-        stat = nc_inq_varid(ncid, "p", &p_varid);
-        if (stat != NC_NOERR) {
-            printf("variable 'p' not found\n");
-            goto error;
-        }
-
-        /* Read values. */
-        nc_get_var_double(ncid, time_varid, &solver->time);
-        nc_get_var_int(ncid, iter_varid, &solver->iter);
-        nc_get_var_float(ncid, u_varid, (float *)u_value);
-        nc_get_var_float(ncid, v_varid, (float *)v_value);
-        nc_get_var_float(ncid, w_varid, (float *)w_value);
-        nc_get_var_float(ncid, p_varid, (float *)p_value);
-
-        /* Close file. */
-        nc_close(ncid);
-
-        /* Convert column-major order to row-major order. */
-        for (int i = 0; i <= Nx_global+1; i++) {
-            for (int j = 0; j <= Ny+1; j++) {
-                for (int k = 0; k <= Nz+1; k++) {
-                    u1_global[i][j][k] = u_value[k][j][i];
-                    u2_global[i][j][k] = v_value[k][j][i];
-                    u3_global[i][j][k] = w_value[k][j][i];
-                    p_global[i][j][k] = p_value[k][j][i];
-                }
-            }
-        }
-
-        free(u_value);
-        free(v_value);
-        free(w_value);
-        free(p_value);
-
-        /* Data to process 0. */
-        memcpy(u1, u1_global, sizeof(double)*(Nx+2)*(Ny+2)*(Nz+2));
-        memcpy(u2, u2_global, sizeof(double)*(Nx+2)*(Ny+2)*(Nz+2));
-        memcpy(u3, u3_global, sizeof(double)*(Nx+2)*(Ny+2)*(Nz+2));
-        memcpy(p, p_global, sizeof(double)*(Nx+2)*(Ny+2)*(Nz+2));
-
-        /* Set time and iter. */
-        time_iter.time = solver->time;
-        time_iter.iter = solver->iter;
-
-        /* Send to other processes. */
-        for (int r = 1; r < solver->num_process; r++) {
-            const int ilower_r = r * Nx_global / solver->num_process + 1;
-            const int iupper_r = (r+1) * Nx_global / solver->num_process;
-            const int Nx_r = iupper_r - ilower_r + 1;
-
-            MPI_Send(u1_global[ilower_r-1], (Nx_r+2)*(Ny+2)*(Nz+2), MPI_DOUBLE, r, 0, MPI_COMM_WORLD);
-            MPI_Send(u2_global[ilower_r-1], (Nx_r+2)*(Ny+2)*(Nz+2), MPI_DOUBLE, r, 1, MPI_COMM_WORLD);
-            MPI_Send(u3_global[ilower_r-1], (Nx_r+2)*(Ny+2)*(Nz+2), MPI_DOUBLE, r, 2, MPI_COMM_WORLD);
-            MPI_Send(p_global[ilower_r-1], (Nx_r+2)*(Ny+2)*(Nz+2), MPI_DOUBLE, r, 3, MPI_COMM_WORLD);
-            MPI_Send(&time_iter, 1, MPI_DOUBLE_INT, r, 4, MPI_COMM_WORLD);
-        }
-
-        free(u1_global);
-        free(u2_global);
-        free(u3_global);
-        free(p_global);
-
-        return;
-
-error:
-        MPI_Abort(MPI_COMM_WORLD, -1);
-    }
-    else {
-        struct time_iter time_iter;
-
-        /* Receive from process 0. */
-        MPI_Recv(u1, (Nx+2)*(Ny+2)*(Nz+2), MPI_DOUBLE, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-        MPI_Recv(u2, (Nx+2)*(Ny+2)*(Nz+2), MPI_DOUBLE, 0, 1, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-        MPI_Recv(u3, (Nx+2)*(Ny+2)*(Nz+2), MPI_DOUBLE, 0, 2, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-        MPI_Recv(p, (Nx+2)*(Ny+2)*(Nz+2), MPI_DOUBLE, 0, 3, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-        MPI_Recv(&time_iter, 1, MPI_DOUBLE_INT, 0, 4, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-
-        /* Set time and iter. */
-        solver->time = time_iter.time;
-        solver->iter = time_iter.iter;
-    }
-
-    srand(0);
-    FOR_ALL_CELL (i, j, k) {
-        u1[i][j][k] += (double)rand() / RAND_MAX * 0.02 - 0.01;
-        u2[i][j][k] += (double)rand() / RAND_MAX * 0.02 - 0.01;
-        u3[i][j][k] += (double)rand() / RAND_MAX * 0.02 - 0.01;
-    }
-}
-
-/**
- * @brief Initializes flow with functions. Each function takes three arguments
- *        x, y, and z in turn and returns the value of u1, u2, u3, or p for each
- *        point.
- *
- * @param solver IBMSolver.
- * @param initfunc_u1 Initialization function for u1.
- * @param initfunc_u2 Initialization function for u2.
- * @param initfunc_u3 Initialization function for u3.
- * @param initfunc_p Initialization function for p.
- */
-void IBMSolver_init_flow_func(
-    IBMSolver *solver,
-    IBMSolverInitFunc initfunc_u1,
-    IBMSolverInitFunc initfunc_u2,
-    IBMSolverInitFunc initfunc_u3,
-    IBMSolverInitFunc initfunc_p
-) {
-    const int Nx = solver->Nx;
-    const int Ny = solver->Ny;
-    const int Nz = solver->Nz;
-
-    const double *const xc = solver->xc;
-    const double *const yc = solver->yc;
-    const double *const zc = solver->zc;
-
-    double (*const u1)[Ny+2][Nz+2] = solver->u1;
-    double (*const u2)[Ny+2][Nz+2] = solver->u2;
-    double (*const u3)[Ny+2][Nz+2] = solver->u3;
-    double (*const p)[Ny+2][Nz+2] = solver->p;
-
-    FOR_ALL_CELL(i, j, k) {
-        u1[i][j][k] = initfunc_u1(xc[i], yc[j], zc[k]);
-        u2[i][j][k] = initfunc_u2(xc[i], yc[j], zc[k]);
-        u3[i][j][k] = initfunc_u3(xc[i], yc[j], zc[k]);
-        p[i][j][k] = initfunc_p(xc[i], yc[j], zc[k]);
-    }
-}
-
 static void alloc_arrays(IBMSolver *solver) {
     const int Nx = solver->Nx;
     const int Ny = solver->Ny;
@@ -810,6 +538,9 @@ static void alloc_arrays(IBMSolver *solver) {
     const int Nx_global = solver->Nx_global;
     const int Ny_global = solver->Ny_global;
     const int Nz_global = solver->Nz_global;
+
+    solver->cell_idx = calloc((Nx+4)*(Ny+4)*(Nz+4), sizeof(int));
+    solver->cell_idx_periodic = calloc((Nx+4)*(Ny+4)*(Nz+4), sizeof(int));
 
     solver->dx = calloc(Nx+4, sizeof(double));
     solver->dy = calloc(Ny+4, sizeof(double));
@@ -841,15 +572,15 @@ static void alloc_arrays(IBMSolver *solver) {
     solver->u3_star  = calloc((Nx+4)*(Ny+4)*(Nz+4), sizeof(double));
     solver->u3_tilde = calloc((Nx+4)*(Ny+4)*(Nz+4), sizeof(double));
 
-    solver->U1      = calloc((Nx+3)*(Ny+4)*(Nz+4), sizeof(double));
-    solver->U1_next = calloc((Nx+3)*(Ny+4)*(Nz+4), sizeof(double));
-    solver->U1_star = calloc((Nx+3)*(Ny+4)*(Nz+4), sizeof(double));
-    solver->U2      = calloc((Nx+4)*(Ny+3)*(Nz+4), sizeof(double));
-    solver->U2_next = calloc((Nx+4)*(Ny+3)*(Nz+4), sizeof(double));
-    solver->U2_star = calloc((Nx+4)*(Ny+3)*(Nz+4), sizeof(double));
-    solver->U3      = calloc((Nx+4)*(Ny+4)*(Nz+3), sizeof(double));
-    solver->U3_next = calloc((Nx+4)*(Ny+4)*(Nz+3), sizeof(double));
-    solver->U3_star = calloc((Nx+4)*(Ny+4)*(Nz+3), sizeof(double));
+    solver->U1      = calloc((Nx+1)*(Ny+4)*(Nz+4), sizeof(double));
+    solver->U1_next = calloc((Nx+1)*(Ny+4)*(Nz+4), sizeof(double));
+    solver->U1_star = calloc((Nx+1)*(Ny+4)*(Nz+4), sizeof(double));
+    solver->U2      = calloc((Nx+4)*(Ny+1)*(Nz+4), sizeof(double));
+    solver->U2_next = calloc((Nx+4)*(Ny+1)*(Nz+4), sizeof(double));
+    solver->U2_star = calloc((Nx+4)*(Ny+1)*(Nz+4), sizeof(double));
+    solver->U3      = calloc((Nx+4)*(Ny+4)*(Nz+1), sizeof(double));
+    solver->U3_next = calloc((Nx+4)*(Ny+4)*(Nz+1), sizeof(double));
+    solver->U3_star = calloc((Nx+4)*(Ny+4)*(Nz+1), sizeof(double));
 
     solver->p       = calloc((Nx+4)*(Ny+4)*(Nz+4), sizeof(double));
     solver->p_next  = calloc((Nx+4)*(Ny+4)*(Nz+4), sizeof(double));
@@ -876,6 +607,356 @@ static void alloc_arrays(IBMSolver *solver) {
     solver->z_exchg = calloc(2*(Nx+4)*(Ny+4), sizeof(double));
 }
 
+static void calc_cell_idx(IBMSolver *solver) {
+    const int Nx = solver->Nx;
+    const int Ny = solver->Ny;
+    const int Nz = solver->Nz;
+
+    int ifirst, ilast, jfirst, jlast, kfirst, klast;
+
+    int *x_exchg = calloc(2*(Ny+4)*(Nz+4), sizeof(int));
+    int *y_exchg = calloc(2*(Nx+4)*(Nz+4), sizeof(int));
+    int *z_exchg = calloc(2*(Nx+4)*(Ny+4), sizeof(int));
+
+    int cnt;
+
+    ifirst = solver->ri == 0 ? -2 : 0;
+    ilast = solver->ri == solver->Px-1 ? solver->Nx+2 : solver->Nx;
+    jfirst = solver->rj == 0 ? -2 : 0;
+    jlast = solver->rj == solver->Py-1 ? solver->Ny+2 : solver->Ny;
+    kfirst = solver->rk == 0 ? -2 : 0;
+    klast = solver->rk == solver->Pz-1 ? solver->Nz+2 : solver->Nz;
+
+    cnt = solver->idx_first;
+    for (int i = ifirst; i < ilast; i++) {
+        for (int j = jfirst; j < jlast; j++) {
+            for (int k = kfirst; k < klast; k++) {
+                c3e(solver->cell_idx, i, j, k) = cnt++;
+            }
+        }
+    }
+
+    /* Exchange cell indices. */
+    /* X. */
+    if (solver->ri != solver->Px-1) {
+        cnt = 0;
+        for (int i = Nx-2; i <= Nx-1; i++) {
+            for (int j = -2; j < Ny+2; j++) {
+                for (int k = -2; k < Nz+2; k++) {
+                    x_exchg[cnt++] = c3e(solver->cell_idx, i, j, k);
+                }
+            }
+        }
+        MPI_Send(x_exchg, 2*(Ny+4)*(Nz+4), MPI_INT, solver->rank + solver->Py*solver->Pz, 0, MPI_COMM_WORLD);
+    }
+    if (solver->ri != 0) {
+        MPI_Recv(x_exchg, 2*(Ny+4)*(Nz+4), MPI_INT, solver->rank - solver->Py*solver->Pz, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        cnt = 0;
+        for (int i = -2; i <= -1; i++) {
+            for (int j = -2; j < Ny+2; j++) {
+                for (int k = -2; k < Nz+2; k++) {
+                    c3e(solver->cell_idx, i, j, k) = x_exchg[cnt++];
+                }
+            }
+        }
+        cnt = 0;
+        for (int i = 0; i <= 1; i++) {
+            for (int j = -2; j < Ny+2; j++) {
+                for (int k = -2; k < Nz+2; k++) {
+                    x_exchg[cnt++] = c3e(solver->cell_idx, i, j, k);
+                }
+            }
+        }
+        MPI_Send(x_exchg, 2*(Ny+4)*(Nz+4), MPI_INT, solver->rank - solver->Py*solver->Pz, 0, MPI_COMM_WORLD);
+    }
+    if (solver->ri != solver->Px-1) {
+        MPI_Recv(x_exchg, 2*(Ny+4)*(Nz+4), MPI_INT, solver->rank + solver->Py*solver->Pz, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        cnt = 0;
+        for (int i = Nx; i <= Nx+1; i++) {
+            for (int j = -2; j < Ny+2; j++) {
+                for (int k = -2; k < Nz+2; k++) {
+                    c3e(solver->cell_idx, i, j, k) = x_exchg[cnt++];
+                }
+            }
+        }
+    }
+
+    /* Y. */
+    if (solver->rj != solver->Py-1) {
+        cnt = 0;
+        for (int i = -2; i < Nx+2; i++) {
+            for (int j = Ny-2; j <= Ny-1; j++) {
+                for (int k = -2; k < Nz+2; k++) {
+                    y_exchg[cnt++] = c3e(solver->cell_idx, i, j, k);
+                }
+            }
+        }
+        MPI_Send(y_exchg, 2*(Nx+4)*(Nz+4), MPI_INT, solver->rank + solver->Pz, 0, MPI_COMM_WORLD);
+    }
+    if (solver->rj != 0) {
+        MPI_Recv(y_exchg, 2*(Nx+4)*(Nz+4), MPI_INT, solver->rank - solver->Pz, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        cnt = 0;
+        for (int i = -2; i < Nx+2; i++) {
+            for (int j = -2; j <= -1; j++) {
+                for (int k = -2; k < Nz+2; k++) {
+                    c3e(solver->cell_idx, i, j, k) = y_exchg[cnt++];
+                }
+            }
+        }
+        cnt = 0;
+        for (int i = -2; i < Nx+2; i++) {
+            for (int j = 0; j <= 1; j++) {
+                for (int k = -2; k < Nz+2; k++) {
+                    y_exchg[cnt++] = c3e(solver->cell_idx, i, j, k);
+                }
+            }
+        }
+        MPI_Send(y_exchg, 2*(Nx+4)*(Nz+4), MPI_INT, solver->rank - solver->Pz, 0, MPI_COMM_WORLD);
+    }
+    if (solver->rj != solver->Py-1) {
+        MPI_Recv(y_exchg, 2*(Nx+4)*(Nz+4), MPI_INT, solver->rank + solver->Pz, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        cnt = 0;
+        for (int i = -2; i < Nx+2; i++) {
+            for (int j = Ny; j <= Ny+1; j++) {
+                for (int k = -2; k < Nz+2; k++) {
+                    c3e(solver->cell_idx, i, j, k) = y_exchg[cnt++];
+                }
+            }
+        }
+    }
+
+    /* Z. */
+    if (solver->rk != solver->Pz-1) {
+        cnt = 0;
+        for (int i = -2; i < Nx+2; i++) {
+            for (int j = -2; j < Ny+2; j++) {
+                for (int k = Nz-2; k <= Nz-1; k++) {
+                    z_exchg[cnt++] = c3e(solver->cell_idx, i, j, k);
+                }
+            }
+        }
+        MPI_Send(z_exchg, 2*(Nx+4)*(Ny+4), MPI_INT, solver->rank + 1, 0, MPI_COMM_WORLD);
+    }
+    if (solver->rk != 0) {
+        MPI_Recv(z_exchg, 2*(Nx+4)*(Ny+4), MPI_INT, solver->rank - 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        cnt = 0;
+        for (int i = -2; i < Nx+2; i++) {
+            for (int j = -2; j < Ny+2; j++) {
+                for (int k = -2; k <= -1; k++) {
+                    c3e(solver->cell_idx, i, j, k) = z_exchg[cnt++];
+                }
+            }
+        }
+        cnt = 0;
+        for (int i = -2; i < Nx+2; i++) {
+            for (int j = -2; j < Ny+2; j++) {
+                for (int k = 0; k <= 1; k++) {
+                    z_exchg[cnt++] = c3e(solver->cell_idx, i, j, k);
+                }
+            }
+        }
+        MPI_Send(z_exchg, 2*(Nx+4)*(Ny+4), MPI_INT, solver->rank - 1, 0, MPI_COMM_WORLD);
+    }
+    if (solver->rk != solver->Pz-1) {
+        MPI_Recv(z_exchg, 2*(Nx+4)*(Ny+4), MPI_INT, solver->rank + 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        cnt = 0;
+        for (int i = -2; i < Nx+2; i++) {
+            for (int j = -2; j < Ny+2; j++) {
+                for (int k = Nz; k <= Nz+1; k++) {
+                    c3e(solver->cell_idx, i, j, k) = z_exchg[cnt++];
+                }
+            }
+        }
+    }
+
+    /* Cell index, but periodic. */
+    memcpy(solver->cell_idx_periodic, solver->cell_idx, sizeof(int)*(Nx+4)*(Ny+4)*(Nz+4));
+
+    /* X. */
+    if (solver->Px == 1) {
+        for (int i = -2; i <= -1; i++) {
+            for (int j = -2; j < Ny+2; j++) {
+                for (int k = -2; k < Nz+2; k++) {
+                    c3e(solver->cell_idx_periodic, i, j, k) = c3e(solver->cell_idx_periodic, i+Nx, j, k);
+                }
+            }
+        }
+        for (int i = Nx; i <= Nx+1; i++) {
+            for (int j = -2; j < Ny+2; j++) {
+                for (int k = -2; k < Nz+2; k++) {
+                    c3e(solver->cell_idx_periodic, i, j, k) = c3e(solver->cell_idx_periodic, i-Nx, j, k);
+                }
+            }
+        }
+    }
+    else {
+        if (solver->ri == 0) {
+            MPI_Recv(x_exchg, 2*(Ny+4)*(Nz+4), MPI_INT, solver->rank + (solver->Px-1)*solver->Py*solver->Pz, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            cnt = 0;
+            for (int i = -2; i <= -1; i++) {
+                for (int j = -2; j < Ny+2; j++) {
+                    for (int k = -2; k < Nz+2; k++) {
+                        c3e(solver->cell_idx_periodic, i, j, k) = x_exchg[cnt++];
+                    }
+                }
+            }
+            cnt = 0;
+            for (int i = 0; i <= 1; i++) {
+                for (int j = -2; j < Ny+2; j++) {
+                    for (int k = -2; k < Nz+2; k++) {
+                        x_exchg[cnt++] = c3e(solver->cell_idx_periodic, i, j, k);
+                    }
+                }
+            }
+            MPI_Send(x_exchg, 2*(Ny+4)*(Nz+4), MPI_INT, solver->rank + (solver->Px-1)*solver->Py*solver->Pz, 0, MPI_COMM_WORLD);
+        }
+        else if (solver->ri == solver->Px-1) {
+            cnt = 0;
+            for (int i = Nx-2; i <= Nx-1; i++) {
+                for (int j = -2; j < Ny+2; j++) {
+                    for (int k = -2; k < Nz+2; k++) {
+                        x_exchg[cnt++] = c3e(solver->cell_idx_periodic, i, j, k);
+                    }
+                }
+            }
+            MPI_Send(x_exchg, 2*(Ny+4)*(Nz+4), MPI_INT, solver->rank - (solver->Px-1)*solver->Py*solver->Pz, 0, MPI_COMM_WORLD);
+            MPI_Recv(x_exchg, 2*(Ny+4)*(Nz+4), MPI_INT, solver->rank - (solver->Px-1)*solver->Py*solver->Pz, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            cnt = 0;
+            for (int i = Nx; i <= Nx+1; i++) {
+                for (int j = -2; j < Ny+2; j++) {
+                    for (int k = -2; k < Nz+2; k++) {
+                        c3e(solver->cell_idx_periodic, i, j, k) = x_exchg[cnt++];
+                    }
+                }
+            }
+        }
+    }
+
+    /* Y. */
+    if (solver->Py == 1) {
+        for (int i = -2; i < Nx+2; i++) {
+            for (int j = -2; j <= -1; j++) {
+                for (int k = -2; k < Nz+2; k++) {
+                    c3e(solver->cell_idx_periodic, i, j, k) = c3e(solver->cell_idx_periodic, i, j+Ny, k);
+                }
+            }
+        }
+        for (int i = -2; i < Nx+2; i++) {
+            for (int j = Ny; j <= Ny+1; j++) {
+                for (int k = -2; k < Nz+2; k++) {
+                    c3e(solver->cell_idx_periodic, i, j, k) = c3e(solver->cell_idx_periodic, i, j-Ny, k);
+                }
+            }
+        }
+    }
+    else {
+        if (solver->rj == 0) {
+            MPI_Recv(y_exchg, 2*(Nx+4)*(Nz+4), MPI_INT, solver->rank + (solver->Py-1)*solver->Pz, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            cnt = 0;
+            for (int i = -2; i < Nx+2; i++) {
+                for (int j = -2; j <= -1; j++) {
+                    for (int k = -2; k < Nz+2; k++) {
+                        c3e(solver->cell_idx_periodic, i, j, k) = y_exchg[cnt++];
+                    }
+                }
+            }
+            cnt = 0;
+            for (int i = -2; i < Nx+2; i++) {
+                for (int j = 0; j <= 1; j++) {
+                    for (int k = -2; k < Nz+2; k++) {
+                        y_exchg[cnt++] = c3e(solver->cell_idx_periodic, i, j, k);
+                    }
+                }
+            }
+            MPI_Send(y_exchg, 2*(Nx+4)*(Nz+4), MPI_INT, solver->rank + (solver->Py-1)*solver->Pz, 0, MPI_COMM_WORLD);
+        }
+        else if (solver->rj == solver->Py-1) {
+            cnt = 0;
+            for (int i = -2; i < Nx+2; i++) {
+                for (int j = Ny-2; j <= Ny-1; j++) {
+                    for (int k = -2; k < Nz+2; k++) {
+                        y_exchg[cnt++] = c3e(solver->cell_idx_periodic, i, j, k);
+                    }
+                }
+            }
+            MPI_Send(y_exchg, 2*(Nx+4)*(Nz+4), MPI_INT, solver->rank - (solver->Py-1)*solver->Pz, 0, MPI_COMM_WORLD);
+            MPI_Recv(y_exchg, 2*(Nx+4)*(Nz+4), MPI_INT, solver->rank - (solver->Py-1)*solver->Pz, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            cnt = 0;
+            for (int i = -2; i < Nx+2; i++) {
+                for (int j = Ny; j <= Ny+1; j++) {
+                    for (int k = -2; k < Nz+2; k++) {
+                        c3e(solver->cell_idx_periodic, i, j, k) = y_exchg[cnt++];
+                    }
+                }
+            }
+        }
+    }
+
+    /* Z. */
+    if (solver->Pz == 1) {
+        for (int i = -2; i < Nx+2; i++) {
+            for (int j = -2; j < Ny+2; j++) {
+                for (int k = -2; k <= -1; k++) {
+                    c3e(solver->cell_idx_periodic, i, j, k) = c3e(solver->cell_idx_periodic, i, j, k+Nz);
+                }
+            }
+        }
+        for (int i = -2; i < Nx+2; i++) {
+            for (int j = -2; j < Ny+2; j++) {
+                for (int k = Nz; k <= Nz+1; k++) {
+                    c3e(solver->cell_idx_periodic, i, j, k) = c3e(solver->cell_idx_periodic, i, j, k-Nz);
+                }
+            }
+        }
+    }
+    else {
+        if (solver->rk == 0) {
+            MPI_Recv(z_exchg, 2*(Nx+4)*(Ny+4), MPI_INT, solver->rank + (solver->Pz-1), 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            cnt = 0;
+            for (int i = -2; i < Nx+2; i++) {
+                for (int j = -2; j < Ny+2; j++) {
+                    for (int k = -2; k <= -1; k++) {
+                        c3e(solver->cell_idx_periodic, i, j, k) = z_exchg[cnt++];
+                    }
+                }
+            }
+            cnt = 0;
+            for (int i = -2; i < Nx+2; i++) {
+                for (int j = -2; j < Ny+2; j++) {
+                    for (int k = 0; k <= 1; k++) {
+                        z_exchg[cnt++] = c3e(solver->cell_idx_periodic, i, j, k);
+                    }
+                }
+            }
+            MPI_Send(z_exchg, 2*(Nx+4)*(Ny+4), MPI_INT, solver->rank + (solver->Pz-1), 0, MPI_COMM_WORLD);
+        }
+        else if (solver->rk == solver->Pz-1) {
+            cnt = 0;
+            for (int i = -2; i < Nx+2; i++) {
+                for (int j = -2; j < Ny+2; j++) {
+                    for (int k = Nz-2; k <= Nz-1; k++) {
+                        z_exchg[cnt++] = c3e(solver->cell_idx_periodic, i, j, k);
+                    }
+                }
+            }
+            MPI_Send(z_exchg, 2*(Nx+4)*(Ny+4), MPI_INT, solver->rank - (solver->Pz-1), 0, MPI_COMM_WORLD);
+            MPI_Recv(z_exchg, 2*(Nx+4)*(Ny+4), MPI_INT, solver->rank - (solver->Pz-1), 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            cnt = 0;
+            for (int i = -2; i < Nx+2; i++) {
+                for (int j = -2; j < Ny+2; j++) {
+                    for (int k = Nz; k <= Nz+1; k++) {
+                        c3e(solver->cell_idx_periodic, i, j, k) = z_exchg[cnt++];
+                    }
+                }
+            }
+        }
+    }
+
+    free(x_exchg);
+    free(y_exchg);
+    free(z_exchg);
+}
+
 static void calc_lvset_flag(IBMSolver *solver) {
     const int Nx = solver->Nx;
     const int Ny = solver->Ny;
@@ -892,8 +973,8 @@ static void calc_lvset_flag(IBMSolver *solver) {
         for (int i = -2; i < Nx+2; i++) {
             for (int j = -2; j < Ny+2; j++) {
                 for (int k = -2; k < Nz+2; k++) {
-                    ce3(solver->lvset, i, j, k) = .5;
-                    ce3(solver->flag, i, j, k) = FLAG_FLUID;
+                    c3e(solver->lvset, i, j, k) = .5;
+                    c3e(solver->flag, i, j, k) = FLAG_FLUID;
                 }
             }
         }
@@ -905,7 +986,7 @@ static void calc_lvset_flag(IBMSolver *solver) {
         solver->poly,
         Nx+4, Ny+4, Nz+4,
         solver->xc, solver->yc, solver->zc,
-        solver->lvset, .5
+        (double (*)[Ny+4][Nz+4])solver->lvset, .5
     );
 
     /* Calculate flag.
@@ -916,8 +997,8 @@ static void calc_lvset_flag(IBMSolver *solver) {
     for (int i = -2; i < Nx+2; i++) {
         for (int j = -2; j < Ny+2; j++) {
             for (int k = -2; k < Nz+2; k++) {
-                if (ce3(solver->lvset, i, j, k) >= 0) {
-                    ce3(solver->flag, i, j, k) = FLAG_FLUID;
+                if (c3e(solver->lvset, i, j, k) >= 0) {
+                    c3e(solver->flag, i, j, k) = FLAG_FLUID;
                 }
                 else {
                     bool is_ghost_cell = false;
@@ -926,9 +1007,9 @@ static void calc_lvset_flag(IBMSolver *solver) {
                         if (ni < -2 || ni > Nx+2 || nj < -2 || nj > Ny+2 || nk < -2 || nk > Nz+2) {
                             continue;
                         }
-                        is_ghost_cell = is_ghost_cell || ce3(solver->lvset, ni, nj, nk) >= 0;
+                        is_ghost_cell = is_ghost_cell || c3e(solver->lvset, ni, nj, nk) >= 0;
                     }
-                    ce3(solver->flag, i, j, k) = is_ghost_cell ? FLAG_GHOST : FLAG_SOLID;
+                    c3e(solver->flag, i, j, k) = is_ghost_cell ? FLAG_GHOST : FLAG_SOLID;
                 }
             }
         }
@@ -939,33 +1020,33 @@ static void calc_lvset_flag(IBMSolver *solver) {
         cnt = 0;
         for (int j = -2; j < Ny+2; j++) {
             for (int k = -2; k < Nz+2; k++) {
-                x_exchg[cnt++] = ce3(solver->flag, Nx-2, j, k);
+                x_exchg[cnt++] = c3e(solver->flag, Nx-2, j, k);
             }
         }
         MPI_Send(x_exchg, (Ny+4)*(Nz+4), MPI_INT, solver->rank + solver->Py*solver->Pz, 0, MPI_COMM_WORLD);
     }
-    else if (solver->ri != 0) {
+    if (solver->ri != 0) {
         MPI_Recv(x_exchg, (Ny+4)*(Nz+4), MPI_INT, solver->rank - solver->Py*solver->Pz, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
         cnt = 0;
         for (int j = -2; j < Ny+2; j++) {
             for (int k = -2; k < Nz+2; k++) {
-                ce3(solver->flag, -2, j, k) = x_exchg[cnt++];
+                c3e(solver->flag, -2, j, k) = x_exchg[cnt++];
             }
         }
         cnt = 0;
         for (int j = -2; j < Ny+2; j++) {
             for (int k = -2; k < Nz+2; k++) {
-                x_exchg[cnt++] = ce3(solver->flag, 1, j, k);
+                x_exchg[cnt++] = c3e(solver->flag, 1, j, k);
             }
         }
         MPI_Send(x_exchg, (Ny+4)*(Nz+4), MPI_INT, solver->rank - solver->Py*solver->Pz, 0, MPI_COMM_WORLD);
     }
-    else if (solver->ri != solver->Px-1) {
+    if (solver->ri != solver->Px-1) {
         MPI_Recv(x_exchg, (Ny+4)*(Nz+4), MPI_INT, solver->rank + solver->Py*solver->Pz, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
         cnt = 0;
         for (int j = -2; j < Ny+2; j++) {
             for (int k = -2; k < Nz+2; k++) {
-                ce3(solver->flag, Nx+1, j, k) = x_exchg[cnt++];
+                c3e(solver->flag, Nx+1, j, k) = x_exchg[cnt++];
             }
         }
     }
@@ -974,33 +1055,33 @@ static void calc_lvset_flag(IBMSolver *solver) {
         cnt = 0;
         for (int i = -2; i < Nx+2; i++) {
             for (int k = -2; k < Nz+2; k++) {
-                y_exchg[cnt++] = ce3(solver->flag, i, Ny-2, k);
+                y_exchg[cnt++] = c3e(solver->flag, i, Ny-2, k);
             }
         }
         MPI_Send(y_exchg, (Nx+4)*(Nz+4), MPI_INT, solver->rank + solver->Pz, 0, MPI_COMM_WORLD);
     }
-    else if (solver->rj != 0) {
+    if (solver->rj != 0) {
         MPI_Recv(y_exchg, (Nx+4)*(Nz+4), MPI_INT, solver->rank - solver->Pz, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
         cnt = 0;
         for (int i = -2; i < Nx+2; i++) {
             for (int k = -2; k < Nz+2; k++) {
-                ce3(solver->flag, i, -2, k) = y_exchg[cnt++];
+                c3e(solver->flag, i, -2, k) = y_exchg[cnt++];
             }
         }
         cnt = 0;
         for (int i = -2; i < Nx+2; i++) {
             for (int k = -2; k < Nz+2; k++) {
-                y_exchg[cnt++] = ce3(solver->flag, i, 1, k);
+                y_exchg[cnt++] = c3e(solver->flag, i, 1, k);
             }
         }
         MPI_Send(y_exchg, (Nx+4)*(Nz+4), MPI_INT, solver->rank - solver->Pz, 0, MPI_COMM_WORLD);
     }
-    else if (solver->rj != solver->Py-1) {
+    if (solver->rj != solver->Py-1) {
         MPI_Recv(y_exchg, (Nx+4)*(Nz+4), MPI_INT, solver->rank + solver->Pz, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
         cnt = 0;
         for (int i = -2; i < Nx+2; i++) {
             for (int k = -2; k < Nz+2; k++) {
-                ce3(solver->flag, i, Nx+1, k) = y_exchg[cnt++];
+                c3e(solver->flag, i, Nx+1, k) = y_exchg[cnt++];
             }
         }
     }
@@ -1009,42 +1090,46 @@ static void calc_lvset_flag(IBMSolver *solver) {
         cnt = 0;
         for (int i = -2; i < Nx+2; i++) {
             for (int j = -2; j < Ny+2; j++) {
-                z_exchg[cnt++] = ce3(solver->flag, i, j, Nz-2);
+                z_exchg[cnt++] = c3e(solver->flag, i, j, Nz-2);
             }
         }
         MPI_Send(z_exchg, (Nx+4)*(Ny+4), MPI_INT, solver->rank + 1, 0, MPI_COMM_WORLD);
     }
-    else if (solver->rk != 0) {
+    if (solver->rk != 0) {
         MPI_Recv(z_exchg, (Nx+4)*(Ny+4), MPI_INT, solver->rank - 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
         cnt = 0;
         for (int i = -2; i < Nx+2; i++) {
             for (int j = -2; j < Ny+2; j++) {
-                ce3(solver->flag, i, j, -2) = z_exchg[cnt++];
+                c3e(solver->flag, i, j, -2) = z_exchg[cnt++];
             }
         }
         cnt = 0;
         for (int i = -2; i < Nx+2; i++) {
             for (int j = -2; j < Ny+2; j++) {
-                z_exchg[cnt++] = ce3(solver->flag, i, j, 1);
+                z_exchg[cnt++] = c3e(solver->flag, i, j, 1);
             }
         }
         MPI_Send(z_exchg, (Nx+4)*(Ny+4), MPI_INT, solver->rank - 1, 0, MPI_COMM_WORLD);
     }
-    else if (solver->rk != solver->Pz-1) {
+    if (solver->rk != solver->Pz-1) {
         MPI_Recv(z_exchg, (Nx+4)*(Ny+4), MPI_INT, solver->rank + 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
         cnt = 0;
         for (int i = -2; i < Nx+2; i++) {
             for (int j = -2; j < Ny+2; j++) {
-                ce3(solver->flag, i, j, Nz+1) = z_exchg[cnt++];
+                c3e(solver->flag, i, j, Nz+1) = z_exchg[cnt++];
             }
         }
     }
+
+    free(x_exchg);
+    free(y_exchg);
+    free(z_exchg);
 }
 
 static void build_hypre(IBMSolver *solver) {
-    const int Nx = solver->Nx;
-    const int Ny = solver->Ny;
-    const int Nz = solver->Nz;
+    const int Nx_out = solver->Nx_out;
+    const int Ny_out = solver->Ny_out;
+    const int Nz_out = solver->Nz_out;
 
     /* Matrices. */
     solver->A_u1 = create_matrix(solver, 1);
@@ -1060,8 +1145,8 @@ static void build_hypre(IBMSolver *solver) {
     /* Vectors. */
     HYPRE_IJVectorCreate(
         MPI_COMM_WORLD,
-        GLOB_CELL_IDX(1, 1, 1),
-        GLOB_CELL_IDX(Nx, Ny, Nz),
+        solver->idx_first,
+        solver->idx_last-1,
         &solver->b
     );
     HYPRE_IJVectorSetObjectType(solver->b, HYPRE_PARCSR);
@@ -1069,20 +1154,20 @@ static void build_hypre(IBMSolver *solver) {
 
     HYPRE_IJVectorCreate(
         MPI_COMM_WORLD,
-        GLOB_CELL_IDX(1, 1, 1),
-        GLOB_CELL_IDX(Nx, Ny, Nz),
+        solver->idx_first,
+        solver->idx_last-1,
         &solver->x
     );
     HYPRE_IJVectorSetObjectType(solver->x, HYPRE_PARCSR);
     HYPRE_IJVectorInitialize(solver->x);
 
-    solver->vector_rows = calloc(Nx*Ny*Nz, sizeof(int));
-    solver->vector_values = calloc(Nx*Ny*Nz, sizeof(double));
-    solver->vector_zeros = calloc(Nx*Ny*Nz, sizeof(double));
-    solver->vector_res = calloc(Nx*Ny*Nz, sizeof(double));
+    solver->vector_rows = calloc(Nx_out*Ny_out*Nz_out, sizeof(int));
+    solver->vector_values = calloc(Nx_out*Ny_out*Nz_out, sizeof(double));
+    solver->vector_zeros = calloc(Nx_out*Ny_out*Nz_out, sizeof(double));
+    solver->vector_res = calloc(Nx_out*Ny_out*Nz_out, sizeof(double));
 
-    for (int i = 0; i < Nx*Ny*Nz; i++) {
-        solver->vector_rows[i] = GLOB_CELL_IDX(1, 1, 1) + i;
+    for (int i = 0; i < Nx_out*Ny_out*Nz_out; i++) {
+        solver->vector_rows[i] = solver->idx_first + i;
     }
 
     /* Set velocity solver. */
@@ -1177,7 +1262,7 @@ static void build_hypre(IBMSolver *solver) {
         HYPRE_BoomerAMGSetAggNumLevels(solver->precond_p, 1);
         HYPRE_BoomerAMGSetNumSweeps(solver->precond_p, 1);
         HYPRE_BoomerAMGSetRelaxType(solver->precond_p, 6);
-        // HYPRE_BoomerAMGSetPrintLevel(solver->precond_p, 1);
+        HYPRE_BoomerAMGSetPrintLevel(solver->precond_p, 1);
 
         switch (solver->linear_solver_type) {
         case SOLVER_PCG:
@@ -1214,8 +1299,8 @@ static void build_hypre(IBMSolver *solver) {
         }
     }
 
-    HYPRE_IJVectorSetValues(solver->b, Nx*Ny*Nz, solver->vector_rows, solver->vector_zeros);
-    HYPRE_IJVectorSetValues(solver->x, Nx*Ny*Nz, solver->vector_rows, solver->vector_zeros);
+    HYPRE_IJVectorSetValues(solver->b, Nx_out*Ny_out*Nz_out, solver->vector_rows, solver->vector_zeros);
+    HYPRE_IJVectorSetValues(solver->x, Nx_out*Ny_out*Nz_out, solver->vector_rows, solver->vector_zeros);
 
     HYPRE_IJVectorAssemble(solver->b);
     HYPRE_IJVectorAssemble(solver->x);
@@ -1244,9 +1329,6 @@ static HYPRE_IJMatrix create_matrix(IBMSolver *solver, int type) {
     const int Nx = solver->Nx;
     const int Ny = solver->Ny;
     const int Nz = solver->Nz;
-    const int Nx_global = solver->Nx_global;
-    const int Ny_global = solver->Ny_global;
-    const int Nz_global = solver->Nz_global;
 
     const double *kx_W = solver->kx_W;
     const double *kx_E = solver->kx_E;
@@ -1255,264 +1337,63 @@ static HYPRE_IJMatrix create_matrix(IBMSolver *solver, int type) {
     const double *kz_D = solver->kz_D;
     const double *kz_U = solver->kz_U;
 
-    const double *xc = solver->xc;
-    const double *yc = solver->yc;
-    const double *zc = solver->zc;
+    int ifirst, ilast, jfirst, jlast;
 
     HYPRE_IJMatrix A;
 
-    // TODO: Fix global cell index
+    int ncols;
+    int cur_idx;
+    int cols[9];
+    double values[9];
+    double a, b;
+
+    ifirst = solver->ri == 0 ? -2 : 0;
+    ilast = solver->ri == solver->Px-1 ? solver->Nx+2 : solver->Nx;
+    jfirst = solver->rj == 0 ? -2 : 0;
+    jlast = solver->rj == solver->Py-1 ? solver->Ny+2 : solver->Ny;
 
     HYPRE_IJMatrixCreate(
         MPI_COMM_WORLD,
-        solver->idx_first, solver->idx_last,
-        solver->idx_first, solver->idx_last,
+        solver->idx_first, solver->idx_last-1,
+        solver->idx_first, solver->idx_last-1,
         &A
     );
     HYPRE_IJMatrixSetObjectType(A, HYPRE_PARCSR);
     HYPRE_IJMatrixInitialize(A);
 
-    FOR_ALL_CELL (i, j, k) {
-        int cur_idx = GLOB_CELL_IDX(i, j, k);
-        int ncols;
-        int cols[9] = {cur_idx, 0};
-        double values[9] = {0};
+    /* Inner cells. */
+    FOR_INNER_CELL (i, j, k) {
+        cur_idx = c3e(solver->cell_idx, i, j, k);
+        for (int l = 0; l < 9; l++) {
+            cols[l] = 0;
+            values[l] = 0;
+        }
+        cols[0] = cur_idx;
 
         /* Fluid cell. */
-        if (ce3(solver->flag, i, j, k) == FLAG_FLUID) {
+        if (c3e(solver->flag, i, j, k) == FLAG_FLUID) {
             cols[0] = cur_idx;
             for (int l = 0; l < 6; l++) {
-                cols[l+1] = GLOB_CELL_IDX(i+adj[l][0], j+adj[l][1], k+adj[l][2]);
+                cols[l+1] = c3e(solver->cell_idx, i+adj[l][0], j+adj[l][1], k+adj[l][2]);
             }
-            values[0] = 1+ky_N[j]+kx_E[i]+ky_S[j]+kx_W[i]+kz_D[k]+kz_U[k];
-            values[1] = -ky_N[j];
-            values[2] = -kx_E[i];
-            values[3] = -ky_S[j];
-            values[4] = -kx_W[i];
-            values[5] = -kz_D[k];
-            values[6] = -kz_U[k];
+            values[1] = -c1e(ky_N, j);
+            values[2] = -c1e(kx_E, i);
+            values[3] = -c1e(ky_S, j);
+            values[4] = -c1e(kx_W, i);
+            values[5] = -c1e(kz_D, k);
+            values[6] = -c1e(kz_U, k);
+            values[0] = type != 4
+                ? 1-values[1]-values[2]-values[3]-values[4]-values[5]-values[6]
+                : -values[1]-values[2]-values[3]-values[4]-values[5]-values[6];
 
             if (type == 4) {
                 values[0] -= 1;
             }
 
-            /* Boundary cells: a coefficient is added to values[0] for dirichlet
-               boundary condition and is subtracted from for neumann boundary
-               condition. Extrapolation is somewhat more complex. */
-
-            /* West (i = 1) */
-            if (LOCL_TO_GLOB(i) == 1) {
-                switch (solver->bc[3].type) {
-                case BC_VELOCITY_INLET:
-                case BC_STATIONARY_WALL:
-                    values[4] = 0;
-                    if (type != 4) values[0] += kx_W[i];
-                    else           values[0] -= kx_W[i];
-                    break;
-                case BC_PRESSURE_OUTLET:
-                    values[4] = 0;
-                    if (type == 4) values[0] += kx_W[i];
-                    else {
-                        values[0] -= kx_W[i]*(xc[i+1]-xc[i-1])/(xc[i+1]-xc[i]);
-                        values[2] += kx_W[i]*(xc[i]-xc[i-1])/(xc[i+1]-xc[i]);
-                    }
-                    break;
-                case BC_FREE_SLIP_WALL:
-                    values[4] = 0;
-                    if (type == 1) values[0] += kx_W[i];
-                    else           values[0] -= kx_W[i];
-                    break;
-                case BC_ALL_PERIODIC:
-                    cols[4] = LOCL_CELL_IDX(Nx_global, j, k);
-                    break;
-                case BC_VELOCITY_PERIODIC:
-                    if (type != 4) cols[4] = LOCL_CELL_IDX(Nx_global, j, k);
-                    else {
-                        values[4] = 0;
-                        values[0] += kx_W[i];
-                    }
-                    break;
-                }
-            }
-
-            /* East (i = Nx_global) */
-            if (LOCL_TO_GLOB(i) == Nx_global) {
-                switch (solver->bc[1].type) {
-                case BC_VELOCITY_INLET:
-                case BC_STATIONARY_WALL:
-                    values[2] = 0;
-                    if (type != 4) values[0] += kx_E[i];
-                    else           values[0] -= kx_E[i];
-                    break;
-                case BC_PRESSURE_OUTLET:
-                    values[2] = 0;
-                    if (type == 4) values[0] += kx_E[i];
-                    else {
-                        values[0] -= kx_E[i]*(xc[i+1]-xc[i-1])/(xc[i]-xc[i-1]);
-                        values[4] += kx_E[i]*(xc[i+1]-xc[i])/(xc[i]-xc[i-1]);
-                    }
-                    break;
-                case BC_FREE_SLIP_WALL:
-                    values[2] = 0;
-                    if (type == 1) values[0] += kx_E[i];
-                    else           values[0] -= kx_E[i];
-                    break;
-                case BC_ALL_PERIODIC:
-                    cols[2] = LOCL_CELL_IDX(1, j, k);
-                    break;
-                case BC_VELOCITY_PERIODIC:
-                    if (type != 4) cols[2] = LOCL_CELL_IDX(1, j, k);
-                    else {
-                        values[2] = 0;
-                        values[0] += kx_E[i];
-                    }
-                    break;
-                }
-            }
-
-            /* South (j = 1) */
-            if (j == 1) {
-                switch (solver->bc[2].type) {
-                case BC_VELOCITY_INLET:
-                case BC_STATIONARY_WALL:
-                    values[3] = 0;
-                    if (type != 4) values[0] += ky_S[j];
-                    else           values[0] -= ky_S[j];
-                    break;
-                case BC_PRESSURE_OUTLET:
-                    values[3] = 0;
-                    if (type == 4) values[0] += ky_S[j];
-                    else {
-                        values[0] -= ky_S[j]*(yc[j+1]-yc[j-1])/(yc[j+1]-yc[j]);
-                        values[1] += ky_S[j]*(yc[j]-yc[j-1])/(yc[j+1]-yc[j]);
-                    }
-                    break;
-                case BC_FREE_SLIP_WALL:
-                    values[3] = 0;
-                    if (type == 2) values[0] += ky_S[j];
-                    else           values[0] -= ky_S[j];
-                    break;
-                case BC_ALL_PERIODIC:
-                    cols[3] = GLOB_CELL_IDX(i, Ny, k);
-                    break;
-                case BC_VELOCITY_PERIODIC:
-                    if (type != 4) cols[3] = GLOB_CELL_IDX(i, Ny, k);
-                    else {
-                        values[3] = 0;
-                        values[0] += ky_S[j];
-                    }
-                    break;
-                }
-            }
-
-            /* North (j = Ny) */
-            if (j == Ny) {
-                switch (solver->bc[0].type) {
-                case BC_VELOCITY_INLET:
-                case BC_STATIONARY_WALL:
-                    values[1] = 0;
-                    if (type != 4) values[0] += ky_N[j];
-                    else           values[0] -= ky_N[j];
-                    break;
-                case BC_PRESSURE_OUTLET:
-                    values[1] = 0;
-                    if (type == 4) values[0] += ky_N[j];
-                    else {
-                        values[0] -= ky_N[j]*(yc[j+1]-yc[j-1])/(yc[j]-yc[j-1]);
-                        values[3] += ky_N[j]*(yc[j+1]-yc[j])/(yc[j]-yc[j-1]);
-                    }
-                    break;
-                case BC_FREE_SLIP_WALL:
-                    values[1] = 0;
-                    if (type == 2) values[0] += ky_N[j];
-                    else           values[0] -= ky_N[j];
-                    break;
-                case BC_ALL_PERIODIC:
-                    cols[1] = GLOB_CELL_IDX(i, 1, k);
-                    break;
-                case BC_VELOCITY_PERIODIC:
-                    if (type != 4) cols[1] = GLOB_CELL_IDX(i, 1, k);
-                    else {
-                        values[1] = 0;
-                        values[0] += ky_N[j];
-                    }
-                    break;
-                }
-            }
-
-            /* Down (k = 1) */
-            if (k == 1) {
-                switch (solver->bc[4].type) {
-                case BC_VELOCITY_INLET:
-                case BC_STATIONARY_WALL:
-                    values[5] = 0;
-                    if (type != 4) values[0] += kz_D[k];
-                    else           values[0] -= kz_D[k];
-                    break;
-                case BC_PRESSURE_OUTLET:
-                    values[5] = 0;
-                    if (type == 4) values[0] += kz_D[k];
-                    else {
-                        values[0] -= kz_D[k]*(zc[k+1]-zc[k-1])/(zc[k+1]-zc[k]);
-                        values[6] += kz_D[k]*(zc[k]-zc[k-1])/(zc[k+1]-zc[k]);
-                    }
-                    break;
-                case BC_FREE_SLIP_WALL:
-                    values[5] = 0;
-                    if (type == 3) values[0] += kz_D[k];
-                    else           values[0] -= kz_D[k];
-                    break;
-                case BC_ALL_PERIODIC:
-                    cols[5] = GLOB_CELL_IDX(i, j, Nz);
-                    break;
-                case BC_VELOCITY_PERIODIC:
-                    if (type != 4) cols[5] = GLOB_CELL_IDX(i, j, Nz);
-                    else {
-                        values[5] = 0;
-                        values[0] += kz_D[k];
-                    }
-                    break;
-                }
-            }
-
-            /* Up (k = Nz) */
-            if (k == Nz) {
-                switch (solver->bc[5].type) {
-                case BC_VELOCITY_INLET:
-                case BC_STATIONARY_WALL:
-                    values[6] = 0;
-                    if (type != 4) values[0] += kz_U[k];
-                    else           values[0] -= kz_U[k];
-                    break;
-                case BC_PRESSURE_OUTLET:
-                    values[6] = 0;
-                    if (type == 4) values[0] += kz_U[k];
-                    else {
-                        values[0] -= kz_U[k]*(zc[k+1]-zc[k-1])/(zc[k]-zc[k-1]);
-                        values[5] += kz_U[k]*(zc[k+1]-zc[k])/(zc[k]-zc[k-1]);
-                    }
-                    break;
-                case BC_FREE_SLIP_WALL:
-                    values[6] = 0;
-                    if (type == 3) values[0] += kz_U[k];
-                    else           values[0] -= kz_U[k];
-                    break;
-                case BC_ALL_PERIODIC:
-                    cols[6] = GLOB_CELL_IDX(i, j, 1);
-                    break;
-                case BC_VELOCITY_PERIODIC:
-                    if (type != 4) cols[6] = GLOB_CELL_IDX(i, j, 1);
-                    else {
-                        values[6] = 0;
-                        values[0] += kz_U[k];
-                    }
-                    break;
-                }
-            }
-
             /* Normalize pressure equation. */
             if (type == 4) {
-                p_coeffsum[i][j][k] = values[0];
+                /* Store center coefficient to normalize RHS also. */
+                c3e(solver->p_coeffsum, i, j, k) = values[0];
                 for (int l = 1; l < 7; l++) {
                     values[l] /= values[0];
                 }
@@ -1520,63 +1401,64 @@ static HYPRE_IJMatrix create_matrix(IBMSolver *solver, int type) {
             }
         }
 
-        /* Ghost cell. */
-        else if (flag[i][j][k] == FLAG_GHOST) {
-            int interp_idx[8][3];
-            double interp_coeff[8];
-            double coeffsum = 0;
+        // /* Ghost cell. */
+        // else if (c3e(solver->flag, i, j, k) == FLAG_GHOST) {
+        //     int interp_idx[8][3];
+        //     double interp_coeff[8];
+        //     double coeffsum;
 
-            values[0] = 1;
+        //     values[0] = 1;
 
-            get_interp_info(solver, i, j, k, interp_idx, interp_coeff);
+        //     get_interp_info(solver, i, j, k, interp_idx, interp_coeff);
 
-            /* If an interpolation cell index is out of range, ignore it. */
-            for (int l = 0; l < 8; l++) {
-                if (
-                    interp_idx[l][0] < 1 || interp_idx[l][0] > Nx_global
-                    || interp_idx[l][1] < 1 || interp_idx[l][1] > Ny
-                    || interp_idx[l][2] < 1 || interp_idx[l][2] > Nz
-                ) {
-                    interp_coeff[l] = 0;
-                }
-            }
+        //     /* If a solid cell is used for interpolation, ignore it. */
+        //     for (int l = 0; l < 8; l++) {
+        //         if (c3e(solver->flag, interp_idx[l][0], interp_idx[l][1], interp_idx[l][2]) == FLAG_SOLID) {
+        //             interp_coeff[l] = 0;
+        //         }
+        //     }
 
-            /* Normalize. */
-            for (int l = 0; l < 8; l++) {
-                coeffsum += interp_coeff[l];
-            }
-            for (int l = 0; l < 8; l++) {
-                interp_coeff[l] /= coeffsum;
-            }
+        //     /* Normalize. */
+        //     coeffsum = 0;
+        //     for (int l = 0; l < 8; l++) {
+        //         coeffsum += interp_coeff[l];
+        //     }
+        //     for (int l = 0; l < 8; l++) {
+        //         interp_coeff[l] /= coeffsum;
+        //     }
 
-            /* If the mirror point is not interpolated using the ghost cell
-               itself. */
-            for (int l = 0; l < 8; l++) {
-                if (LOCL_CELL_IDX(interp_idx[l][0], interp_idx[l][1], interp_idx[l][2]) == cur_idx) {
-                    if (type != 4) {
-                        values[0] += interp_coeff[l];
-                    }
-                    else {
-                        values[0] -= interp_coeff[l];
-                    }
-                    interp_coeff[l] = 0;
-                    break;
-                }
-            }
+        //     /* If the mirror point is not interpolated using the ghost cell
+        //        itself. */
+        //     for (int l = 0; l < 8; l++) {
+        //         if (c3e(solver->cell_idx, interp_idx[l][0], interp_idx[l][1], interp_idx[l][2]) == cur_idx) {
+        //             if (type != 4) {
+        //                 values[0] += interp_coeff[l];
+        //             }
+        //             else {
+        //                 values[0] -= interp_coeff[l];
+        //             }
+        //             interp_coeff[l] = 0;
+        //             break;
+        //         }
+        //     }
 
-            for (int l = 0; l < 8; l++) {
-                cols[l+1] = LOCL_CELL_IDX(interp_idx[l][0], interp_idx[l][1], interp_idx[l][2]);
-                if (type != 4) {
-                    values[l+1] = interp_coeff[l];
-                }
-                else {
-                    values[l+1] = -interp_coeff[l];
-                }
-            }
-        }
+        //     for (int l = 0; l < 8; l++) {
+        //         cols[l+1] = c3e(solver->cell_idx, interp_idx[l][0], interp_idx[l][1], interp_idx[l][2]);
+        //         if (type != 4) {
+        //             values[l+1] = interp_coeff[l];
+        //         }
+        //         else {
+        //             values[l+1] = -interp_coeff[l];
+        //         }
+        //     }
+        // }
 
-        /* Solid cell. */
-        else if (flag[i][j][k] == FLAG_SOLID) {
+        // /* Solid cell. */
+        // else if (c3e(solver->flag, i, j, k) == FLAG_SOLID) {
+        //     values[0] = 1;
+        // }
+
+        else {
             values[0] = 1;
         }
 
@@ -1593,6 +1475,1188 @@ static HYPRE_IJMatrix create_matrix(IBMSolver *solver, int type) {
         HYPRE_IJMatrixSetValues(A, 1, &ncols, &cur_idx, cols, values);
     }
 
+    /* Outer cells - west. */
+    if (solver->ri == 0) {
+        switch (solver->bc[3].type) {
+        case BC_VELOCITY_INLET:
+        case BC_STATIONARY_WALL:
+            for (int j = 0; j < Ny; j++) {
+                for (int k = 0; k < Nz; k++) {
+                    ncols = 2;
+
+                    /* i = -2 */
+                    cols[0] = c3e(solver->cell_idx, -2, j, k);
+                    cols[1] = c3e(solver->cell_idx, 1, j, k);
+                    a = c1e(solver->dx, -2) / 2 + c1e(solver->dx, -1);
+                    b = c1e(solver->dx, 0) + c1e(solver->dx, 1) / 2;
+                    if (type != 4) {
+                        values[0] = b / (a+b);
+                        values[1] = a / (a+b);
+                    }
+                    else {
+                        values[0] = 1;
+                        values[1] = -1;
+                    }
+                    HYPRE_IJMatrixSetValues(A, 1, &ncols, &cols[0], cols, values);
+
+                    /* i = -1 */
+                    cols[0] = c3e(solver->cell_idx, -1, j, k);
+                    cols[1] = c3e(solver->cell_idx, 0, j, k);
+                    a = c1e(solver->dx, -1) / 2;
+                    b = c1e(solver->dx, 0) / 2;
+                    if (type != 4) {
+                        values[0] = b / (a+b);
+                        values[1] = a / (a+b);
+                    }
+                    else {
+                        values[0] = 1;
+                        values[1] = -1;
+                    }
+                    HYPRE_IJMatrixSetValues(A, 1, &ncols, &cols[0], cols, values);
+                }
+            }
+            break;
+        case BC_PRESSURE_OUTLET:
+            for (int j = 0; j < Ny; j++) {
+                for (int k = 0; k < Nz; k++) {
+                    if (type != 4) {
+                        ncols = 3;
+
+                        /* i = -2 */
+                        cols[0] = c3e(solver->cell_idx, -2, j, k);
+                        cols[1] = c3e(solver->cell_idx, -1, j, k);
+                        cols[2] = c3e(solver->cell_idx, 0, j, k);
+                        a = c1e(solver->xc, -1) - c1e(solver->xc, -2);
+                        b = c1e(solver->xc, 0) - c1e(solver->xc, -1);
+                        values[0] = b / (a+b);
+                        values[1] = -1;
+                        values[2] = a / (a+b);
+                        HYPRE_IJMatrixSetValues(A, 1, &ncols, &cols[0], cols, values);
+
+                        /* i = -1 */
+                        cols[0] = c3e(solver->cell_idx, -1, j, k);
+                        cols[1] = c3e(solver->cell_idx, 0, j, k);
+                        cols[2] = c3e(solver->cell_idx, 1, j, k);
+                        a = c1e(solver->xc, 0) - c1e(solver->xc, -1);
+                        b = c1e(solver->xc, 1) - c1e(solver->xc, 0);
+                        values[0] = b / (a+b);
+                        values[1] = -1;
+                        values[2] = a / (a+b);
+                        HYPRE_IJMatrixSetValues(A, 1, &ncols, &cols[0], cols, values);
+                    }
+                    else {
+                        ncols = 2;
+
+                        /* i = -2 */
+                        cols[0] = c3e(solver->cell_idx, -2, j, k);
+                        cols[1] = c3e(solver->cell_idx, 1, j, k);
+                        a = c1e(solver->dx, -2) / 2 + c1e(solver->dx, -1);
+                        b = c1e(solver->dx, 0) + c1e(solver->dx, 1) / 2;
+                        values[0] = b / (a+b);
+                        values[1] = a / (a+b);
+                        HYPRE_IJMatrixSetValues(A, 1, &ncols, &cols[0], cols, values);
+
+                        /* i = -1 */
+                        cols[0] = c3e(solver->cell_idx, -1, j, k);
+                        cols[1] = c3e(solver->cell_idx, 0, j, k);
+                        a = c1e(solver->dx, -1) / 2;
+                        b = c1e(solver->dx, 0) / 2;
+                        values[0] = b / (a+b);
+                        values[1] = a / (a+b);
+                        HYPRE_IJMatrixSetValues(A, 1, &ncols, &cols[0], cols, values);
+                    }
+                }
+            }
+            break;
+        case BC_FREE_SLIP_WALL:
+            for (int j = 0; j < Ny; j++) {
+                for (int k = 0; k < Nz; k++) {
+                    ncols = 2;
+
+                    /* i = -2 */
+                    cols[0] = c3e(solver->cell_idx, -2, j, k);
+                    cols[1] = c3e(solver->cell_idx, 1, j, k);
+                    a = c1e(solver->dx, -2) / 2 + c1e(solver->dx, -1);
+                    b = c1e(solver->dx, 0) + c1e(solver->dx, 1) / 2;
+                    if (type == 1) {
+                        values[0] = b / (a+b);
+                        values[1] = a / (a+b);
+                    }
+                    else {
+                        values[0] = 1;
+                        values[1] = -1;
+                    }
+                    HYPRE_IJMatrixSetValues(A, 1, &ncols, &cols[0], cols, values);
+
+                    /* i = -1 */
+                    cols[0] = c3e(solver->cell_idx, -1, j, k);
+                    cols[1] = c3e(solver->cell_idx, 0, j, k);
+                    a = c1e(solver->dx, -1) / 2;
+                    b = c1e(solver->dx, 0) / 2;
+                    if (type == 1) {
+                        values[0] = b / (a+b);
+                        values[1] = a / (a+b);
+                    }
+                    else {
+                        values[0] = 1;
+                        values[1] = -1;
+                    }
+                    HYPRE_IJMatrixSetValues(A, 1, &ncols, &cols[0], cols, values);
+                }
+            }
+            break;
+        case BC_ALL_PERIODIC:
+            for (int j = 0; j < Ny; j++) {
+                for (int k = 0; k < Nz; k++) {
+                    ncols = 2;
+
+                    /* i = -2 */
+                    cols[0] = c3e(solver->cell_idx, -2, j, k);
+                    cols[1] = c3e(solver->cell_idx_periodic, -2, j, k);
+                    values[0] = 1;
+                    values[1] = -1;
+                    HYPRE_IJMatrixSetValues(A, 1, &ncols, &cols[0], cols, values);
+
+                    /* i = -1 */
+                    cols[0] = c3e(solver->cell_idx, -1, j, k);
+                    cols[1] = c3e(solver->cell_idx_periodic, -1, j, k);
+                    values[0] = 1;
+                    values[1] = -1;
+                    HYPRE_IJMatrixSetValues(A, 1, &ncols, &cols[0], cols, values);
+                }
+            }
+            break;
+        case BC_VELOCITY_PERIODIC:
+            for (int j = 0; j < Ny; j++) {
+                for (int k = 0; k < Nz; k++) {
+                    ncols = 2;
+
+                    if (type != 4) {
+                        /* i = -2 */
+                        cols[0] = c3e(solver->cell_idx, -2, j, k);
+                        cols[1] = c3e(solver->cell_idx_periodic, -2, j, k);
+                        values[0] = 1;
+                        values[1] = -1;
+                        HYPRE_IJMatrixSetValues(A, 1, &ncols, &cols[0], cols, values);
+
+                        /* i = -1 */
+                        cols[0] = c3e(solver->cell_idx, -1, j, k);
+                        cols[1] = c3e(solver->cell_idx_periodic, -1, j, k);
+                        values[0] = 1;
+                        values[1] = -1;
+                        HYPRE_IJMatrixSetValues(A, 1, &ncols, &cols[0], cols, values);
+                    }
+                    else {
+                        /* i = -2 */
+                        cols[0] = c3e(solver->cell_idx, -2, j, k);
+                        cols[1] = c3e(solver->cell_idx, 1, j, k);
+                        a = c1e(solver->dx, -2) / 2 + c1e(solver->dx, -1);
+                        b = c1e(solver->dx, 0) + c1e(solver->dx, 1) / 2;
+                        values[0] = b / (a+b);
+                        values[1] = a / (a+b);
+                        HYPRE_IJMatrixSetValues(A, 1, &ncols, &cols[0], cols, values);
+
+                        /* i = -1 */
+                        cols[0] = c3e(solver->cell_idx, -1, j, k);
+                        cols[1] = c3e(solver->cell_idx, 0, j, k);
+                        a = c1e(solver->dx, -1) / 2;
+                        b = c1e(solver->dx, 0) / 2;
+                        values[0] = b / (a+b);
+                        values[1] = a / (a+b);
+                        HYPRE_IJMatrixSetValues(A, 1, &ncols, &cols[0], cols, values);
+                    }
+                }
+            }
+            break;
+        default:;
+        }
+    }
+
+    /* Outer cells - east. */
+    if (solver->ri == solver->Px-1) {
+        switch (solver->bc[1].type) {
+        case BC_VELOCITY_INLET:
+        case BC_STATIONARY_WALL:
+            for (int j = 0; j < Ny; j++) {
+                for (int k = 0; k < Nz; k++) {
+                    ncols = 2;
+
+                    /* i = Nx */
+                    cols[0] = c3e(solver->cell_idx, Nx, j, k);
+                    cols[1] = c3e(solver->cell_idx, Nx-1, j, k);
+                    a = c1e(solver->dx, Nx-1) / 2;
+                    b = c1e(solver->dx, Nx) / 2;
+                    if (type != 4) {
+                        values[0] = a / (a+b);
+                        values[1] = b / (a+b);
+                    }
+                    else {
+                        values[0] = 1;
+                        values[1] = -1;
+                    }
+                    HYPRE_IJMatrixSetValues(A, 1, &ncols, &cols[0], cols, values);
+
+                    /* i = Nx+1 */
+                    cols[0] = c3e(solver->cell_idx, Nx+1, j, k);
+                    cols[1] = c3e(solver->cell_idx, Nx-2, j, k);
+                    a = c1e(solver->dx, Nx-2) + c1e(solver->dx, Nx-1) / 2;
+                    b = c1e(solver->dx, Nx) / 2 + c1e(solver->dx, Nx+1);
+                    if (type != 4) {
+                        values[0] = a / (a+b);
+                        values[1] = b / (a+b);
+                    }
+                    else {
+                        values[0] = 1;
+                        values[1] = -1;
+                    }
+                    HYPRE_IJMatrixSetValues(A, 1, &ncols, &cols[0], cols, values);
+                }
+            }
+            break;
+        case BC_PRESSURE_OUTLET:
+            for (int j = 0; j < Ny; j++) {
+                for (int k = 0; k < Nz; k++) {
+                    if (type != 4) {
+                        ncols = 3;
+
+                        /* i = Nx */
+                        cols[0] = c3e(solver->cell_idx, Nx, j, k);
+                        cols[1] = c3e(solver->cell_idx, Nx-1, j, k);
+                        cols[2] = c3e(solver->cell_idx, Nx-2, j, k);
+                        a = c1e(solver->xc, Nx-1) - c1e(solver->xc, Nx-2);
+                        b = c1e(solver->xc, Nx) - c1e(solver->xc, Nx-1);
+                        values[0] = a / (a+b);
+                        values[1] = -1;
+                        values[2] = b / (a+b);
+                        HYPRE_IJMatrixSetValues(A, 1, &ncols, &cols[0], cols, values);
+
+                        /* i = Nx+1 */
+                        cols[0] = c3e(solver->cell_idx, Nx+1, j, k);
+                        cols[1] = c3e(solver->cell_idx, Nx, j, k);
+                        cols[2] = c3e(solver->cell_idx, Nx-1, j, k);
+                        a = c1e(solver->xc, Nx) - c1e(solver->xc, Nx-1);
+                        b = c1e(solver->xc, Nx+1) - c1e(solver->xc, Nx);
+                        values[0] = a / (a+b);
+                        values[1] = -1;
+                        values[2] = b / (a+b);
+                        HYPRE_IJMatrixSetValues(A, 1, &ncols, &cols[0], cols, values);
+                    }
+                    else {
+                        ncols = 2;
+
+                        /* i = Nx */
+                        cols[0] = c3e(solver->cell_idx, Nx, j, k);
+                        cols[1] = c3e(solver->cell_idx, Nx-1, j, k);
+                        a = c1e(solver->dx, Nx-1) / 2;
+                        b = c1e(solver->dx, Nx) / 2;
+                        values[0] = a / (a+b);
+                        values[1] = b / (a+b);
+                        HYPRE_IJMatrixSetValues(A, 1, &ncols, &cols[0], cols, values);
+
+                        /* i = Nx+1 */
+                        cols[0] = c3e(solver->cell_idx, Nx+1, j, k);
+                        cols[1] = c3e(solver->cell_idx, Nx-2, j, k);
+                        a = c1e(solver->dx, Nx-2) + c1e(solver->dx, Nx-1) / 2;
+                        b = c1e(solver->dx, Nx) / 2 + c1e(solver->dx, Nx+1);
+                        values[0] = a / (a+b);
+                        values[1] = b / (a+b);
+                        HYPRE_IJMatrixSetValues(A, 1, &ncols, &cols[0], cols, values);
+                    }
+                }
+            }
+            break;
+        case BC_FREE_SLIP_WALL:
+            for (int j = 0; j < Ny; j++) {
+                for (int k = 0; k < Nz; k++) {
+                    ncols = 2;
+
+                    /* i = Nx */
+                    cols[0] = c3e(solver->cell_idx, Nx, j, k);
+                    cols[1] = c3e(solver->cell_idx, Nx-1, j, k);
+                    a = c1e(solver->dx, Nx-1) / 2;
+                    b = c1e(solver->dx, Nx) / 2;
+                    if (type == 1) {
+                        values[0] = a / (a+b);
+                        values[1] = b / (a+b);
+                    }
+                    else {
+                        values[0] = 1;
+                        values[1] = -1;
+                    }
+                    HYPRE_IJMatrixSetValues(A, 1, &ncols, &cols[0], cols, values);
+
+                    /* i = Nx+1 */
+                    cols[0] = c3e(solver->cell_idx, Nx+1, j, k);
+                    cols[1] = c3e(solver->cell_idx, Nx-2, j, k);
+                    a = c1e(solver->dx, Nx-2) + c1e(solver->dx, Nx-1) / 2;
+                    b = c1e(solver->dx, Nx) / 2 + c1e(solver->dx, Nx+1);
+                    if (type == 1) {
+                        values[0] = a / (a+b);
+                        values[1] = b / (a+b);
+                    }
+                    else {
+                        values[0] = 1;
+                        values[1] = -1;
+                    }
+                    HYPRE_IJMatrixSetValues(A, 1, &ncols, &cols[0], cols, values);
+                }
+            }
+            break;
+        case BC_ALL_PERIODIC:
+            for (int j = 0; j < Ny; j++) {
+                for (int k = 0; k < Nz; k++) {
+                    ncols = 2;
+
+                    /* i = Nx */
+                    cols[0] = c3e(solver->cell_idx, Nx, j, k);
+                    cols[1] = c3e(solver->cell_idx_periodic, Nx, j, k);
+                    values[0] = 1;
+                    values[1] = -1;
+                    HYPRE_IJMatrixSetValues(A, 1, &ncols, &cols[0], cols, values);
+
+                    /* i = Nx+1 */
+                    cols[0] = c3e(solver->cell_idx, Nx+1, j, k);
+                    cols[1] = c3e(solver->cell_idx_periodic, Nx+1, j, k);
+                    values[0] = 1;
+                    values[1] = -1;
+                    HYPRE_IJMatrixSetValues(A, 1, &ncols, &cols[0], cols, values);
+                }
+            }
+            break;
+        case BC_VELOCITY_PERIODIC:
+            for (int j = 0; j < Ny; j++) {
+                for (int k = 0; k < Nz; k++) {
+                    ncols = 2;
+
+                    if (type != 4) {
+                        /* i = Nx */
+                        cols[0] = c3e(solver->cell_idx, Nx, j, k);
+                        cols[1] = c3e(solver->cell_idx_periodic, Nx, j, k);
+                        values[0] = 1;
+                        values[1] = -1;
+                        HYPRE_IJMatrixSetValues(A, 1, &ncols, &cols[0], cols, values);
+
+                        /* i = Nx+1 */
+                        cols[0] = c3e(solver->cell_idx, Nx+1, j, k);
+                        cols[1] = c3e(solver->cell_idx_periodic, Nx+1, j, k);
+                        values[0] = 1;
+                        values[1] = -1;
+                        HYPRE_IJMatrixSetValues(A, 1, &ncols, &cols[0], cols, values);
+                    }
+                    else {
+                        /* i = Nx */
+                        cols[0] = c3e(solver->cell_idx, Nx, j, k);
+                        cols[1] = c3e(solver->cell_idx, Nx-1, j, k);
+                        a = c1e(solver->dx, Nx-1) / 2;
+                        b = c1e(solver->dx, Nx) / 2;
+                        values[0] = a / (a+b);
+                        values[1] = b / (a+b);
+                        HYPRE_IJMatrixSetValues(A, 1, &ncols, &cols[0], cols, values);
+
+                        /* i = Nx+1 */
+                        cols[0] = c3e(solver->cell_idx, Nx+1, j, k);
+                        cols[1] = c3e(solver->cell_idx, Nx-2, j, k);
+                        a = c1e(solver->dx, Nx-2) + c1e(solver->dx, Nx-1) / 2;
+                        b = c1e(solver->dx, Nx) / 2 + c1e(solver->dx, Nx+1);
+                        values[0] = a / (a+b);
+                        values[1] = b / (a+b);
+                        HYPRE_IJMatrixSetValues(A, 1, &ncols, &cols[0], cols, values);
+                    }
+                }
+            }
+            break;
+        default:;
+        }
+    }
+
+    /* Outer cells - south. */
+    if (solver->rj == 0) {
+        switch (solver->bc[2].type) {
+        case BC_VELOCITY_INLET:
+        case BC_STATIONARY_WALL:
+            for (int i = ifirst; i < ilast; i++) {
+                for (int k = 0; k < Nz; k++) {
+                    ncols = 2;
+
+                    /* j = -2 */
+                    cols[0] = c3e(solver->cell_idx, i, -2, k);
+                    cols[1] = c3e(solver->cell_idx, i, 1, k);
+                    a = c1e(solver->dy, -2) / 2 + c1e(solver->dy, -1);
+                    b = c1e(solver->dy, 0) + c1e(solver->dy, 1) / 2;
+                    if (type != 4) {
+                        values[0] = b / (a+b);
+                        values[1] = a / (a+b);
+                    }
+                    else {
+                        values[0] = 1;
+                        values[1] = -1;
+                    }
+                    HYPRE_IJMatrixSetValues(A, 1, &ncols, &cols[0], cols, values);
+
+                    /* j = -1 */
+                    cols[0] = c3e(solver->cell_idx, i, -1, k);
+                    cols[1] = c3e(solver->cell_idx, i, 0, k);
+                    a = c1e(solver->dy, -1) / 2;
+                    b = c1e(solver->dy, 0) / 2;
+                    if (type != 4) {
+                        values[0] = b / (a+b);
+                        values[1] = a / (a+b);
+                    }
+                    else {
+                        values[0] = 1;
+                        values[1] = -1;
+                    }
+                    HYPRE_IJMatrixSetValues(A, 1, &ncols, &cols[0], cols, values);
+                }
+            }
+            break;
+        case BC_PRESSURE_OUTLET:
+            for (int i = ifirst; i < ilast; i++) {
+                for (int k = 0; k < Nz; k++) {
+                    if (type != 4) {
+                        ncols = 3;
+
+                        /* j = -2 */
+                        cols[0] = c3e(solver->cell_idx, i, -2, k);
+                        cols[1] = c3e(solver->cell_idx, i, -1, k);
+                        cols[2] = c3e(solver->cell_idx, i, 0, k);
+                        a = c1e(solver->yc, -1) - c1e(solver->yc, -2);
+                        b = c1e(solver->yc, 0) - c1e(solver->yc, -1);
+                        values[0] = b / (a+b);
+                        values[1] = -1;
+                        values[2] = a / (a+b);
+                        HYPRE_IJMatrixSetValues(A, 1, &ncols, &cols[0], cols, values);
+
+                        /* j = -1 */
+                        cols[0] = c3e(solver->cell_idx, i, -1, k);
+                        cols[1] = c3e(solver->cell_idx, i, 0, k);
+                        cols[2] = c3e(solver->cell_idx, i, 1, k);
+                        a = c1e(solver->yc, 0) - c1e(solver->yc, -1);
+                        b = c1e(solver->yc, 1) - c1e(solver->yc, 0);
+                        values[0] = b / (a+b);
+                        values[1] = -1;
+                        values[2] = a / (a+b);
+                        HYPRE_IJMatrixSetValues(A, 1, &ncols, &cols[0], cols, values);
+                    }
+                    else {
+                        ncols = 2;
+
+                        /* j = -2 */
+                        cols[0] = c3e(solver->cell_idx, i, -2, k);
+                        cols[1] = c3e(solver->cell_idx, i, 1, k);
+                        a = c1e(solver->dy, -2) / 2 + c1e(solver->dy, -1);
+                        b = c1e(solver->dy, 0) + c1e(solver->dy, 1) / 2;
+                        values[0] = b / (a+b);
+                        values[1] = a / (a+b);
+                        HYPRE_IJMatrixSetValues(A, 1, &ncols, &cols[0], cols, values);
+
+                        /* j = -1 */
+                        cols[0] = c3e(solver->cell_idx, i, -1, k);
+                        cols[1] = c3e(solver->cell_idx, i, 0, k);
+                        a = c1e(solver->dy, -1) / 2;
+                        b = c1e(solver->dy, 0) / 2;
+                        values[0] = b / (a+b);
+                        values[1] = a / (a+b);
+                        HYPRE_IJMatrixSetValues(A, 1, &ncols, &cols[0], cols, values);
+                    }
+                }
+            }
+            break;
+        case BC_FREE_SLIP_WALL:
+            for (int i = ifirst; i < ilast; i++) {
+                for (int k = 0; k < Nz; k++) {
+                    ncols = 2;
+
+                    /* j = -2 */
+                    cols[0] = c3e(solver->cell_idx, i, -2, k);
+                    cols[1] = c3e(solver->cell_idx, i, 1, k);
+                    a = c1e(solver->dy, -2) / 2 + c1e(solver->dy, -1);
+                    b = c1e(solver->dy, 0) + c1e(solver->dy, 1) / 2;
+                    if (type == 2) {
+                        values[0] = b / (a+b);
+                        values[1] = a / (a+b);
+                    }
+                    else {
+                        values[0] = 1;
+                        values[1] = -1;
+                    }
+                    HYPRE_IJMatrixSetValues(A, 1, &ncols, &cols[0], cols, values);
+
+                    /* j = -1 */
+                    cols[0] = c3e(solver->cell_idx, i, -1, k);
+                    cols[1] = c3e(solver->cell_idx, i, 0, k);
+                    a = c1e(solver->dy, -1) / 2;
+                    b = c1e(solver->dy, 0) / 2;
+                    if (type == 2) {
+                        values[0] = b / (a+b);
+                        values[1] = a / (a+b);
+                    }
+                    else {
+                        values[0] = 1;
+                        values[1] = -1;
+                    }
+                    HYPRE_IJMatrixSetValues(A, 1, &ncols, &cols[0], cols, values);
+                }
+            }
+            break;
+        case BC_ALL_PERIODIC:
+            for (int i = ifirst; i < ilast; i++) {
+                for (int k = 0; k < Nz; k++) {
+                    ncols = 2;
+
+                    /* j = -2 */
+                    cols[0] = c3e(solver->cell_idx, i, -2, k);
+                    cols[1] = c3e(solver->cell_idx_periodic, i, -2, k);
+                    values[0] = 1;
+                    values[1] = -1;
+                    HYPRE_IJMatrixSetValues(A, 1, &ncols, &cols[0], cols, values);
+
+                    /* j = -1 */
+                    cols[0] = c3e(solver->cell_idx, i, -1, k);
+                    cols[1] = c3e(solver->cell_idx_periodic, i, -1, k);
+                    values[0] = 1;
+                    values[1] = -1;
+                    HYPRE_IJMatrixSetValues(A, 1, &ncols, &cols[0], cols, values);
+                }
+            }
+            break;
+        case BC_VELOCITY_PERIODIC:
+            for (int i = ifirst; i < ilast; i++) {
+                for (int k = 0; k < Nz; k++) {
+                    ncols = 2;
+
+                    if (type != 4) {
+                        /* j = -2 */
+                        cols[0] = c3e(solver->cell_idx, i, -2, k);
+                        cols[1] = c3e(solver->cell_idx_periodic, i, -2, k);
+                        values[0] = 1;
+                        values[1] = -1;
+                        HYPRE_IJMatrixSetValues(A, 1, &ncols, &cols[0], cols, values);
+
+                        /* j = -1 */
+                        cols[0] = c3e(solver->cell_idx, i, -1, k);
+                        cols[1] = c3e(solver->cell_idx_periodic, i, -1, k);
+                        values[0] = 1;
+                        values[1] = -1;
+                        HYPRE_IJMatrixSetValues(A, 1, &ncols, &cols[0], cols, values);
+                    }
+                    else {
+                        /* j = -2 */
+                        cols[0] = c3e(solver->cell_idx, i, -2, k);
+                        cols[1] = c3e(solver->cell_idx, i, 1, k);
+                        a = c1e(solver->dy, -2) / 2 + c1e(solver->dy, -1);
+                        b = c1e(solver->dy, 0) + c1e(solver->dy, 1) / 2;
+                        values[0] = b / (a+b);
+                        values[1] = a / (a+b);
+                        HYPRE_IJMatrixSetValues(A, 1, &ncols, &cols[0], cols, values);
+
+                        /* j = -1 */
+                        cols[0] = c3e(solver->cell_idx, i, -1, k);
+                        cols[1] = c3e(solver->cell_idx, i, 0, k);
+                        a = c1e(solver->dy, -1) / 2;
+                        b = c1e(solver->dy, 0) / 2;
+                        values[0] = b / (a+b);
+                        values[1] = a / (a+b);
+                        HYPRE_IJMatrixSetValues(A, 1, &ncols, &cols[0], cols, values);
+                    }
+                }
+            }
+            break;
+        default:;
+        }
+    }
+
+    /* Outer cells - north. */
+    if (solver->rj == solver->Py-1) {
+        switch (solver->bc[0].type) {
+        case BC_VELOCITY_INLET:
+        case BC_STATIONARY_WALL:
+            for (int i = ifirst; i < ilast; i++) {
+                for (int k = 0; k < Nz; k++) {
+                    ncols = 2;
+
+                    /* j = Ny */
+                    cols[0] = c3e(solver->cell_idx, i, Ny, k);
+                    cols[1] = c3e(solver->cell_idx, i, Ny-1, k);
+                    a = c1e(solver->dy, Ny-1) / 2;
+                    b = c1e(solver->dy, Ny) / 2;
+                    if (type != 4) {
+                        values[0] = a / (a+b);
+                        values[1] = b / (a+b);
+                    }
+                    else {
+                        values[0] = 1;
+                        values[1] = -1;
+                    }
+                    HYPRE_IJMatrixSetValues(A, 1, &ncols, &cols[0], cols, values);
+
+                    /* j = Ny+1 */
+                    cols[0] = c3e(solver->cell_idx, i, Ny+1, k);
+                    cols[1] = c3e(solver->cell_idx, i, Ny-2, k);
+                    a = c1e(solver->dy, Ny-2) + c1e(solver->dy, Ny-1) / 2;
+                    b = c1e(solver->dy, Ny) / 2 + c1e(solver->dy, Ny+1);
+                    if (type != 4) {
+                        values[0] = a / (a+b);
+                        values[1] = b / (a+b);
+                    }
+                    else {
+                        values[0] = 1;
+                        values[1] = -1;
+                    }
+                    HYPRE_IJMatrixSetValues(A, 1, &ncols, &cols[0], cols, values);
+                }
+            }
+            break;
+        case BC_PRESSURE_OUTLET:
+            for (int i = ifirst; i < ilast; i++) {
+                for (int k = 0; k < Nz; k++) {
+                    if (type != 4) {
+                        ncols = 3;
+
+                        /* j = Ny */
+                        cols[0] = c3e(solver->cell_idx, i, Ny, k);
+                        cols[1] = c3e(solver->cell_idx, i, Ny-1, k);
+                        cols[2] = c3e(solver->cell_idx, i, Ny-2, k);
+                        a = c1e(solver->yc, Ny-1) - c1e(solver->yc, Ny-2);
+                        b = c1e(solver->yc, Ny) - c1e(solver->yc, Ny-1);
+                        values[0] = a / (a+b);
+                        values[1] = -1;
+                        values[2] = b / (a+b);
+                        HYPRE_IJMatrixSetValues(A, 1, &ncols, &cols[0], cols, values);
+
+                        /* j = Ny+1 */
+                        cols[0] = c3e(solver->cell_idx, i, Ny+1, k);
+                        cols[1] = c3e(solver->cell_idx, i, Ny, k);
+                        cols[2] = c3e(solver->cell_idx, i, Ny-1, k);
+                        a = c1e(solver->yc, Ny) - c1e(solver->yc, Ny-1);
+                        b = c1e(solver->yc, Ny+1) - c1e(solver->yc, Ny);
+                        values[0] = a / (a+b);
+                        values[1] = -1;
+                        values[2] = b / (a+b);
+                        HYPRE_IJMatrixSetValues(A, 1, &ncols, &cols[0], cols, values);
+                    }
+                    else {
+                        ncols = 2;
+
+                        /* j = Ny */
+                        cols[0] = c3e(solver->cell_idx, i, Ny, k);
+                        cols[1] = c3e(solver->cell_idx, i, Ny-1, k);
+                        a = c1e(solver->dy, Ny-1) / 2;
+                        b = c1e(solver->dy, Ny) / 2;
+                        values[0] = a / (a+b);
+                        values[1] = b / (a+b);
+                        HYPRE_IJMatrixSetValues(A, 1, &ncols, &cols[0], cols, values);
+
+                        /* j = Ny+1 */
+                        cols[0] = c3e(solver->cell_idx, i, Ny+1, k);
+                        cols[1] = c3e(solver->cell_idx, i, Ny-2, k);
+                        a = c1e(solver->dy, Ny-2) + c1e(solver->dy, Ny-1) / 2;
+                        b = c1e(solver->dy, Ny) / 2 + c1e(solver->dy, Ny+1);
+                        values[0] = a / (a+b);
+                        values[1] = b / (a+b);
+                        HYPRE_IJMatrixSetValues(A, 1, &ncols, &cols[0], cols, values);
+                    }
+                }
+            }
+            break;
+        case BC_FREE_SLIP_WALL:
+            for (int i = ifirst; i < ilast; i++) {
+                for (int k = 0; k < Nz; k++) {
+                    ncols = 2;
+
+                    /* j = Ny */
+                    cols[0] = c3e(solver->cell_idx, i, Ny, k);
+                    cols[1] = c3e(solver->cell_idx, i, Ny-1, k);
+                    a = c1e(solver->dy, Ny-1) / 2;
+                    b = c1e(solver->dy, Ny) / 2;
+                    if (type == 2) {
+                        values[0] = a / (a+b);
+                        values[1] = b / (a+b);
+                    }
+                    else {
+                        values[0] = 1;
+                        values[1] = -1;
+                    }
+                    HYPRE_IJMatrixSetValues(A, 1, &ncols, &cols[0], cols, values);
+
+                    /* j = Ny+1 */
+                    cols[0] = c3e(solver->cell_idx, i, Ny+1, k);
+                    cols[1] = c3e(solver->cell_idx, i, Ny-2, k);
+                    a = c1e(solver->dy, Ny-2) + c1e(solver->dy, Ny-1) / 2;
+                    b = c1e(solver->dy, Ny) / 2 + c1e(solver->dy, Ny+1);
+                    if (type == 2) {
+                        values[0] = a / (a+b);
+                        values[1] = b / (a+b);
+                    }
+                    else {
+                        values[0] = 1;
+                        values[1] = -1;
+                    }
+                    HYPRE_IJMatrixSetValues(A, 1, &ncols, &cols[0], cols, values);
+                }
+            }
+            break;
+        case BC_ALL_PERIODIC:
+            for (int i = ifirst; i < ilast; i++) {
+                for (int k = 0; k < Nz; k++) {
+                    ncols = 2;
+
+                    /* j = Ny */
+                    cols[0] = c3e(solver->cell_idx, i, Ny, k);
+                    cols[1] = c3e(solver->cell_idx_periodic, i, Ny, k);
+                    values[0] = 1;
+                    values[1] = -1;
+                    HYPRE_IJMatrixSetValues(A, 1, &ncols, &cols[0], cols, values);
+
+                    /* j = Ny+1 */
+                    cols[0] = c3e(solver->cell_idx, i, Ny+1, k);
+                    cols[1] = c3e(solver->cell_idx_periodic, i, Ny+1, k);
+                    values[0] = 1;
+                    values[1] = -1;
+                    HYPRE_IJMatrixSetValues(A, 1, &ncols, &cols[0], cols, values);
+                }
+            }
+            break;
+        case BC_VELOCITY_PERIODIC:
+            for (int i = ifirst; i < ilast; i++) {
+                for (int k = 0; k < Nz; k++) {
+                    ncols = 2;
+
+                    if (type != 4) {
+                        /* j = Ny */
+                        cols[0] = c3e(solver->cell_idx, i, Ny, k);
+                        cols[1] = c3e(solver->cell_idx_periodic, i, Ny, k);
+                        values[0] = 1;
+                        values[1] = -1;
+                        HYPRE_IJMatrixSetValues(A, 1, &ncols, &cols[0], cols, values);
+
+                        /* j = Ny+1 */
+                        cols[0] = c3e(solver->cell_idx, i, Ny+1, k);
+                        cols[1] = c3e(solver->cell_idx_periodic, i, Ny+1, k);
+                        values[0] = 1;
+                        values[1] = -1;
+                        HYPRE_IJMatrixSetValues(A, 1, &ncols, &cols[0], cols, values);
+                    }
+                    else {
+                        /* j = Ny */
+                        cols[0] = c3e(solver->cell_idx, i, Ny, k);
+                        cols[1] = c3e(solver->cell_idx, i, Ny-1, k);
+                        a = c1e(solver->dy, Ny-1) / 2;
+                        b = c1e(solver->dy, Ny) / 2;
+                        values[0] = a / (a+b);
+                        values[1] = b / (a+b);
+                        HYPRE_IJMatrixSetValues(A, 1, &ncols, &cols[0], cols, values);
+
+                        /* j = Ny+1 */
+                        cols[0] = c3e(solver->cell_idx, i, Ny+1, k);
+                        cols[1] = c3e(solver->cell_idx, i, Ny-2, k);
+                        a = c1e(solver->dy, Ny-2) + c1e(solver->dy, Ny-1) / 2;
+                        b = c1e(solver->dy, Ny) / 2 + c1e(solver->dy, Ny+1);
+                        values[0] = a / (a+b);
+                        values[1] = b / (a+b);
+                        HYPRE_IJMatrixSetValues(A, 1, &ncols, &cols[0], cols, values);
+                    }
+                }
+            }
+            break;
+        default:;
+        }
+    }
+
+    /* Outer cells - down. */
+    if (solver->rk == 0) {
+        switch (solver->bc[4].type) {
+        case BC_VELOCITY_INLET:
+        case BC_STATIONARY_WALL:
+            for (int i = ifirst; i < ilast; i++) {
+                for (int j = jfirst; j < jlast; j++) {
+                    ncols = 2;
+
+                    /* k = -2 */
+                    cols[0] = c3e(solver->cell_idx, i, j, -2);
+                    cols[1] = c3e(solver->cell_idx, i, j, 1);
+                    a = c1e(solver->dz, -2) / 2 + c1e(solver->dz, -1);
+                    b = c1e(solver->dz, 0) + c1e(solver->dz, 1) / 2;
+                    if (type != 4) {
+                        values[0] = b / (a+b);
+                        values[1] = a / (a+b);
+                    }
+                    else {
+                        values[0] = 1;
+                        values[1] = -1;
+                    }
+                    HYPRE_IJMatrixSetValues(A, 1, &ncols, &cols[0], cols, values);
+
+                    /* k = -1 */
+                    cols[0] = c3e(solver->cell_idx, i, j, -1);
+                    cols[1] = c3e(solver->cell_idx, i, j, 0);
+                    a = c1e(solver->dz, -1) / 2;
+                    b = c1e(solver->dz, 0) / 2;
+                    if (type != 4) {
+                        values[0] = b / (a+b);
+                        values[1] = a / (a+b);
+                    }
+                    else {
+                        values[0] = 1;
+                        values[1] = -1;
+                    }
+                    HYPRE_IJMatrixSetValues(A, 1, &ncols, &cols[0], cols, values);
+                }
+            }
+            break;
+        case BC_PRESSURE_OUTLET:
+            for (int i = ifirst; i < ilast; i++) {
+                for (int j = jfirst; j < jlast; j++) {
+                    if (type != 4) {
+                        ncols = 3;
+
+                        /* k = -2 */
+                        cols[0] = c3e(solver->cell_idx, i, j, -2);
+                        cols[1] = c3e(solver->cell_idx, i, j, -1);
+                        cols[2] = c3e(solver->cell_idx, i, j, 0);
+                        a = c1e(solver->zc, -1) - c1e(solver->zc, -2);
+                        b = c1e(solver->zc, 0) - c1e(solver->zc, -1);
+                        values[0] = b / (a+b);
+                        values[1] = -1;
+                        values[2] = a / (a+b);
+                        HYPRE_IJMatrixSetValues(A, 1, &ncols, &cols[0], cols, values);
+
+                        /* k = -1 */
+                        cols[0] = c3e(solver->cell_idx, i, j, -1);
+                        cols[1] = c3e(solver->cell_idx, i, j, 0);
+                        cols[2] = c3e(solver->cell_idx, i, j, 1);
+                        a = c1e(solver->zc, 0) - c1e(solver->zc, -1);
+                        b = c1e(solver->zc, 1) - c1e(solver->zc, 0);
+                        values[0] = b / (a+b);
+                        values[1] = -1;
+                        values[2] = a / (a+b);
+                        HYPRE_IJMatrixSetValues(A, 1, &ncols, &cols[0], cols, values);
+                    }
+                    else {
+                        ncols = 2;
+
+                        /* k = -2 */
+                        cols[0] = c3e(solver->cell_idx, i, j, -2);
+                        cols[1] = c3e(solver->cell_idx, i, j, 1);
+                        a = c1e(solver->dz, -2) / 2 + c1e(solver->dz, -1);
+                        b = c1e(solver->dz, 0) + c1e(solver->dz, 1) / 2;
+                        values[0] = b / (a+b);
+                        values[1] = a / (a+b);
+                        HYPRE_IJMatrixSetValues(A, 1, &ncols, &cols[0], cols, values);
+
+                        /* k = -1 */
+                        cols[0] = c3e(solver->cell_idx, i, j, -1);
+                        cols[1] = c3e(solver->cell_idx, i, j, 0);
+                        a = c1e(solver->dz, -1) / 2;
+                        b = c1e(solver->dz, 0) / 2;
+                        values[0] = b / (a+b);
+                        values[1] = a / (a+b);
+                        HYPRE_IJMatrixSetValues(A, 1, &ncols, &cols[0], cols, values);
+                    }
+                }
+            }
+            break;
+        case BC_FREE_SLIP_WALL:
+            for (int i = ifirst; i < ilast; i++) {
+                for (int j = jfirst; j < jlast; j++) {
+                    ncols = 2;
+
+                    /* k = -2 */
+                    cols[0] = c3e(solver->cell_idx, i, j, -2);
+                    cols[1] = c3e(solver->cell_idx, i, j, 1);
+                    a = c1e(solver->dz, -2) / 2 + c1e(solver->dz, -1);
+                    b = c1e(solver->dz, 0) + c1e(solver->dz, 1) / 2;
+                    if (type == 3) {
+                        values[0] = b / (a+b);
+                        values[1] = a / (a+b);
+                    }
+                    else {
+                        values[0] = 1;
+                        values[1] = -1;
+                    }
+                    HYPRE_IJMatrixSetValues(A, 1, &ncols, &cols[0], cols, values);
+
+                    /* k = -1 */
+                    cols[0] = c3e(solver->cell_idx, i, j, -1);
+                    cols[1] = c3e(solver->cell_idx, i, j, 0);
+                    a = c1e(solver->dz, -1) / 2;
+                    b = c1e(solver->dz, 0) / 2;
+                    if (type == 3) {
+                        values[0] = b / (a+b);
+                        values[1] = a / (a+b);
+                    }
+                    else {
+                        values[0] = 1;
+                        values[1] = -1;
+                    }
+                    HYPRE_IJMatrixSetValues(A, 1, &ncols, &cols[0], cols, values);
+                }
+            }
+            break;
+        case BC_ALL_PERIODIC:
+            for (int i = ifirst; i < ilast; i++) {
+                for (int j = jfirst; j < jlast; j++) {
+                    ncols = 2;
+
+                    /* k = -2 */
+                    cols[0] = c3e(solver->cell_idx, i, j, -2);
+                    cols[1] = c3e(solver->cell_idx_periodic, i, j, -2);
+                    values[0] = 1;
+                    values[1] = -1;
+                    HYPRE_IJMatrixSetValues(A, 1, &ncols, &cols[0], cols, values);
+
+                    /* k = -1 */
+                    cols[0] = c3e(solver->cell_idx, i, j, -1);
+                    cols[1] = c3e(solver->cell_idx_periodic, i, j, -1);
+                    values[0] = 1;
+                    values[1] = -1;
+                    HYPRE_IJMatrixSetValues(A, 1, &ncols, &cols[0], cols, values);
+                }
+            }
+            break;
+        case BC_VELOCITY_PERIODIC:
+            for (int i = ifirst; i < ilast; i++) {
+                for (int j = jfirst; j < jlast; j++) {
+                    ncols = 2;
+
+                    if (type != 4) {
+                        /* k = -2 */
+                        cols[0] = c3e(solver->cell_idx, i, j, -2);
+                        cols[1] = c3e(solver->cell_idx_periodic, i, j, -2);
+                        values[0] = 1;
+                        values[1] = -1;
+                        HYPRE_IJMatrixSetValues(A, 1, &ncols, &cols[0], cols, values);
+
+                        /* k = -1 */
+                        cols[0] = c3e(solver->cell_idx, i, j, -1);
+                        cols[1] = c3e(solver->cell_idx_periodic, i, j, -1);
+                        values[0] = 1;
+                        values[1] = -1;
+                        HYPRE_IJMatrixSetValues(A, 1, &ncols, &cols[0], cols, values);
+                    }
+                    else {
+                        /* k = -2 */
+                        cols[0] = c3e(solver->cell_idx, i, j, -2);
+                        cols[1] = c3e(solver->cell_idx, i, j, 1);
+                        a = c1e(solver->dz, -2) / 2 + c1e(solver->dz, -1);
+                        b = c1e(solver->dz, 0) + c1e(solver->dz, 1) / 2;
+                        values[0] = b / (a+b);
+                        values[1] = a / (a+b);
+                        HYPRE_IJMatrixSetValues(A, 1, &ncols, &cols[0], cols, values);
+
+                        /* k = -1 */
+                        cols[0] = c3e(solver->cell_idx, i, j, -1);
+                        cols[1] = c3e(solver->cell_idx, i, j, 0);
+                        a = c1e(solver->dz, -1) / 2;
+                        b = c1e(solver->dz, 0) / 2;
+                        values[0] = b / (a+b);
+                        values[1] = a / (a+b);
+                        HYPRE_IJMatrixSetValues(A, 1, &ncols, &cols[0], cols, values);
+                    }
+                }
+            }
+            break;
+        default:;
+        }
+    }
+
+    /* Outer cells - up. */
+    if (solver->rk == solver->Pz-1) {
+        switch (solver->bc[5].type) {
+        case BC_VELOCITY_INLET:
+        case BC_STATIONARY_WALL:
+            for (int i = ifirst; i < ilast; i++) {
+                for (int j = jfirst; j < jlast; j++) {
+                    ncols = 2;
+
+                    /* k = Nz */
+                    cols[0] = c3e(solver->cell_idx, i, j, Nz);
+                    cols[1] = c3e(solver->cell_idx, i, j, Nz-1);
+                    a = c1e(solver->dy, Ny-1) / 2;
+                    b = c1e(solver->dy, Ny) / 2;
+                    if (type != 4) {
+                        values[0] = a / (a+b);
+                        values[1] = b / (a+b);
+                    }
+                    else {
+                        values[0] = 1;
+                        values[1] = -1;
+                    }
+                    HYPRE_IJMatrixSetValues(A, 1, &ncols, &cols[0], cols, values);
+
+                    /* k = Nz+1 */
+                    cols[0] = c3e(solver->cell_idx, i, j, Nz+1);
+                    cols[1] = c3e(solver->cell_idx, i, j, Nz-2);
+                    a = c1e(solver->dz, Nz-2) + c1e(solver->dz, Nz-1) / 2;
+                    b = c1e(solver->dz, Nz) / 2 + c1e(solver->dz, Nz+1);
+                    if (type != 4) {
+                        values[0] = a / (a+b);
+                        values[1] = b / (a+b);
+                    }
+                    else {
+                        values[0] = 1;
+                        values[1] = -1;
+                    }
+                    HYPRE_IJMatrixSetValues(A, 1, &ncols, &cols[0], cols, values);
+                }
+            }
+            break;
+        case BC_PRESSURE_OUTLET:
+            for (int i = ifirst; i < ilast; i++) {
+                for (int j = jfirst; j < jlast; j++) {
+                    if (type != 4) {
+                        ncols = 3;
+
+                        /* k = Nz */
+                        cols[0] = c3e(solver->cell_idx, i, j, Nz);
+                        cols[1] = c3e(solver->cell_idx, i, j, Nz-1);
+                        cols[2] = c3e(solver->cell_idx, i, j, Nz-2);
+                        a = c1e(solver->zc, Nz-1) - c1e(solver->zc, Nz-2);
+                        b = c1e(solver->zc, Nz) - c1e(solver->zc, Nz-1);
+                        values[0] = a / (a+b);
+                        values[1] = -1;
+                        values[2] = b / (a+b);
+                        HYPRE_IJMatrixSetValues(A, 1, &ncols, &cols[0], cols, values);
+
+                        /* k = Nz+1 */
+                        cols[0] = c3e(solver->cell_idx, i, j, Nz+1);
+                        cols[1] = c3e(solver->cell_idx, i, j, Nz);
+                        cols[2] = c3e(solver->cell_idx, i, j, Nz-1);
+                        a = c1e(solver->zc, Nz) - c1e(solver->zc, Nz-1);
+                        b = c1e(solver->zc, Nz+1) - c1e(solver->zc, Nz);
+                        values[0] = a / (a+b);
+                        values[1] = -1;
+                        values[2] = b / (a+b);
+                        HYPRE_IJMatrixSetValues(A, 1, &ncols, &cols[0], cols, values);
+                    }
+                    else {
+                        ncols = 2;
+
+                        /* k = Nz */
+                        cols[0] = c3e(solver->cell_idx, i, j, Nz);
+                        cols[1] = c3e(solver->cell_idx, i, j, Nz-1);
+                        a = c1e(solver->dz, Nz-1) / 2;
+                        b = c1e(solver->dz, Nz) / 2;
+                        values[0] = a / (a+b);
+                        values[1] = b / (a+b);
+                        HYPRE_IJMatrixSetValues(A, 1, &ncols, &cols[0], cols, values);
+
+                        /* k = Nz+1 */
+                        cols[0] = c3e(solver->cell_idx, i, j, Nz+1);
+                        cols[1] = c3e(solver->cell_idx, i, j, Nz-2);
+                        a = c1e(solver->dz, Nz-2) + c1e(solver->dz, Nz-1) / 2;
+                        b = c1e(solver->dz, Nz) / 2 + c1e(solver->dz, Nz+1);
+                        values[0] = a / (a+b);
+                        values[1] = b / (a+b);
+                        HYPRE_IJMatrixSetValues(A, 1, &ncols, &cols[0], cols, values);
+                    }
+                }
+            }
+            break;
+        case BC_FREE_SLIP_WALL:
+            for (int i = ifirst; i < ilast; i++) {
+                for (int j = jfirst; j < jlast; j++) {
+                    ncols = 2;
+
+                    /* k = Nz */
+                    cols[0] = c3e(solver->cell_idx, i, j, Nz);
+                    cols[1] = c3e(solver->cell_idx, i, j, Nz-1);
+                    a = c1e(solver->dz, Nz-1) / 2;
+                    b = c1e(solver->dz, Nz) / 2;
+                    if (type == 3) {
+                        values[0] = a / (a+b);
+                        values[1] = b / (a+b);
+                    }
+                    else {
+                        values[0] = 1;
+                        values[1] = -1;
+                    }
+                    HYPRE_IJMatrixSetValues(A, 1, &ncols, &cols[0], cols, values);
+
+                    /* k = Nz+1 */
+                    cols[0] = c3e(solver->cell_idx, i, j, Nz+1);
+                    cols[1] = c3e(solver->cell_idx, i, j, Nz-2);
+                    a = c1e(solver->dz, Nz-2) + c1e(solver->dz, Nz-1) / 2;
+                    b = c1e(solver->dz, Nz) / 2 + c1e(solver->dz, Nz+1);
+                    if (type == 3) {
+                        values[0] = a / (a+b);
+                        values[1] = b / (a+b);
+                    }
+                    else {
+                        values[0] = 1;
+                        values[1] = -1;
+                    }
+                    HYPRE_IJMatrixSetValues(A, 1, &ncols, &cols[0], cols, values);
+                }
+            }
+            break;
+        case BC_ALL_PERIODIC:
+            for (int i = ifirst; i < ilast; i++) {
+                for (int j = jfirst; j < jlast; j++) {
+                    ncols = 2;
+
+                    /* k = Nz */
+                    cols[0] = c3e(solver->cell_idx, i, j, Nz);
+                    cols[1] = c3e(solver->cell_idx_periodic, i, j, Nz);
+                    values[0] = 1;
+                    values[1] = -1;
+                    HYPRE_IJMatrixSetValues(A, 1, &ncols, &cols[0], cols, values);
+
+                    /* k = Nz+1 */
+                    cols[0] = c3e(solver->cell_idx, i, j, Nz+1);
+                    cols[1] = c3e(solver->cell_idx_periodic, i, j, Nz+1);
+                    values[0] = 1;
+                    values[1] = -1;
+                    HYPRE_IJMatrixSetValues(A, 1, &ncols, &cols[0], cols, values);
+                }
+            }
+            break;
+        case BC_VELOCITY_PERIODIC:
+            for (int i = ifirst; i < ilast; i++) {
+                for (int j = jfirst; j < jlast; j++) {
+                    ncols = 2;
+
+                    if (type != 4) {
+                        /* k = Nz */
+                        cols[0] = c3e(solver->cell_idx, i, j, Nz);
+                        cols[1] = c3e(solver->cell_idx_periodic, i, j, Nz);
+                        values[0] = 1;
+                        values[1] = -1;
+                        HYPRE_IJMatrixSetValues(A, 1, &ncols, &cols[0], cols, values);
+
+                        /* k = Nz+1 */
+                        cols[0] = c3e(solver->cell_idx, i, j, Nz+1);
+                        cols[1] = c3e(solver->cell_idx_periodic, i, j, Nz+1);
+                        values[0] = 1;
+                        values[1] = -1;
+                        HYPRE_IJMatrixSetValues(A, 1, &ncols, &cols[0], cols, values);
+                    }
+                    else {
+                        /* k = Nz */
+                        cols[0] = c3e(solver->cell_idx, i, j, Nz);
+                        cols[1] = c3e(solver->cell_idx, i, j, Nz-1);
+                        a = c1e(solver->dz, Nz-1) / 2;
+                        b = c1e(solver->dz, Nz) / 2;
+                        values[0] = a / (a+b);
+                        values[1] = b / (a+b);
+                        HYPRE_IJMatrixSetValues(A, 1, &ncols, &cols[0], cols, values);
+
+                        /* k = Nz+1 */
+                        cols[0] = c3e(solver->cell_idx, i, j, Nz+1);
+                        cols[1] = c3e(solver->cell_idx, i, j, Nz-2);
+                        a = c1e(solver->dz, Nz-2) + c1e(solver->dz, Nz-1) / 2;
+                        b = c1e(solver->dz, Nz) / 2 + c1e(solver->dz, Nz+1);
+                        values[0] = a / (a+b);
+                        values[1] = b / (a+b);
+                        HYPRE_IJMatrixSetValues(A, 1, &ncols, &cols[0], cols, values);
+                    }
+                }
+            }
+            break;
+        default:;
+        }
+    }
+
     HYPRE_IJMatrixAssemble(A);
 
     return A;
@@ -1603,31 +2667,30 @@ static void get_interp_info(
     const int i, const int j, const int k,
     int interp_idx[restrict][3], double interp_coeff[restrict]
 ) {
+    const int Nx = solver->Nx;
     const int Ny = solver->Ny;
     const int Nz = solver->Nz;
-    const int Nx_global = solver->Nx_global;
 
-    const double *xc = solver->xc;
-    const double *yc = solver->yc;
-    const double *zc = solver->zc;
-    const double *xc_global = solver->xc_global;
+    /* Normal vector. */
+    Vector n;
+    /* Mirror point. */
+    Vector m;
 
-    const double (*lvset)[Ny+2][Nz+2] = solver->lvset;
-
-    Vector n, m;
-
-    n.x = (lvset[i+1][j][k] - lvset[i-1][j][k]) / (xc[i+1] - xc[i-1]);
-    n.y = (lvset[i][j+1][k] - lvset[i][j-1][k]) / (yc[j+1] - yc[j-1]);
-    n.z = (lvset[i][j][k+1] - lvset[i][j][k-1]) / (zc[k+1] - zc[k-1]);
+    n.x = (c3e(solver->lvset, i+1, j, k) - c3e(solver->lvset, i-1, j, k))
+        / (c1e(solver->xc, i+1) - c1e(solver->xc, i-1));
+    n.x = (c3e(solver->lvset, i, j+1, k) - c3e(solver->lvset, i, j-1, k))
+        / (c1e(solver->yc, j+1) - c1e(solver->yc, j-1));
+    n.x = (c3e(solver->lvset, i, j, k+1) - c3e(solver->lvset, i, j, k-1))
+        / (c1e(solver->zc, k+1) - c1e(solver->zc, k-1));
 
     m = Vector_lincom(
-        1, (Vector){xc[i], yc[j], zc[k]},
-        -2*lvset[i][j][k], n
+        1, (Vector){c1e(solver->xc, i), c1e(solver->yc, j), c1e(solver->zc, k)},
+        -2*c3e(solver->lvset, i, j, k), n
     );
 
-    const int im = upper_bound(Nx_global+2, xc_global, m.x) - 1;
-    const int jm = upper_bound(Ny+2, yc, m.y) - 1;
-    const int km = upper_bound(Nz+2, zc, m.z) - 1;
+    const int im = upper_bound_double(Nx+4, solver->xc, m.x) - 3;
+    const int jm = upper_bound_double(Ny+4, solver->yc, m.y) - 3;
+    const int km = upper_bound_double(Nz+4, solver->zc, m.z) - 3;
 
     /* Order of cells:
             011        111
@@ -1646,9 +2709,9 @@ static void get_interp_info(
         interp_idx[l][2] = km + !!(l & 1);
     }
 
-    const double xl = xc_global[im], xu = xc_global[im+1];
-    const double yl = yc[jm], yu = yc[jm+1];
-    const double zl = zc[km], zu = zc[km+1];
+    const double xl = c1e(solver->xc, im), xu = c1e(solver->xc, im+1);
+    const double yl = c1e(solver->yc, jm), yu = c1e(solver->yc, jm+1);
+    const double zl = c1e(solver->zc, km), zu = c1e(solver->zc, km+1);
     const double vol = (xu - xl) * (yu - yl) * (zu - zl);
 
     interp_coeff[0] = (xu-m.x)*(yu-m.y)*(zu-m.z) / vol;
@@ -1669,8 +2732,4 @@ static bool isperiodic(IBMSolverBCType type) {
     default:
         return false;
     }
-}
-
-static int cell_idx(IBMSolver *solver, int i, int j, int k) {
-
 }

@@ -794,12 +794,12 @@ static inline void VertexExtrusion_cpt(
     Vector d;
     double dist;
 
-    xmax_idx = upper_bound(nx, x, ve.vertex.x + ve.radius);
-    xmin_idx = lower_bound(nx, x, ve.vertex.x - ve.radius);
-    ymax_idx = upper_bound(ny, y, ve.vertex.y + ve.radius);
-    ymin_idx = lower_bound(ny, y, ve.vertex.y - ve.radius);
-    zmax_idx = upper_bound(nz, z, ve.vertex.z + ve.radius);
-    zmin_idx = lower_bound(nz, z, ve.vertex.z - ve.radius);
+    xmax_idx = upper_bound_double(nx, x, ve.vertex.x + ve.radius);
+    xmin_idx = lower_bound_double(nx, x, ve.vertex.x - ve.radius);
+    ymax_idx = upper_bound_double(ny, y, ve.vertex.y + ve.radius);
+    ymin_idx = lower_bound_double(ny, y, ve.vertex.y - ve.radius);
+    zmax_idx = upper_bound_double(nz, z, ve.vertex.z + ve.radius);
+    zmin_idx = lower_bound_double(nz, z, ve.vertex.z - ve.radius);
 
     for (int i = xmin_idx; i < xmax_idx; i++) {
         for (int j = ymin_idx; j < ymax_idx; j++) {
@@ -843,12 +843,12 @@ static inline void EdgeExtrusion_cpt(
         zmin = min(zmin, ee.pts[i].z);
     }
 
-    xmax_idx = upper_bound(nx, x, xmax);
-    xmin_idx = lower_bound(nx, x, xmin);
-    ymax_idx = upper_bound(ny, y, ymax);
-    ymin_idx = lower_bound(ny, y, ymin);
-    zmax_idx = upper_bound(nz, z, zmax);
-    zmin_idx = lower_bound(nz, z, zmin);
+    xmax_idx = upper_bound_double(nx, x, xmax);
+    xmin_idx = lower_bound_double(nx, x, xmin);
+    ymax_idx = upper_bound_double(ny, y, ymax);
+    ymin_idx = lower_bound_double(ny, y, ymin);
+    zmax_idx = upper_bound_double(nz, z, zmax);
+    zmin_idx = lower_bound_double(nz, z, zmin);
 
     ee_faces[0] = Plane_3pts(ee.pts[0], ee.pts[4], ee.pts[2]);
     ee_faces[1] = Plane_3pts(ee.pts[1], ee.pts[3], ee.pts[5]);
@@ -903,12 +903,12 @@ static inline void FaceExtrusion_cpt(
         zmin = min(zmin, fe.pts[i].z);
     }
 
-    xmax_idx = upper_bound(nx, x, xmax);
-    xmin_idx = lower_bound(nx, x, xmin);
-    ymax_idx = upper_bound(ny, y, ymax);
-    ymin_idx = lower_bound(ny, y, ymin);
-    zmax_idx = upper_bound(nz, z, zmax);
-    zmin_idx = lower_bound(nz, z, zmin);
+    xmax_idx = upper_bound_double(nx, x, xmax);
+    xmin_idx = lower_bound_double(nx, x, xmin);
+    ymax_idx = upper_bound_double(ny, y, ymax);
+    ymin_idx = lower_bound_double(ny, y, ymin);
+    zmax_idx = upper_bound_double(nz, z, zmax);
+    zmin_idx = lower_bound_double(nz, z, zmin);
 
     fe_faces[0] = Plane_3pts(fe.pts[0], fe.pts[2], fe.pts[1]);
     fe_faces[1] = Plane_3pts(fe.pts[3], fe.pts[4], fe.pts[5]);
