@@ -21,15 +21,15 @@
             for (int k = 0; k < Nz; k++)
 #define FOR_ALL_XSTAG(i, j, k) \
     for (int i = 0; i <= Nx; i++) \
-        for (int j = 1; j <= Ny; j++) \
-            for (int k = 1; k <= Nz; k++)
+        for (int j = 0; j < Ny; j++) \
+            for (int k = 0; k < Nz; k++)
 #define FOR_ALL_YSTAG(i, j, k) \
-    for (int i = 1; i <= Nx; i++) \
+    for (int i = 0; i < Nx; i++) \
         for (int j = 0; j <= Ny; j++) \
-            for (int k = 1; k <= Nz; k++)
+            for (int k = 0; k < Nz; k++)
 #define FOR_ALL_ZSTAG(i, j, k) \
-    for (int i = 1; i <= Nx; i++) \
-        for (int j = 1; j <= Ny; j++) \
+    for (int i = 0; i < Nx; i++) \
+        for (int j = 0; j < Ny; j++) \
             for (int k = 0; k <= Nz; k++)
 
 #define max(a, b) ({typeof(a) _a = a; typeof(b) _b = b; _a > _b ? _a : _b;})
@@ -46,5 +46,11 @@ int lower_bound_int(const int, const int [], const int);
 int upper_bound_int(const int, const int [], const int);
 
 int dir_to_idx(IBMSolverDirection);
+
+void IBMSolver_ghost_interp(
+    IBMSolver *,
+    const int, const int, const int,
+    int [restrict][3], double [restrict]
+);
 
 #endif

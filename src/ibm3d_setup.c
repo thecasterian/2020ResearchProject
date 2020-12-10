@@ -30,11 +30,6 @@ static void calc_lvset_flag(IBMSolver *);
 static void build_hypre(IBMSolver *);
 static HYPRE_IJMatrix create_matrix(IBMSolver *, int);
 
-static void get_interp_info(
-    IBMSolver *,
-    const int, const int, const int,
-    int [restrict][3], double [restrict]
-);
 static bool isperiodic(IBMSolverBCType);
 
 /**
@@ -633,9 +628,9 @@ static void alloc_arrays(IBMSolver *solver) {
 
     solver->p_coeffsum = calloc((Nx+4)*(Ny+4)*(Nz+4), sizeof(double));
 
-    solver->x_exchg = calloc(6*(Ny+4)*(Nz+4), sizeof(double));
-    solver->y_exchg = calloc(6*(Nx+4)*(Nz+4), sizeof(double));
-    solver->z_exchg = calloc(6*(Nx+4)*(Ny+4), sizeof(double));
+    solver->x_exchg = calloc(8*(Ny+4)*(Nz+4), sizeof(double));
+    solver->y_exchg = calloc(8*(Nx+4)*(Nz+4), sizeof(double));
+    solver->z_exchg = calloc(8*(Nx+4)*(Ny+4), sizeof(double));
 }
 
 static void calc_cell_idx(IBMSolver *solver) {
@@ -1389,6 +1384,10 @@ static HYPRE_IJMatrix create_matrix(IBMSolver *solver, int type) {
     double values[9];
     double a, b;
 
+    int interp_idx[8][3];
+    double interp_coeff[8];
+    double coeffsum;
+
     ifirst = solver->ri == 0 ? -2 : 0;
     ilast = solver->ri == solver->Px-1 ? solver->Nx+2 : solver->Nx;
     jfirst = solver->rj == 0 ? -2 : 0;
@@ -1439,13 +1438,9 @@ static HYPRE_IJMatrix create_matrix(IBMSolver *solver, int type) {
 
         /* Ghost cell. */
         else if (c3e(solver->flag, i, j, k) == FLAG_GHOST) {
-            int interp_idx[8][3];
-            double interp_coeff[8];
-            double coeffsum;
-
             values[0] = 1;
 
-            get_interp_info(solver, i, j, k, interp_idx, interp_coeff);
+            IBMSolver_ghost_interp(solver, i, j, k, interp_idx, interp_coeff);
 
             /* If a solid cell is used for interpolation, ignore it. */
             for (int l = 0; l < 8; l++) {
@@ -2697,68 +2692,6 @@ static HYPRE_IJMatrix create_matrix(IBMSolver *solver, int type) {
     HYPRE_IJMatrixAssemble(A);
 
     return A;
-}
-
-static void get_interp_info(
-    IBMSolver *solver,
-    const int i, const int j, const int k,
-    int interp_idx[restrict][3], double interp_coeff[restrict]
-) {
-    const int Nx = solver->Nx;
-    const int Ny = solver->Ny;
-    const int Nz = solver->Nz;
-
-    /* Normal vector. */
-    Vector n;
-    /* Mirror point. */
-    Vector m;
-
-    n.x = (c3e(solver->lvset, i+1, j, k) - c3e(solver->lvset, i-1, j, k))
-        / (c1e(solver->xc, i+1) - c1e(solver->xc, i-1));
-    n.x = (c3e(solver->lvset, i, j+1, k) - c3e(solver->lvset, i, j-1, k))
-        / (c1e(solver->yc, j+1) - c1e(solver->yc, j-1));
-    n.x = (c3e(solver->lvset, i, j, k+1) - c3e(solver->lvset, i, j, k-1))
-        / (c1e(solver->zc, k+1) - c1e(solver->zc, k-1));
-
-    m = Vector_lincom(
-        1, (Vector){c1e(solver->xc, i), c1e(solver->yc, j), c1e(solver->zc, k)},
-        -2*c3e(solver->lvset, i, j, k), n
-    );
-
-    const int im = upper_bound_double(Nx+4, solver->xc, m.x) - 3;
-    const int jm = upper_bound_double(Ny+4, solver->yc, m.y) - 3;
-    const int km = upper_bound_double(Nz+4, solver->zc, m.z) - 3;
-
-    /* Order of cells:
-            011        111
-             +----------+
-        001 /|     101 /|          z
-           +----------+ |          | y
-           | |        | |          |/
-           | +--------|-+          +------ x
-           |/ 010     |/ 110
-           +----------+
-          000        100
-    */
-    for (int l = 0; l < 8; l++) {
-        interp_idx[l][0] = im + !!(l & 4);
-        interp_idx[l][1] = jm + !!(l & 2);
-        interp_idx[l][2] = km + !!(l & 1);
-    }
-
-    const double xl = c1e(solver->xc, im), xu = c1e(solver->xc, im+1);
-    const double yl = c1e(solver->yc, jm), yu = c1e(solver->yc, jm+1);
-    const double zl = c1e(solver->zc, km), zu = c1e(solver->zc, km+1);
-    const double vol = (xu - xl) * (yu - yl) * (zu - zl);
-
-    interp_coeff[0] = (xu-m.x)*(yu-m.y)*(zu-m.z) / vol;
-    interp_coeff[1] = (xu-m.x)*(yu-m.y)*(m.z-zl) / vol;
-    interp_coeff[2] = (xu-m.x)*(m.y-yl)*(zu-m.z) / vol;
-    interp_coeff[3] = (xu-m.x)*(m.y-yl)*(m.z-zl) / vol;
-    interp_coeff[4] = (m.x-xl)*(yu-m.y)*(zu-m.z) / vol;
-    interp_coeff[5] = (m.x-xl)*(yu-m.y)*(m.z-zl) / vol;
-    interp_coeff[6] = (m.x-xl)*(m.y-yl)*(zu-m.z) / vol;
-    interp_coeff[7] = (m.x-xl)*(m.y-yl)*(m.z-zl) / vol;
 }
 
 static bool isperiodic(IBMSolverBCType type) {

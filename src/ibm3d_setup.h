@@ -22,4 +22,10 @@ void IBMSolver_set_autosave(IBMSolver *, const char *, int);
 
 void IBMSolver_assemble(IBMSolver *);
 
+void IBMSolver_ghost_interp(
+    IBMSolver *,
+    const int, const int, const int,
+    int [restrict][3], double [restrict]
+);
+
 #endif

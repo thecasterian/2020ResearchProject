@@ -150,3 +150,65 @@ int dir_to_idx(IBMSolverDirection dir) {
     }
     return -1;
 }
+
+void IBMSolver_ghost_interp(
+    IBMSolver *solver,
+    const int i, const int j, const int k,
+    int interp_idx[restrict][3], double interp_coeff[restrict]
+) {
+    const int Nx = solver->Nx;
+    const int Ny = solver->Ny;
+    const int Nz = solver->Nz;
+
+    /* Normal vector. */
+    Vector n;
+    /* Mirror point. */
+    Vector m;
+
+    n.x = (c3e(solver->lvset, i+1, j, k) - c3e(solver->lvset, i-1, j, k))
+        / (c1e(solver->xc, i+1) - c1e(solver->xc, i-1));
+    n.x = (c3e(solver->lvset, i, j+1, k) - c3e(solver->lvset, i, j-1, k))
+        / (c1e(solver->yc, j+1) - c1e(solver->yc, j-1));
+    n.x = (c3e(solver->lvset, i, j, k+1) - c3e(solver->lvset, i, j, k-1))
+        / (c1e(solver->zc, k+1) - c1e(solver->zc, k-1));
+
+    m = Vector_lincom(
+        1, (Vector){c1e(solver->xc, i), c1e(solver->yc, j), c1e(solver->zc, k)},
+        -2*c3e(solver->lvset, i, j, k), n
+    );
+
+    const int im = upper_bound_double(Nx+4, solver->xc, m.x) - 3;
+    const int jm = upper_bound_double(Ny+4, solver->yc, m.y) - 3;
+    const int km = upper_bound_double(Nz+4, solver->zc, m.z) - 3;
+
+    /* Order of cells:
+            011        111
+             +----------+
+        001 /|     101 /|          z
+           +----------+ |          | y
+           | |        | |          |/
+           | +--------|-+          +------ x
+           |/ 010     |/ 110
+           +----------+
+          000        100
+    */
+    for (int l = 0; l < 8; l++) {
+        interp_idx[l][0] = im + !!(l & 4);
+        interp_idx[l][1] = jm + !!(l & 2);
+        interp_idx[l][2] = km + !!(l & 1);
+    }
+
+    const double xl = c1e(solver->xc, im), xu = c1e(solver->xc, im+1);
+    const double yl = c1e(solver->yc, jm), yu = c1e(solver->yc, jm+1);
+    const double zl = c1e(solver->zc, km), zu = c1e(solver->zc, km+1);
+    const double vol = (xu - xl) * (yu - yl) * (zu - zl);
+
+    interp_coeff[0] = (xu-m.x)*(yu-m.y)*(zu-m.z) / vol;
+    interp_coeff[1] = (xu-m.x)*(yu-m.y)*(m.z-zl) / vol;
+    interp_coeff[2] = (xu-m.x)*(m.y-yl)*(zu-m.z) / vol;
+    interp_coeff[3] = (xu-m.x)*(m.y-yl)*(m.z-zl) / vol;
+    interp_coeff[4] = (m.x-xl)*(yu-m.y)*(zu-m.z) / vol;
+    interp_coeff[5] = (m.x-xl)*(yu-m.y)*(m.z-zl) / vol;
+    interp_coeff[6] = (m.x-xl)*(m.y-yl)*(zu-m.z) / vol;
+    interp_coeff[7] = (m.x-xl)*(m.y-yl)*(m.z-zl) / vol;
+}
