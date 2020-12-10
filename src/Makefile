@@ -1,7 +1,7 @@
 UNAME = $(shell uname)
 
 CC = mpicc
-CFLAGS = -Wall -O3 -Wno-unused-result
+CFLAGS = -Wall -Wextra -O3 -Wno-unused-result
 
 ifeq ($(UNAME), Darwin)
 	INCLUDE = -I/usr/local/Cellar/glib/2.66.0/include/glib-2.0 -I/usr/local/include

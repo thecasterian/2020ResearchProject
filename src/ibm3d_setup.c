@@ -162,6 +162,10 @@ void IBMSolver_destroy(IBMSolver *solver) {
     default:;
     }
 
+    free(solver->x_exchg);
+    free(solver->y_exchg);
+    free(solver->z_exchg);
+
     free(solver);
 }
 
@@ -278,12 +282,7 @@ void IBMSolver_set_params(IBMSolver *solver, const double Re, const double dt) {
 /**
  * @brief Sets boundary condition of 6 cell boundaries in IBMSolver. Multiple
  *        boundary directions can be provided at once using bitwise-or operator
- *        (|), e.g., DIR_WEST | DIR_EAST. Some boundary types require boundary
- *        value informations. It can be provided as a constant or a function.
- *        For the first case, two additional arguments BC_CONST and the constant
- *        value required. For the second case, two additional arguments BC_FUNC
- *        and the function required. The function takes four arguments t, x, y,
- *        and z in turn and returns the boundary value.
+ *        (|), e.g., DIR_WEST | DIR_EAST.
  *
  * @param solver IBMSolver.
  * @param direction Direction of boundary.
@@ -296,36 +295,68 @@ void IBMSolver_set_bc(
     ...
 ) {
     IBMSolverBCValType val_type = BC_CONST;
-    double const_value = NAN;
-    IBMSolverBCValFunc func = NULL;
+    double const_u1 = NAN, const_u2 = NAN, const_u3 = NAN, const_p = NAN;
+    IBMSolverBCValFunc func_u1 = NULL, func_u2 = NULL, func_u3 = NULL, func_p = NULL;
     va_list ap;
 
     va_start(ap, type);
     switch (type) {
-        case BC_VELOCITY_INLET:
-        case BC_PRESSURE_OUTLET:
-        case BC_VELOCITY_PERIODIC:
-            val_type = va_arg(ap, IBMSolverBCValType);
-            if (val_type == BC_CONST) {
-                const_value = va_arg(ap, double);
-            }
-            else {
-                func = va_arg(ap, IBMSolverBCValFunc);
-            }
+    case BC_VELOCITY_COMPONENT:
+        val_type = va_arg(ap, IBMSolverBCValType);
+        if (val_type == BC_CONST) {
+            const_u1 = va_arg(ap, double);
+            const_u2 = va_arg(ap, double);
+            const_u3 = va_arg(ap, double);
+        }
+        else {
+            func_u1 = va_arg(ap, IBMSolverBCValFunc);
+            func_u2 = va_arg(ap, IBMSolverBCValFunc);
+            func_u3 = va_arg(ap, IBMSolverBCValFunc);
+        }
         break;
-        default:;
+    case BC_PRESSURE:
+    case BC_VELOCITY_PERIODIC:
+        val_type = va_arg(ap, IBMSolverBCValType);
+        if (val_type == BC_CONST) {
+            const_p = va_arg(ap, double);
+        }
+        else {
+            func_p = va_arg(ap, IBMSolverBCValFunc);
+        }
+        break;
+    case BC_STATIONARY_WALL:
+        type = BC_VELOCITY_COMPONENT;
+        val_type = BC_CONST;
+        const_u1 = 0;
+        const_u2 = 0;
+        const_u3 = 0;
+        break;
+    case BC_SYMMETRIC:
+        type = BC_FREE_SLIP_WALL;
+        break;
+    default:;
     }
     va_end(ap);
+
+    if (solver->rank == 0 && val_type != BC_CONST && val_type != BC_FUNC) {
+        fprintf(stderr, "error: invalid boundary condition value type\n");
+    }
 
     for (int i = 0; i < 6; i++) {
         if (direction & (1 << i)) {
             solver->bc[i].type = type;
             solver->bc[i].val_type = val_type;
             if (val_type == BC_CONST) {
-                solver->bc[i].const_value = const_value;
+                solver->bc[i].const_u1 = const_u1;
+                solver->bc[i].const_u2 = const_u2;
+                solver->bc[i].const_u3 = const_u3;
+                solver->bc[i].const_p = const_p;
             }
             else {
-                solver->bc[i].func = func;
+                solver->bc[i].func_u1 = func_u1;
+                solver->bc[i].func_u2 = func_u2;
+                solver->bc[i].func_u3 = func_u3;
+                solver->bc[i].func_p = func_p;
             }
         }
     }
@@ -467,18 +498,18 @@ void IBMSolver_assemble(IBMSolver *solver) {
 
     c1e(xc_global, -1) = c1e(xc_global, 0) - (c1e(dx_global, -1) + c1e(dx_global, 0)) / 2;
     c1e(xc_global, -2) = c1e(xc_global, -1) - (c1e(dx_global, -2) + c1e(dx_global, -1)) / 2;
-    c1e(xc_global, Nx_global+1) = c1e(xc_global, Nx_global) + (c1e(dx_global, Nx_global-1) + c1e(dx_global, Nx_global)) / 2;
-    c1e(xc_global, Nx_global+2) = c1e(xc_global, Nx_global+1) + (c1e(dx_global, Nx_global) + c1e(dx_global, Nx_global+1)) / 2;
+    c1e(xc_global, Nx_global) = c1e(xc_global, Nx_global-1) + (c1e(dx_global, Nx_global-1) + c1e(dx_global, Nx_global)) / 2;
+    c1e(xc_global, Nx_global+1) = c1e(xc_global, Nx_global) + (c1e(dx_global, Nx_global) + c1e(dx_global, Nx_global+1)) / 2;
 
     c1e(yc_global, -1) = c1e(yc_global, 0) - (c1e(dy_global, -1) + c1e(dy_global, 0)) / 2;
     c1e(yc_global, -2) = c1e(yc_global, -1) - (c1e(dy_global, -2) + c1e(dy_global, -1)) / 2;
-    c1e(yc_global, Ny_global+1) = c1e(yc_global, Ny_global) + (c1e(dy_global, Ny_global-1) + c1e(dy_global, Ny_global)) / 2;
-    c1e(yc_global, Ny_global+2) = c1e(yc_global, Ny_global+1) + (c1e(dy_global, Ny_global) + c1e(dy_global, Ny_global+1)) / 2;
+    c1e(yc_global, Ny_global) = c1e(yc_global, Ny_global-1) + (c1e(dy_global, Ny_global-1) + c1e(dy_global, Ny_global)) / 2;
+    c1e(yc_global, Ny_global+1) = c1e(yc_global, Ny_global) + (c1e(dy_global, Ny_global) + c1e(dy_global, Ny_global+1)) / 2;
 
     c1e(zc_global, -1) = c1e(zc_global, 0) - (c1e(dz_global, -1) + c1e(dz_global, 0)) / 2;
     c1e(zc_global, -2) = c1e(zc_global, -1) - (c1e(dz_global, -2) + c1e(dz_global, -1)) / 2;
-    c1e(zc_global, Nz_global+1) = c1e(zc_global, Nz_global) + (c1e(dz_global, Nz_global-1) + c1e(dz_global, Nz_global)) / 2;
-    c1e(zc_global, Nz_global+2) = c1e(zc_global, Nz_global+1) + (c1e(dz_global, Nz_global) + c1e(dz_global, Nz_global+1)) / 2;
+    c1e(zc_global, Nz_global) = c1e(zc_global, Nz_global-1) + (c1e(dz_global, Nz_global-1) + c1e(dz_global, Nz_global)) / 2;
+    c1e(zc_global, Nz_global+1) = c1e(zc_global, Nz_global) + (c1e(dz_global, Nz_global) + c1e(dz_global, Nz_global+1)) / 2;
 
     c1e(dx, -1) = c1e(dx_global, solver->ilower-1);
     c1e(dx, -2) = c1e(dx_global, solver->ilower-2);
@@ -602,9 +633,9 @@ static void alloc_arrays(IBMSolver *solver) {
 
     solver->p_coeffsum = calloc((Nx+4)*(Ny+4)*(Nz+4), sizeof(double));
 
-    solver->x_exchg = calloc(2*(Ny+4)*(Nz+4), sizeof(double));
-    solver->y_exchg = calloc(2*(Nx+4)*(Nz+4), sizeof(double));
-    solver->z_exchg = calloc(2*(Nx+4)*(Ny+4), sizeof(double));
+    solver->x_exchg = calloc(6*(Ny+4)*(Nz+4), sizeof(double));
+    solver->y_exchg = calloc(6*(Nx+4)*(Nz+4), sizeof(double));
+    solver->z_exchg = calloc(6*(Nx+4)*(Ny+4), sizeof(double));
 }
 
 static void calc_cell_idx(IBMSolver *solver) {
@@ -962,6 +993,8 @@ static void calc_lvset_flag(IBMSolver *solver) {
     const int Ny = solver->Ny;
     const int Nz = solver->Nz;
 
+    double (*const lvset)[Ny+4][Nz+4] = calloc(Nx+4, sizeof(double [Ny+4][Nz+4]));
+
     int *x_exchg = calloc((Ny+4)*(Nz+4), sizeof(int));
     int *y_exchg = calloc((Nx+4)*(Nz+4), sizeof(int));
     int *z_exchg = calloc((Nx+4)*(Ny+4), sizeof(int));
@@ -986,8 +1019,18 @@ static void calc_lvset_flag(IBMSolver *solver) {
         solver->poly,
         Nx+4, Ny+4, Nz+4,
         solver->xc, solver->yc, solver->zc,
-        (double (*)[Ny+4][Nz+4])solver->lvset, .5
+        lvset, .5
     );
+
+    for (int i = -2; i < Nx+2; i++) {
+        for (int j = -2; j < Ny+2; j++) {
+            for (int k = -2; k < Nz+2; k++) {
+                c3e(solver->lvset, i, j, k) = lvset[i+2][j+2][k+2];
+            }
+        }
+    }
+
+    free(lvset);
 
     /* Calculate flag.
        * Level set function is positive or zero.  => fluid cell
@@ -1081,7 +1124,7 @@ static void calc_lvset_flag(IBMSolver *solver) {
         cnt = 0;
         for (int i = -2; i < Nx+2; i++) {
             for (int k = -2; k < Nz+2; k++) {
-                c3e(solver->flag, i, Nx+1, k) = y_exchg[cnt++];
+                c3e(solver->flag, i, Ny+1, k) = y_exchg[cnt++];
             }
         }
     }
@@ -1342,7 +1385,6 @@ static HYPRE_IJMatrix create_matrix(IBMSolver *solver, int type) {
     HYPRE_IJMatrix A;
 
     int ncols;
-    int cur_idx;
     int cols[9];
     double values[9];
     double a, b;
@@ -1363,16 +1405,14 @@ static HYPRE_IJMatrix create_matrix(IBMSolver *solver, int type) {
 
     /* Inner cells. */
     FOR_INNER_CELL (i, j, k) {
-        cur_idx = c3e(solver->cell_idx, i, j, k);
         for (int l = 0; l < 9; l++) {
             cols[l] = 0;
             values[l] = 0;
         }
-        cols[0] = cur_idx;
+        cols[0] = c3e(solver->cell_idx, i, j, k);
 
         /* Fluid cell. */
         if (c3e(solver->flag, i, j, k) == FLAG_FLUID) {
-            cols[0] = cur_idx;
             for (int l = 0; l < 6; l++) {
                 cols[l+1] = c3e(solver->cell_idx, i+adj[l][0], j+adj[l][1], k+adj[l][2]);
             }
@@ -1386,10 +1426,6 @@ static HYPRE_IJMatrix create_matrix(IBMSolver *solver, int type) {
                 ? 1-values[1]-values[2]-values[3]-values[4]-values[5]-values[6]
                 : -values[1]-values[2]-values[3]-values[4]-values[5]-values[6];
 
-            if (type == 4) {
-                values[0] -= 1;
-            }
-
             /* Normalize pressure equation. */
             if (type == 4) {
                 /* Store center coefficient to normalize RHS also. */
@@ -1401,65 +1437,66 @@ static HYPRE_IJMatrix create_matrix(IBMSolver *solver, int type) {
             }
         }
 
-        // /* Ghost cell. */
-        // else if (c3e(solver->flag, i, j, k) == FLAG_GHOST) {
-        //     int interp_idx[8][3];
-        //     double interp_coeff[8];
-        //     double coeffsum;
+        /* Ghost cell. */
+        else if (c3e(solver->flag, i, j, k) == FLAG_GHOST) {
+            int interp_idx[8][3];
+            double interp_coeff[8];
+            double coeffsum;
 
-        //     values[0] = 1;
+            values[0] = 1;
 
-        //     get_interp_info(solver, i, j, k, interp_idx, interp_coeff);
+            get_interp_info(solver, i, j, k, interp_idx, interp_coeff);
 
-        //     /* If a solid cell is used for interpolation, ignore it. */
-        //     for (int l = 0; l < 8; l++) {
-        //         if (c3e(solver->flag, interp_idx[l][0], interp_idx[l][1], interp_idx[l][2]) == FLAG_SOLID) {
-        //             interp_coeff[l] = 0;
-        //         }
-        //     }
+            /* If a solid cell is used for interpolation, ignore it. */
+            for (int l = 0; l < 8; l++) {
+                if (c3e(solver->flag, interp_idx[l][0], interp_idx[l][1], interp_idx[l][2]) == FLAG_SOLID) {
+                    interp_coeff[l] = 0;
+                }
+            }
 
-        //     /* Normalize. */
-        //     coeffsum = 0;
-        //     for (int l = 0; l < 8; l++) {
-        //         coeffsum += interp_coeff[l];
-        //     }
-        //     for (int l = 0; l < 8; l++) {
-        //         interp_coeff[l] /= coeffsum;
-        //     }
+            /* Normalize. */
+            coeffsum = 0;
+            for (int l = 0; l < 8; l++) {
+                coeffsum += interp_coeff[l];
+            }
+            for (int l = 0; l < 8; l++) {
+                interp_coeff[l] /= coeffsum;
+            }
 
-        //     /* If the mirror point is not interpolated using the ghost cell
-        //        itself. */
-        //     for (int l = 0; l < 8; l++) {
-        //         if (c3e(solver->cell_idx, interp_idx[l][0], interp_idx[l][1], interp_idx[l][2]) == cur_idx) {
-        //             if (type != 4) {
-        //                 values[0] += interp_coeff[l];
-        //             }
-        //             else {
-        //                 values[0] -= interp_coeff[l];
-        //             }
-        //             interp_coeff[l] = 0;
-        //             break;
-        //         }
-        //     }
+            /* If the mirror point is not interpolated using the ghost cell
+               itself. */
+            for (int l = 0; l < 8; l++) {
+                if (c3e(solver->cell_idx, interp_idx[l][0], interp_idx[l][1], interp_idx[l][2]) == cols[0]) {
+                    if (type != 4) {
+                        values[0] += interp_coeff[l];
+                    }
+                    else {
+                        values[0] -= interp_coeff[l];
+                    }
+                    interp_coeff[l] = 0;
+                    break;
+                }
+            }
 
-        //     for (int l = 0; l < 8; l++) {
-        //         cols[l+1] = c3e(solver->cell_idx, interp_idx[l][0], interp_idx[l][1], interp_idx[l][2]);
-        //         if (type != 4) {
-        //             values[l+1] = interp_coeff[l];
-        //         }
-        //         else {
-        //             values[l+1] = -interp_coeff[l];
-        //         }
-        //     }
-        // }
+            for (int l = 0; l < 8; l++) {
+                cols[l+1] = c3e(solver->cell_idx, interp_idx[l][0], interp_idx[l][1], interp_idx[l][2]);
+                if (type != 4) {
+                    values[l+1] = interp_coeff[l];
+                }
+                else {
+                    values[l+1] = -interp_coeff[l];
+                }
+            }
+        }
 
-        // /* Solid cell. */
-        // else if (c3e(solver->flag, i, j, k) == FLAG_SOLID) {
-        //     values[0] = 1;
-        // }
+        /* Solid cell. */
+        else if (c3e(solver->flag, i, j, k) == FLAG_SOLID) {
+            values[0] = 1;
+        }
 
         else {
-            values[0] = 1;
+            fprintf(stderr, "error(%d): wrong flag\n", solver->rank);
+            MPI_Abort(MPI_COMM_WORLD, -1);
         }
 
         /* Remove zero elements. */
@@ -1472,13 +1509,13 @@ static HYPRE_IJMatrix create_matrix(IBMSolver *solver, int type) {
             }
         }
 
-        HYPRE_IJMatrixSetValues(A, 1, &ncols, &cur_idx, cols, values);
+        HYPRE_IJMatrixSetValues(A, 1, &ncols, &cols[0], cols, values);
     }
 
     /* Outer cells - west. */
     if (solver->ri == 0) {
         switch (solver->bc[3].type) {
-        case BC_VELOCITY_INLET:
+        case BC_VELOCITY_COMPONENT:
         case BC_STATIONARY_WALL:
             for (int j = 0; j < Ny; j++) {
                 for (int k = 0; k < Nz; k++) {
@@ -1516,7 +1553,7 @@ static HYPRE_IJMatrix create_matrix(IBMSolver *solver, int type) {
                 }
             }
             break;
-        case BC_PRESSURE_OUTLET:
+        case BC_PRESSURE:
             for (int j = 0; j < Ny; j++) {
                 for (int k = 0; k < Nz; k++) {
                     if (type != 4) {
@@ -1675,7 +1712,7 @@ static HYPRE_IJMatrix create_matrix(IBMSolver *solver, int type) {
     /* Outer cells - east. */
     if (solver->ri == solver->Px-1) {
         switch (solver->bc[1].type) {
-        case BC_VELOCITY_INLET:
+        case BC_VELOCITY_COMPONENT:
         case BC_STATIONARY_WALL:
             for (int j = 0; j < Ny; j++) {
                 for (int k = 0; k < Nz; k++) {
@@ -1713,7 +1750,7 @@ static HYPRE_IJMatrix create_matrix(IBMSolver *solver, int type) {
                 }
             }
             break;
-        case BC_PRESSURE_OUTLET:
+        case BC_PRESSURE:
             for (int j = 0; j < Ny; j++) {
                 for (int k = 0; k < Nz; k++) {
                     if (type != 4) {
@@ -1872,7 +1909,7 @@ static HYPRE_IJMatrix create_matrix(IBMSolver *solver, int type) {
     /* Outer cells - south. */
     if (solver->rj == 0) {
         switch (solver->bc[2].type) {
-        case BC_VELOCITY_INLET:
+        case BC_VELOCITY_COMPONENT:
         case BC_STATIONARY_WALL:
             for (int i = ifirst; i < ilast; i++) {
                 for (int k = 0; k < Nz; k++) {
@@ -1910,7 +1947,7 @@ static HYPRE_IJMatrix create_matrix(IBMSolver *solver, int type) {
                 }
             }
             break;
-        case BC_PRESSURE_OUTLET:
+        case BC_PRESSURE:
             for (int i = ifirst; i < ilast; i++) {
                 for (int k = 0; k < Nz; k++) {
                     if (type != 4) {
@@ -2069,7 +2106,7 @@ static HYPRE_IJMatrix create_matrix(IBMSolver *solver, int type) {
     /* Outer cells - north. */
     if (solver->rj == solver->Py-1) {
         switch (solver->bc[0].type) {
-        case BC_VELOCITY_INLET:
+        case BC_VELOCITY_COMPONENT:
         case BC_STATIONARY_WALL:
             for (int i = ifirst; i < ilast; i++) {
                 for (int k = 0; k < Nz; k++) {
@@ -2107,7 +2144,7 @@ static HYPRE_IJMatrix create_matrix(IBMSolver *solver, int type) {
                 }
             }
             break;
-        case BC_PRESSURE_OUTLET:
+        case BC_PRESSURE:
             for (int i = ifirst; i < ilast; i++) {
                 for (int k = 0; k < Nz; k++) {
                     if (type != 4) {
@@ -2266,7 +2303,7 @@ static HYPRE_IJMatrix create_matrix(IBMSolver *solver, int type) {
     /* Outer cells - down. */
     if (solver->rk == 0) {
         switch (solver->bc[4].type) {
-        case BC_VELOCITY_INLET:
+        case BC_VELOCITY_COMPONENT:
         case BC_STATIONARY_WALL:
             for (int i = ifirst; i < ilast; i++) {
                 for (int j = jfirst; j < jlast; j++) {
@@ -2304,7 +2341,7 @@ static HYPRE_IJMatrix create_matrix(IBMSolver *solver, int type) {
                 }
             }
             break;
-        case BC_PRESSURE_OUTLET:
+        case BC_PRESSURE:
             for (int i = ifirst; i < ilast; i++) {
                 for (int j = jfirst; j < jlast; j++) {
                     if (type != 4) {
@@ -2463,7 +2500,7 @@ static HYPRE_IJMatrix create_matrix(IBMSolver *solver, int type) {
     /* Outer cells - up. */
     if (solver->rk == solver->Pz-1) {
         switch (solver->bc[5].type) {
-        case BC_VELOCITY_INLET:
+        case BC_VELOCITY_COMPONENT:
         case BC_STATIONARY_WALL:
             for (int i = ifirst; i < ilast; i++) {
                 for (int j = jfirst; j < jlast; j++) {
@@ -2501,7 +2538,7 @@ static HYPRE_IJMatrix create_matrix(IBMSolver *solver, int type) {
                 }
             }
             break;
-        case BC_PRESSURE_OUTLET:
+        case BC_PRESSURE:
             for (int i = ifirst; i < ilast; i++) {
                 for (int j = jfirst; j < jlast; j++) {
                     if (type != 4) {

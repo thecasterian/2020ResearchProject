@@ -134,9 +134,9 @@ int main(int argc, char **argv) {
     IBMSolver_set_grid(solver, Nx, Ny, Nz, xf, yf, zf);
     IBMSolver_set_params(solver, Re, dt);
 
-    IBMSolver_set_bc(solver, DIR_WEST, BC_VELOCITY_INLET, 1);
-    IBMSolver_set_bc(solver, DIR_EAST, BC_PRESSURE_OUTLET, 0);
-    IBMSolver_set_bc(solver, DIR_NORTH | DIR_SOUTH | DIR_DOWN | DIR_UP, BC_FREE_SLIP_WALL, 0);
+    IBMSolver_set_bc(solver, DIR_WEST, BC_VELOCITY_COMPONENT, BC_CONST, 1., 0., 0.);
+    IBMSolver_set_bc(solver, DIR_EAST, BC_PRESSURE, BC_CONST, 0.);
+    IBMSolver_set_bc(solver, DIR_NORTH | DIR_SOUTH | DIR_DOWN | DIR_UP, BC_FREE_SLIP_WALL);
 
     IBMSolver_set_obstacle(solver, poly);
 
@@ -160,11 +160,12 @@ int main(int argc, char **argv) {
     if (rank == 0) {
         printf("\nInitialization done\n");
     }
-    goto end;
+    MPI_Barrier(MPI_COMM_WORLD);
 
     /*===== Run. =============================================================*/
 
     IBMSolver_iterate(solver, num_time_steps, true);
+    goto end;
 
     /*===== Export results. ==================================================*/
 

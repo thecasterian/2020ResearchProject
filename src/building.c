@@ -58,8 +58,8 @@ int main(int argc, char **argv) {
     IBMSolver_set_grid(solver, Nx, Ny, Nz, xf, yf, zf);
     IBMSolver_set_params(solver, Re, dt);
 
-    IBMSolver_set_bc(solver, DIR_WEST, BC_VELOCITY_INLET, BC_FUNC, inlet_vel);
-    IBMSolver_set_bc(solver, DIR_EAST, BC_PRESSURE_OUTLET, BC_CONST, 0.);
+    IBMSolver_set_bc(solver, DIR_WEST, BC_VELOCITY_COMPONENT, BC_FUNC, inlet_vel);
+    IBMSolver_set_bc(solver, DIR_EAST, BC_PRESSURE, BC_CONST, 0.);
     IBMSolver_set_bc(solver, DIR_SOUTH | DIR_NORTH | DIR_UP, BC_FREE_SLIP_WALL);
     IBMSolver_set_bc(solver, DIR_DOWN, BC_STATIONARY_WALL);
 

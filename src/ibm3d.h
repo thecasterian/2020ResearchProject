@@ -35,10 +35,11 @@ typedef enum _direction {
 } IBMSolverDirection;
 
 typedef enum _bc_type {
-    BC_VELOCITY_INLET,          /* Normal velocity specified. */
-    BC_PRESSURE_OUTLET,         /* Pressure specified. */
+    BC_VELOCITY_COMPONENT,      /* Velocity specified. */
+    BC_PRESSURE,                /* Pressure specified. */
     BC_STATIONARY_WALL,         /* Stationary wall. */
     BC_FREE_SLIP_WALL,          /* Free-slip wall. */
+    BC_SYMMETRIC,               /* Symmetric. */
     BC_ALL_PERIODIC,            /* All periodic. */
     BC_VELOCITY_PERIODIC,       /* Velocity periodic, pressure specified. */
 } IBMSolverBCType;
@@ -55,8 +56,8 @@ typedef struct _bc {
     IBMSolverBCType type;
     IBMSolverBCValType val_type;
     union {
-        double const_value;
-        IBMSolverBCValFunc func;
+        double const_u1, const_u2, const_u3, const_p;
+        IBMSolverBCValFunc func_u1, func_u2, func_u3, func_p;
     };
 } IBMSolverBC;
 
