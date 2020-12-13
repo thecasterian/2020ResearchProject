@@ -56,8 +56,12 @@ typedef struct _bc {
     IBMSolverBCType type;
     IBMSolverBCValType val_type;
     union {
-        double const_u1, const_u2, const_u3, const_p;
-        IBMSolverBCValFunc func_u1, func_u2, func_u3, func_p;
+        struct {
+            double const_u1, const_u2, const_u3, const_p;
+        };
+        struct {
+            IBMSolverBCValFunc func_u1, func_u2, func_u3, func_p;
+        };
     };
 } IBMSolverBC;
 

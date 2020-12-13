@@ -1,5 +1,6 @@
 #include <stdio.h>
 
+#include <math.h>
 #include "utils.h"
 #include "geo3d.h"
 #include "ibm3d.h"
@@ -129,7 +130,7 @@ int main(int argc, char **argv) {
 
     /*===== Set solver. ======================================================*/
 
-    IBMSolver *solver = IBMSolver_new(num_process, rank, 4, 2, 2);
+    IBMSolver *solver = IBMSolver_new(num_process, rank, 2, 1, 3);
 
     IBMSolver_set_grid(solver, Nx, Ny, Nz, xf, yf, zf);
     IBMSolver_set_params(solver, Re, dt);

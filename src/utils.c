@@ -167,9 +167,9 @@ void IBMSolver_ghost_interp(
 
     n.x = (c3e(solver->lvset, i+1, j, k) - c3e(solver->lvset, i-1, j, k))
         / (c1e(solver->xc, i+1) - c1e(solver->xc, i-1));
-    n.x = (c3e(solver->lvset, i, j+1, k) - c3e(solver->lvset, i, j-1, k))
+    n.y = (c3e(solver->lvset, i, j+1, k) - c3e(solver->lvset, i, j-1, k))
         / (c1e(solver->yc, j+1) - c1e(solver->yc, j-1));
-    n.x = (c3e(solver->lvset, i, j, k+1) - c3e(solver->lvset, i, j, k-1))
+    n.z = (c3e(solver->lvset, i, j, k+1) - c3e(solver->lvset, i, j, k-1))
         / (c1e(solver->zc, k+1) - c1e(solver->zc, k-1));
 
     m = Vector_lincom(
