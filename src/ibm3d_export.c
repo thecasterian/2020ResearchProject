@@ -7,6 +7,8 @@
 
 #include "utils.h"
 
+static inline int divceil(const int, const int);
+
 /**
  * @brief Exports result in netCDF CF format.
  *
@@ -18,11 +20,19 @@ void IBMSolver_export_result(IBMSolver *solver, const char *filename) {
     const int Ny = solver->Ny;
     const int Nz = solver->Nz;
     const int Nx_global = solver->Nx_global;
+    const int Ny_global = solver->Ny_global;
+    const int Nz_global = solver->Nz_global;
 
-    const double (*const u1)[Ny+2][Nz+2] = solver->u1;
-    const double (*const u2)[Ny+2][Nz+2] = solver->u2;
-    const double (*const u3)[Ny+2][Nz+2] = solver->u3;
-    const double (*const p)[Ny+2][Nz+2] = solver->p;
+    const double *const u1 = solver->u1;
+    const double *const u2 = solver->u2;
+    const double *const u3 = solver->u3;
+    const double *const p = solver->p;
+
+    double *const buffer = calloc(
+        4 * divceil(Nx_global+4, solver->Px) * divceil(Ny_global+4, solver->Py) * divceil(Nz_global+4, solver->Pz),
+        sizeof(double)
+    );
+    int cnt;
 
     if (solver->rank == 0) {
         /* File name with extension. */
@@ -41,20 +51,15 @@ void IBMSolver_export_result(IBMSolver *solver, const char *filename) {
         /* Value of variables. */
         const double time_value[1] = {solver->time};
         const double *const x_value = solver->xc_global;
-        const double *const y_value = solver->yc;
-        const double *const z_value = solver->zc;
+        const double *const y_value = solver->yc_global;
+        const double *const z_value = solver->zc_global;
         const int iter_value[1] = {solver->iter};
 
-        float (*const u_value)[Ny+2][Nx_global+2] = calloc(Nz+2, sizeof(float [Ny+2][Nx_global+2]));
-        float (*const v_value)[Ny+2][Nx_global+2] = calloc(Nz+2, sizeof(float [Ny+2][Nx_global+2]));
-        float (*const w_value)[Ny+2][Nx_global+2] = calloc(Nz+2, sizeof(float [Ny+2][Nx_global+2]));
-        float (*const p_value)[Ny+2][Nx_global+2] = calloc(Nz+2, sizeof(float [Ny+2][Nx_global+2]));
-        float (*const vort_value)[Ny+2][Nx_global+2] = calloc(Nz+2, sizeof(float [Ny+2][Nx_global+2]));
-
-        double (*const u1_global)[Ny+2][Nz+2] = calloc(Nx_global+2, sizeof(double [Ny+2][Nz+2]));
-        double (*const u2_global)[Ny+2][Nz+2] = calloc(Nx_global+2, sizeof(double [Ny+2][Nz+2]));
-        double (*const u3_global)[Ny+2][Nz+2] = calloc(Nx_global+2, sizeof(double [Ny+2][Nz+2]));
-        double (*const p_global)[Ny+2][Nz+2] = calloc(Nx_global+2, sizeof(double [Ny+2][Nz+2]));
+        float (*const u_value)[Ny_global+4][Nx_global+4] = calloc(Nz_global+4, sizeof(float [Ny_global+4][Nx_global+4]));
+        float (*const v_value)[Ny_global+4][Nx_global+4] = calloc(Nz_global+4, sizeof(float [Ny_global+4][Nx_global+4]));
+        float (*const w_value)[Ny_global+4][Nx_global+4] = calloc(Nz_global+4, sizeof(float [Ny_global+4][Nx_global+4]));
+        float (*const p_value)[Ny_global+4][Nx_global+4] = calloc(Nz_global+4, sizeof(float [Ny_global+4][Nx_global+4]));
+        float (*const vort_value)[Ny_global+4][Nx_global+4] = calloc(Nz_global+2, sizeof(float [Ny_global+4][Nx_global+4]));
 
         /* Velocity gradients. */
         int iprev, inext, jprev, jnext, kprev, knext;
@@ -69,50 +74,55 @@ void IBMSolver_export_result(IBMSolver *solver, const char *filename) {
         snprintf(filename_ext, 100, "%s.nc", filename);
 
         /* Data from process 0. */
-        memcpy(u1_global, u1, sizeof(double)*(Nx+2)*(Ny+2)*(Nz+2));
-        memcpy(u2_global, u2, sizeof(double)*(Nx+2)*(Ny+2)*(Nz+2));
-        memcpy(u3_global, u3, sizeof(double)*(Nx+2)*(Ny+2)*(Nz+2));
-        memcpy(p_global, p, sizeof(double)*(Nx+2)*(Ny+2)*(Nz+2));
-
-        /* Receive from other processes. */
-        for (int r = 1; r < solver->num_process; r++) {
-            const int ilower_r = r * Nx_global / solver->num_process + 1;
-            const int iupper_r = (r+1) * Nx_global / solver->num_process;
-            const int Nx_r = iupper_r - ilower_r + 1;
-
-            MPI_Recv(u1_global[ilower_r], (Nx_r+1)*(Ny+2)*(Nz+2), MPI_DOUBLE, r, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-            MPI_Recv(u2_global[ilower_r], (Nx_r+1)*(Ny+2)*(Nz+2), MPI_DOUBLE, r, 1, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-            MPI_Recv(u3_global[ilower_r], (Nx_r+1)*(Ny+2)*(Nz+2), MPI_DOUBLE, r, 2, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-            MPI_Recv(p_global[ilower_r], (Nx_r+1)*(Ny+2)*(Nz+2), MPI_DOUBLE, r, 3, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-        }
-
-        /* Convert row-major order to column-major order. */
-        for (int i = 0; i <= Nx_global+1; i++) {
-            for (int j = 0; j <= Ny+1; j++) {
-                for (int k = 0; k <= Nz+1; k++) {
-                    u_value[k][j][i] = u1_global[i][j][k];
-                    v_value[k][j][i] = u2_global[i][j][k];
-                    w_value[k][j][i] = u3_global[i][j][k];
-                    p_value[k][j][i] = p_global[i][j][k];
+        for (int i = solver->ilower_out; i < solver->iupper_out; i++) {
+            for (int j = solver->jlower_out; j < solver->jupper_out; j++) {
+                for (int k = solver->klower_out; k < solver->kupper_out; k++) {
+                    u_value[k+2][j+2][i+2] = c3e(u1, i, j, k);
+                    v_value[k+2][j+2][i+2] = c3e(u2, i, j, k);
+                    w_value[k+2][j+2][i+2] = c3e(u3, i, j, k);
+                    p_value[k+2][j+2][i+2] = c3e(p, i, j, k);
                 }
             }
         }
 
-        free(u1_global);
-        free(u2_global);
-        free(u3_global);
-        free(p_global);
+        /* Receive from other processes. */
+        for (int rank = 1; rank < solver->num_process; rank++) {
+            const int ri = rank / (solver->Py * solver->Pz);
+            const int rj = rank % (solver->Py * solver->Pz) / solver->Pz;
+            const int rk = rank % solver->Pz;
+
+            const int ilower = ri * (Nx_global+4) / solver->Px - 2;
+            const int jlower = rj * (Ny_global+4) / solver->Py - 2;
+            const int klower = rk * (Nz_global+4) / solver->Pz - 2;
+
+            const int iupper = (ri+1) * (Nx_global+4) / solver->Px - 2;
+            const int jupper = (rj+1) * (Ny_global+4) / solver->Py - 2;
+            const int kupper = (rk+1) * (Nz_global+4) / solver->Pz - 2;
+
+            MPI_Recv(buffer, 4*(iupper-ilower)*(jupper-jlower)*(kupper-klower), MPI_DOUBLE, rank, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            cnt = 0;
+            for (int i = ilower; i < iupper; i++) {
+                for (int j = jlower; j < jupper; j++) {
+                    for (int k = klower; k < kupper; k++) {
+                        u_value[k+2][j+2][i+2] = buffer[cnt++];
+                        v_value[k+2][j+2][i+2] = buffer[cnt++];
+                        w_value[k+2][j+2][i+2] = buffer[cnt++];
+                        p_value[k+2][j+2][i+2] = buffer[cnt++];
+                    }
+                }
+            }
+        }
 
         /* Calculate vorticity. */
-        for (int k = 0; k <= Nz+1; k++) {
-            for (int j = 0; j <= Ny+1; j++) {
-                for (int i = 0; i <= Nx_global+1; i++) {
+        for (int k = 0; k < Nz_global+4; k++) {
+            for (int j = 0; j < Ny_global+4; j++) {
+                for (int i = 0; i < Nx_global+4; i++) {
                     iprev = max(i-1, 0);
-                    inext = min(i+1, Nx_global+1);
+                    inext = min(i+1, Nx_global+4);
                     jprev = max(j-1, 0);
-                    jnext = min(j+1, Ny+1);
+                    jnext = min(j+1, Ny_global+4);
                     kprev = max(k-1, 0);
-                    knext = min(k+1, Nz+1);
+                    knext = min(k+1, Nz_global+4);
 
                     dudy = (u_value[k][jnext][i] - u_value[k][jprev][i]) / (y_value[jnext] - y_value[jprev]);
                     dudz = (u_value[knext][j][i] - u_value[kprev][j][i]) / (z_value[knext] - z_value[kprev]);
@@ -130,8 +140,11 @@ void IBMSolver_export_result(IBMSolver *solver, const char *filename) {
             }
         }
 
+        fprintf(stderr, "%s\n", filename_ext);
+
         /* Create file. */
         stat = nc_create(filename_ext, NC_CLOBBER, &ncid);
+        fprintf(stderr, "hi\n");
         if (stat != NC_NOERR) {
             fprintf(stderr, "error: cannot open file %s\n", filename_ext);
             goto error;
@@ -139,9 +152,9 @@ void IBMSolver_export_result(IBMSolver *solver, const char *filename) {
 
         /* Define dimensions. */
         nc_def_dim(ncid, "time", 1, &time_dimid);
-        nc_def_dim(ncid, "x", Nx_global+2, &x_dimid);
-        nc_def_dim(ncid, "y", Ny+2, &y_dimid);
-        nc_def_dim(ncid, "z", Nz+2, &z_dimid);
+        nc_def_dim(ncid, "x", Nx_global+4, &x_dimid);
+        nc_def_dim(ncid, "y", Ny_global+4, &y_dimid);
+        nc_def_dim(ncid, "z", Nz_global+4, &z_dimid);
 
         /* Define variables. */
         nc_def_var(ncid, "time", NC_DOUBLE, 1, &time_dimid, &time_varid);
@@ -209,12 +222,32 @@ error:
         free(vort_value);
     }
     else {
+        int ifirst, ilast, jfirst, jlast, kfirst, klast;
+
+        ifirst = solver->ri == 0 ? -2 : 0;
+        jfirst = solver->rj == 0 ? -2 : 0;
+        kfirst = solver->rk == 0 ? -2 : 0;
+
+        ilast = solver->ri != solver->Px-1 ? Nx : Nx+2;
+        jlast = solver->rj != solver->Py-1 ? Ny : Ny+2;
+        klast = solver->rk != solver->Pz-1 ? Nz : Nz+2;
+
         /* Send to process 0. */
-        MPI_Send(u1[1], (Nx+1)*(Ny+2)*(Nz+2), MPI_DOUBLE, 0, 0, MPI_COMM_WORLD);
-        MPI_Send(u2[1], (Nx+1)*(Ny+2)*(Nz+2), MPI_DOUBLE, 0, 1, MPI_COMM_WORLD);
-        MPI_Send(u3[1], (Nx+1)*(Ny+2)*(Nz+2), MPI_DOUBLE, 0, 2, MPI_COMM_WORLD);
-        MPI_Send(p[1], (Nx+1)*(Ny+2)*(Nz+2), MPI_DOUBLE, 0, 3, MPI_COMM_WORLD);
+        cnt = 0;
+        for (int i = ifirst; i < ilast; i++) {
+            for (int j = jfirst; j < jlast; j++) {
+                for (int k = kfirst; k < klast; k++) {
+                    buffer[cnt++] = c3e(u1, i, j, k);
+                    buffer[cnt++] = c3e(u2, i, j, k);
+                    buffer[cnt++] = c3e(u3, i, j, k);
+                    buffer[cnt++] = c3e(p, i, j, k);
+                }
+            }
+        }
+        MPI_Send(buffer, 4*(ilast-ifirst)*(jlast-jfirst)*(klast-kfirst), MPI_DOUBLE, 0, 0, MPI_COMM_WORLD);
     }
+
+    free(buffer);
 }
 
 /**
@@ -229,9 +262,21 @@ void IBMSolver_export_lvset_flag(IBMSolver *solver, const char *filename) {
     const int Ny = solver->Ny;
     const int Nz = solver->Nz;
     const int Nx_global = solver->Nx_global;
+    const int Ny_global = solver->Ny_global;
+    const int Nz_global = solver->Nz_global;
 
-    const double (*const lvset)[Ny+2][Nz+2] = solver->lvset;
-    const int (*const flag)[Ny+2][Nz+2] = solver->flag;
+    const double *const lvset = solver->lvset;
+    const int *const flag = solver->flag;
+
+    double *const buffer_lvset = calloc(
+        divceil(Nx_global+4, solver->Px) * divceil(Ny_global+4, solver->Py) * divceil(Nz_global+4, solver->Pz),
+        sizeof(double)
+    );
+    int *const buffer_flag = calloc(
+        divceil(Nx_global+4, solver->Px) * divceil(Ny_global+4, solver->Py) * divceil(Nz_global+4, solver->Pz),
+        sizeof(int)
+    );
+    int cnt;
 
     if (solver->rank == 0) {
         /* File name with extension. */
@@ -248,14 +293,11 @@ void IBMSolver_export_lvset_flag(IBMSolver *solver, const char *filename) {
 
         /* Value of variables. */
         const double *const x_value = solver->xc_global;
-        const double *const y_value = solver->yc;
-        const double *const z_value = solver->zc;
+        const double *const y_value = solver->yc_global;
+        const double *const z_value = solver->zc_global;
 
-        float (*const lvset_value)[Ny+2][Nx_global+2] = calloc(Nz+2, sizeof(float [Ny+2][Nx_global+2]));
-        signed char (*const flag_value)[Ny+2][Nx_global+2] = calloc(Nz+2, sizeof(signed char [Ny+2][Nx_global+2]));
-
-        double (*const lvset_global)[Ny+2][Nz+2] = calloc(Nx_global+2, sizeof(double [Ny+2][Nz+2]));
-        int (*const flag_global)[Ny+2][Nz+2] = calloc(Nx_global+2, sizeof(int [Ny+2][Nz+2]));
+        float (*const lvset_value)[Ny_global+2][Nx_global+2] = calloc(Nz_global+2, sizeof(float [Ny_global+2][Nx_global+2]));
+        int (*const flag_value)[Ny_global+2][Nx_global+2] = calloc(Nz_global+2, sizeof(signed char [Ny_global+2][Nx_global+2]));
 
         /* netCDF function return value. */
         int stat;
@@ -264,31 +306,50 @@ void IBMSolver_export_lvset_flag(IBMSolver *solver, const char *filename) {
         snprintf(filename_ext, 100, "%s.nc", filename);
 
         /* Data from process 0. */
-        memcpy(lvset_global, lvset, sizeof(double)*(Nx+2)*(Ny+2)*(Nz+2));
-        memcpy(flag_global, flag, sizeof(int)*(Nx+2)*(Ny+2)*(Nz+2));
-
-        /* Receive from other processes. */
-        for (int r = 1; r < solver->num_process; r++) {
-            const int ilower_r = r * Nx_global / solver->num_process + 1;
-            const int iupper_r = (r+1) * Nx_global / solver->num_process;
-            const int Nx_r = iupper_r - ilower_r + 1;
-
-            MPI_Recv(lvset_global[ilower_r], (Nx_r+1)*(Ny+2)*(Nz+2), MPI_DOUBLE, r, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-            MPI_Recv(flag_global[ilower_r], (Nx_r+1)*(Ny+2)*(Nz+2), MPI_INT, r, 1, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-        }
-
-        /* Convert row-major order to column-major order. */
-        for (int i = 0; i <= Nx_global+1; i++) {
-            for (int j = 0; j <= Ny+1; j++) {
-                for (int k = 0; k <= Nz+1; k++) {
-                    lvset_value[k][j][i] = lvset_global[i][j][k];
-                    flag_value[k][j][i] = flag_global[i][j][k];
+        for (int i = solver->ilower_out; i < solver->iupper_out; i++) {
+            for (int j = solver->jlower_out; j < solver->jupper_out; j++) {
+                for (int k = solver->klower_out; k < solver->kupper_out; k++) {
+                    lvset_value[k+2][j+2][i+2] = c3e(lvset, i, j, k);
+                    flag_value[k+2][j+2][i+2] = c3e(flag, i, j, k);
                 }
             }
         }
 
-        free(lvset_global);
-        free(flag_global);
+        /* Receive from other processes. */
+        for (int rank = 1; rank < solver->num_process; rank++) {
+            const int ri = rank / (solver->Py * solver->Pz);
+            const int rj = rank % (solver->Py * solver->Pz) / solver->Pz;
+            const int rk = rank % solver->Pz;
+
+            const int ilower = ri * (Nx_global+4) / solver->Px - 2;
+            const int jlower = rj * (Ny_global+4) / solver->Py - 2;
+            const int klower = rk * (Nz_global+4) / solver->Pz - 2;
+
+            const int iupper = (ri+1) * (Nx_global+4) / solver->Px - 2;
+            const int jupper = (rj+1) * (Ny_global+4) / solver->Py - 2;
+            const int kupper = (rk+1) * (Nz_global+4) / solver->Pz - 2;
+
+            MPI_Recv(buffer_lvset, (iupper-ilower)*(jupper-jlower)*(kupper-klower), MPI_DOUBLE, rank, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            cnt = 0;
+            for (int i = ilower; i < iupper; i++) {
+                for (int j = jlower; j < jupper; j++) {
+                    for (int k = klower; k < kupper; k++) {
+                        lvset_value[k+2][j+2][i+2] = buffer_lvset[cnt++];
+                    }
+                }
+            }
+            MPI_Recv(buffer_flag, (iupper-ilower)*(jupper-jlower)*(kupper-klower), MPI_INT, rank, 1, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            cnt = 0;
+            for (int i = ilower; i < iupper; i++) {
+                for (int j = jlower; j < jupper; j++) {
+                    for (int k = klower; k < kupper; k++) {
+                        flag_value[k+2][j+2][i+2] = buffer_flag[cnt++];
+                    }
+                }
+            }
+        }
+
+        fprintf(stderr, "%s\n", filename_ext);
 
         /* Create file. */
         stat = nc_create(filename_ext, NC_CLOBBER, &ncid);
@@ -298,9 +359,9 @@ void IBMSolver_export_lvset_flag(IBMSolver *solver, const char *filename) {
         }
 
         /* Define dimensions. */
-        nc_def_dim(ncid, "x", Nx_global+2, &x_dimid);
-        nc_def_dim(ncid, "y", Ny+2, &y_dimid);
-        nc_def_dim(ncid, "z", Nz+2, &z_dimid);
+        nc_def_dim(ncid, "x", Nx_global+4, &x_dimid);
+        nc_def_dim(ncid, "y", Ny_global+4, &y_dimid);
+        nc_def_dim(ncid, "z", Nz_global+4, &z_dimid);
 
         /* Define variables. */
         nc_def_var(ncid, "x", NC_DOUBLE, 1, &x_dimid, &x_varid);
@@ -320,7 +381,7 @@ void IBMSolver_export_lvset_flag(IBMSolver *solver, const char *filename) {
         dimids[2] = x_dimid;
 
         nc_def_var(ncid, "lvset", NC_FLOAT, 3, dimids, &lvset_varid);
-        nc_def_var(ncid, "flag", NC_BYTE, 3, dimids, &flag_varid);
+        nc_def_var(ncid, "flag", NC_INT, 3, dimids, &flag_varid);
 
         /* End of definitions. */
         nc_enddef(ncid);
@@ -331,15 +392,48 @@ void IBMSolver_export_lvset_flag(IBMSolver *solver, const char *filename) {
         nc_put_var_double(ncid, z_varid, z_value);
 
         nc_put_var_float(ncid, lvset_varid, (float *)lvset_value);
-        nc_put_var_schar(ncid, flag_varid, (signed char *)flag_value);
+        nc_put_var_int(ncid, flag_varid, (int *)flag_value);
 
 error:
         free(lvset_value);
         free(flag_value);
     }
     else {
+        int ifirst, ilast, jfirst, jlast, kfirst, klast;
+
+        ifirst = solver->ri == 0 ? -2 : 0;
+        jfirst = solver->rj == 0 ? -2 : 0;
+        kfirst = solver->rk == 0 ? -2 : 0;
+
+        ilast = solver->ri != solver->Px-1 ? Nx : Nx+2;
+        jlast = solver->rj != solver->Py-1 ? Ny : Ny+2;
+        klast = solver->rk != solver->Pz-1 ? Nz : Nz+2;
+
         /* Send to process 0. */
-        MPI_Send(lvset[1], (Nx+1)*(Ny+2)*(Nz+2), MPI_DOUBLE, 0, 0, MPI_COMM_WORLD);
-        MPI_Send(flag[1], (Nx+1)*(Ny+2)*(Nz+2), MPI_INT, 0, 1, MPI_COMM_WORLD);
+        cnt = 0;
+        for (int i = ifirst; i < ilast; i++) {
+            for (int j = jfirst; j < jlast; j++) {
+                for (int k = kfirst; k < klast; k++) {
+                    buffer_lvset[cnt++] = c3e(lvset, i, j, k);
+                }
+            }
+        }
+        MPI_Send(buffer_lvset, (ilast-ifirst)*(jlast-jfirst)*(klast-kfirst), MPI_DOUBLE, 0, 0, MPI_COMM_WORLD);
+        cnt = 0;
+                for (int i = ifirst; i < ilast; i++) {
+            for (int j = jfirst; j < jlast; j++) {
+                for (int k = kfirst; k < klast; k++) {
+                    buffer_flag[cnt++] = c3e(flag, i, j, k);
+                }
+            }
+        }
+        MPI_Send(buffer_flag, (ilast-ifirst)*(jlast-jfirst)*(klast-kfirst), MPI_INT, 0, 1, MPI_COMM_WORLD);
     }
+
+    free(buffer_lvset);
+    free(buffer_flag);
+}
+
+static inline int divceil(const int a, const int b) {
+    return (a + b - 1) / b;
 }

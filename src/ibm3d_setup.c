@@ -988,12 +988,7 @@ static void calc_lvset_flag(IBMSolver *solver) {
     const int Ny = solver->Ny;
     const int Nz = solver->Nz;
 
-    double (*const lvset)[Ny+4][Nz+4] = calloc(Nx+4, sizeof(double [Ny+4][Nz+4]));
-
-    int *x_exchg = calloc((Ny+4)*(Nz+4), sizeof(int));
-    int *y_exchg = calloc((Nx+4)*(Nz+4), sizeof(int));
-    int *z_exchg = calloc((Nx+4)*(Ny+4), sizeof(int));
-
+    int *x_exchg, *y_exchg, *z_exchg;
     int cnt;
 
     /* No obstacle: every cell is fluid cell. */
@@ -1009,42 +1004,33 @@ static void calc_lvset_flag(IBMSolver *solver) {
         return;
     }
 
+    x_exchg = calloc((Ny+4)*(Nz+4), sizeof(int));
+    y_exchg = calloc((Nx+4)*(Nz+4), sizeof(int));
+    z_exchg = calloc((Nx+4)*(Ny+4), sizeof(int));
+
     /* Calculate level set function. */
     Polyhedron_cpt(
         solver->poly,
         Nx+4, Ny+4, Nz+4,
         solver->xc, solver->yc, solver->zc,
-        lvset, .5
+        (double (*)[Ny+4][Nz+4])solver->lvset, .5
     );
-
-    for (int i = -2; i < Nx+2; i++) {
-        for (int j = -2; j < Ny+2; j++) {
-            for (int k = -2; k < Nz+2; k++) {
-                c3e(solver->lvset, i, j, k) = lvset[i+2][j+2][k+2];
-            }
-        }
-    }
-
-    free(lvset);
 
     /* Calculate flag.
        * Level set function is positive or zero.  => fluid cell
        * Level set function if negative and at
          least one adjacent cell is fluid cell.   => ghost cell
        * Otherwise.                               => solid cell */
-    for (int i = -2; i < Nx+2; i++) {
-        for (int j = -2; j < Ny+2; j++) {
-            for (int k = -2; k < Nz+2; k++) {
+    for (int i = -1; i < Nx+1; i++) {
+        for (int j = -1; j < Ny+1; j++) {
+            for (int k = -1; k < Nz+1; k++) {
                 if (c3e(solver->lvset, i, j, k) >= 0) {
                     c3e(solver->flag, i, j, k) = FLAG_FLUID;
                 }
                 else {
                     bool is_ghost_cell = false;
                     for (int l = 0; l < 6; l++) {
-                        int ni = i + adj[l][0], nj = j + adj[l][1], nk = k + adj[l][2];
-                        if (ni < -2 || ni > Nx+2 || nj < -2 || nj > Ny+2 || nk < -2 || nk > Nz+2) {
-                            continue;
-                        }
+                        const int ni = i + adj[l][0], nj = j + adj[l][1], nk = k + adj[l][2];
                         is_ghost_cell = is_ghost_cell || c3e(solver->lvset, ni, nj, nk) >= 0;
                     }
                     c3e(solver->flag, i, j, k) = is_ghost_cell ? FLAG_GHOST : FLAG_SOLID;

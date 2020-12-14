@@ -60,12 +60,16 @@ void IBMSolver_iterate(IBMSolver *solver, int num_time_steps, bool verbose) {
         calc_u_star(solver, &final_norm_u1, &final_norm_u2, &final_norm_u3);
         calc_u_tilde(solver);
         calc_U_star(solver);
-        calc_p_prime(solver, &final_norm_p); break;
+        calc_p_prime(solver, &final_norm_p);
         update_next(solver);
 
         i++;
         solver->iter++;
         solver->time = start_time + solver->dt * i;
+
+        update_outer(solver);
+        adj_exchange(solver);
+        update_ghost(solver);
 
         /* Print iteration results. */
         if (verbose && solver->rank == 0) {
@@ -201,7 +205,6 @@ static inline void calc_u_star(
     const int Nx = solver->Nx;
     const int Ny = solver->Ny;
     const int Nz = solver->Nz;
-    const int Nx_global = solver->Nx_global;
     const double dt = solver->dt;
 
     const double *const xc = solver->xc;
@@ -372,6 +375,7 @@ static inline void calc_u_star(
             }
         }
     }
+    HYPRE_ParCSRBiCGSTABGetFinalRelativeResidualNorm(solver->linear_solver, final_norm_u1);
 
     /* u2_star. */
 
@@ -495,6 +499,7 @@ static inline void calc_u_star(
             }
         }
     }
+    HYPRE_ParCSRBiCGSTABGetFinalRelativeResidualNorm(solver->linear_solver, final_norm_u2);
 
     /* u3_star. */
 
@@ -618,6 +623,7 @@ static inline void calc_u_star(
             }
         }
     }
+    HYPRE_ParCSRBiCGSTABGetFinalRelativeResidualNorm(solver->linear_solver, final_norm_u3);
 
     /* Exchange u_star between adjacent processes. */
 
@@ -1251,73 +1257,79 @@ static inline void update_next(IBMSolver *solver) {
     const double *const yc = solver->yc;
     const double *const zc = solver->zc;
 
-    const int (*const flag)[Ny+2][Nz+2] = solver->flag;
+    const int *const flag = solver->flag;
 
-    const double (*const p)[Ny+2][Nz+2] = solver->p;
+    const double *const p = solver->p;
 
-    const double (*const u1_star)[Ny+2][Nz+2] = solver->u1_star;
-    const double (*const u2_star)[Ny+2][Nz+2] = solver->u2_star;
-    const double (*const u3_star)[Ny+2][Nz+2] = solver->u3_star;
+    const double *const u1_star = solver->u1_star;
+    const double *const u2_star = solver->u2_star;
+    const double *const u3_star = solver->u3_star;
 
-    const double (*const U1_star)[Ny+2][Nz+2] = solver->U1_star;
-    const double (*const U2_star)[Ny+1][Nz+2] = solver->U2_star;
-    const double (*const U3_star)[Ny+2][Nz+1] = solver->U3_star;
+    const double *const U1_star = solver->U1_star;
+    const double *const U2_star = solver->U2_star;
+    const double *const U3_star = solver->U3_star;
 
-    const double (*const p_prime)[Ny+2][Nz+2] = solver->p_prime;
+    const double *const p_prime = solver->p_prime;
 
-    double (*const u1_next)[Ny+2][Nz+2] = solver->u1_next;
-    double (*const u2_next)[Ny+2][Nz+2] = solver->u2_next;
-    double (*const u3_next)[Ny+2][Nz+2] = solver->u3_next;
-    double (*const U1_next)[Ny+2][Nz+2] = solver->U1_next;
-    double (*const U2_next)[Ny+1][Nz+2] = solver->U2_next;
-    double (*const U3_next)[Ny+2][Nz+1] = solver->U3_next;
-    double (*const p_next)[Ny+2][Nz+2] = solver->p_next;
+    double *const u1_next = solver->u1_next;
+    double *const u2_next = solver->u2_next;
+    double *const u3_next = solver->u3_next;
+    double *const U1_next = solver->U1_next;
+    double *const U2_next = solver->U2_next;
+    double *const U3_next = solver->U3_next;
+    double *const p_next = solver->p_next;
 
     /* Calculate p_next. */
     FOR_INNER_CELL (i, j, k) {
-        if (flag[i][j][k] == FLAG_FLUID || flag[i][j][k] == FLAG_GHOST) {
-            p_next[i][j][k] = p[i][j][k] + p_prime[i][j][k];
+        if (c3e(flag, i, j, k) == FLAG_FLUID || c3e(flag, i, j, k) == FLAG_GHOST) {
+            c3e(p_next, i, j, k) = c3e(p, i, j, k) + c3e(p_prime, i, j, k);
         }
-        else if (flag[i][j][k] == FLAG_SOLID) {
-            p_next[i][j][k] = NAN;
+        else {
+            c3e(p_next, i, j, k) = NAN;
         }
     }
 
     /* Calculate u_next. */
     FOR_INNER_CELL (i, j, k) {
-        if (flag[i][j][k] == FLAG_FLUID) {
-            u1_next[i][j][k] = u1_star[i][j][k] - dt * (p_prime[i+1][j][k] - p_prime[i-1][j][k]) / (xc[i+1] - xc[i-1]);
-            u2_next[i][j][k] = u2_star[i][j][k] - dt * (p_prime[i][j+1][k] - p_prime[i][j-1][k]) / (yc[j+1] - yc[j-1]);
-            u3_next[i][j][k] = u3_star[i][j][k] - dt * (p_prime[i][j][k+1] - p_prime[i][j][k-1]) / (zc[k+1] - zc[k-1]);
+        if (c3e(flag, i, j, k) == FLAG_FLUID) {
+            c3e(u1_next, i, j, k) = c3e(u1_star, i, j, k)
+                - dt * (c3e(p_prime, i+1, j, k) - c3e(p_prime, i-1, j, k)) / (c1e(xc, i+1) - c1e(xc, i-1));
+            c3e(u2_next, i, j, k) = c3e(u2_star, i, j, k)
+                - dt * (c3e(p_prime, i, j+1, k) - c3e(p_prime, i, j-1, k)) / (c1e(yc, j+1) - c1e(yc, j-1));
+            c3e(u3_next, i, j, k) = c3e(u3_star, i, j, k)
+                - dt * (c3e(p_prime, i, j, k+1) - c3e(p_prime, i, j, k-1)) / (c1e(zc, k+1) - c1e(zc, k-1));
         }
-        else if (flag[i][j][k] == FLAG_SOLID) {
-            u1_next[i][j][k] = u2_next[i][j][k] = u3_next[i][j][k] = NAN;
+        else if (c3e(flag, i, j, k) == FLAG_SOLID) {
+            c3e(u1_next, i, j, k) = c3e(u2_next, i, j, k) = c3e(u3_next, i, j, k) = NAN;
         }
     }
 
     /* Calculate U_next. */
     FOR_ALL_XSTAG (i, j, k) {
-        if (flag[i][j][k] == FLAG_FLUID && flag[i+1][j][k] == FLAG_FLUID) {
-            U1_next[i][j][k] = U1_star[i][j][k] - dt * (p_prime[i+1][j][k] - p_prime[i][j][k]) / (xc[i+1] - xc[i]);
+        if (c3e(flag, i-1, j, k) == FLAG_FLUID && c3e(flag, i, j, k) == FLAG_FLUID) {
+            xse(U1_next, i, j, k) = xse(U1_star, i, j, k)
+                - dt * (c3e(p_prime, i, j, k) - c3e(p_prime, i-1, j, k)) / (c1e(xc, i) - c1e(xc, i-1));
         }
-        else if (flag[i][j][k] == FLAG_SOLID || flag[i+1][j][k] == FLAG_SOLID) {
-            U1_next[i][j][k] = NAN;
+        else if (c3e(flag, i-1, j, k) == FLAG_SOLID || c3e(flag, i, j, k) == FLAG_SOLID) {
+            xse(U1_next, i, j, k) = NAN;
         }
     }
     FOR_ALL_YSTAG (i, j, k) {
-        if (flag[i][j][k] == FLAG_FLUID && flag[i][j+1][k] == FLAG_FLUID) {
-            U2_next[i][j][k] = U2_star[i][j][k] - dt * (p_prime[i][j+1][k] - p_prime[i][j][k]) / (yc[j+1] - yc[j]);
+        if (c3e(flag, i, j-1, k) == FLAG_FLUID && c3e(flag, i, j, k) == FLAG_FLUID) {
+            yse(U2_next, i, j, k) = yse(U2_star, i, j, k)
+                - dt * (c3e(p_prime, i, j, k) - c3e(p_prime, i, j-1, k)) / (c1e(yc, j) - c1e(yc, j-1));
         }
-        else if (flag[i][j][k] == FLAG_SOLID || flag[i][j+1][k] == FLAG_SOLID) {
-            U2_next[i][j][k] = NAN;
+        else if (c3e(flag, i, j-1, k) == FLAG_SOLID || c3e(flag, i, j, k) == FLAG_SOLID) {
+            yse(U2_next, i, j, k) = NAN;
         }
     }
     FOR_ALL_ZSTAG (i, j, k) {
-        if (flag[i][j][k] == FLAG_FLUID && flag[i][j][k+1] == FLAG_FLUID) {
-            U3_next[i][j][k] = U3_star[i][j][k] - dt * (p_prime[i][j][k+1] - p_prime[i][j][k]) / (zc[k+1] - zc[k]);
+        if (c3e(flag, i, j, k-1) == FLAG_FLUID && c3e(flag, i, j, k) == FLAG_FLUID) {
+            zse(U3_next, i, j, k) = zse(U3_star, i, j, k)
+                - dt * (c3e(p_prime, i, j, k) - c3e(p_prime, i, j, k-1)) / (c1e(zc, k) - c1e(zc, k-1));
         }
-        else if (flag[i][j][k] == FLAG_SOLID || flag[i][j][k+1] == FLAG_SOLID) {
-            U3_next[i][j][k] = NAN;
+        else if (c3e(flag, i, j, k-1) == FLAG_SOLID || c3e(flag, i, j, k) == FLAG_SOLID) {
+            zse(U3_next, i, j, k) = NAN;
         }
     }
 
@@ -1332,15 +1344,6 @@ static inline void update_next(IBMSolver *solver) {
     SWAP(solver->N1_prev, solver->N1);
     SWAP(solver->N2_prev, solver->N2);
     SWAP(solver->N3_prev, solver->N3);
-
-    /* Set boundary conditions. */
-    update_outer(solver);
-
-    /* Exchange u1, u2, u3, and p between the adjacent processes. */
-    adj_exchange(solver);
-
-    /* Set boundary condition on obstacle surface. */
-    update_ghost(solver);
 }
 
 static void interp_stag_vel(IBMSolver *solver) {
