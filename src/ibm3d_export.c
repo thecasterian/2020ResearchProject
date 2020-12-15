@@ -7,8 +7,6 @@
 
 #include "utils.h"
 
-static inline int divceil(const int, const int);
-
 /**
  * @brief Exports result in netCDF CF format.
  *
@@ -422,8 +420,4 @@ error:
 
     free(buffer_lvset);
     free(buffer_flag);
-}
-
-static inline int divceil(const int a, const int b) {
-    return (a + b - 1) / b;
 }

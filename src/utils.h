@@ -53,4 +53,6 @@ void IBMSolver_ghost_interp(
     int [restrict][3], double [restrict]
 );
 
+int divceil(int, int);
+
 #endif

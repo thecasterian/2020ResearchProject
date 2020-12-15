@@ -212,3 +212,15 @@ void IBMSolver_ghost_interp(
     interp_coeff[6] = (m.x-xl)*(m.y-yl)*(zu-m.z) / vol;
     interp_coeff[7] = (m.x-xl)*(m.y-yl)*(m.z-zl) / vol;
 }
+
+/**
+ * @brief Returns ceil(a / b), e.g., divceil(7, 3) = ceil(7 / 3) = 3. \p a and
+ *        \p b must be positive integers.
+ *
+ * @param a Numerator.
+ * @param b Denominator.
+ * @return Ceiling of quotient.
+ */
+int divceil(int a, int b) {
+    return (a + b - 1) / b;
+}

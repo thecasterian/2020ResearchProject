@@ -50,11 +50,14 @@ void IBMSolver_init_flow_file(
     const int Ny = solver->Ny;
     const int Nz = solver->Nz;
     const int Nx_global = solver->Nx_global;
+    const int Ny_global = solver->Ny_global;
+    const int Nz_global = solver->Nz_global;
 
-    double (*const u1)[Ny+2][Nz+2] = solver->u1;
-    double (*const u2)[Ny+2][Nz+2] = solver->u2;
-    double (*const u3)[Ny+2][Nz+2] = solver->u3;
-    double (*const p)[Ny+2][Nz+2] = solver->p;
+    double *const buffer = calloc(
+        4 * divceil(Nx_global+4, solver->Px) * divceil(Ny_global+4, solver->Py) * divceil(Nz_global+4, solver->Pz),
+        sizeof(double)
+    );
+    int cnt;
 
     struct time_iter {double time; int iter;};
 
@@ -70,15 +73,10 @@ void IBMSolver_init_flow_file(
         /* netCDF function return value. */
         int stat;
 
-        float (*const u_value)[Ny+2][Nx_global+2] = calloc(Nz+2, sizeof(float [Ny+2][Nx_global+2]));
-        float (*const v_value)[Ny+2][Nx_global+2] = calloc(Nz+2, sizeof(float [Ny+2][Nx_global+2]));
-        float (*const w_value)[Ny+2][Nx_global+2] = calloc(Nz+2, sizeof(float [Ny+2][Nx_global+2]));
-        float (*const p_value)[Ny+2][Nx_global+2] = calloc(Nz+2, sizeof(float [Ny+2][Nx_global+2]));
-
-        double (*const u1_global)[Ny+2][Nz+2] = calloc(Nx_global+2, sizeof(double [Ny+2][Nz+2]));
-        double (*const u2_global)[Ny+2][Nz+2] = calloc(Nx_global+2, sizeof(double [Ny+2][Nz+2]));
-        double (*const u3_global)[Ny+2][Nz+2] = calloc(Nx_global+2, sizeof(double [Ny+2][Nz+2]));
-        double (*const p_global)[Ny+2][Nz+2] = calloc(Nx_global+2, sizeof(double [Ny+2][Nz+2]));
+        float (*const u_value)[Ny_global+4][Nx_global+4] = calloc(Nz_global+4, sizeof(float [Ny_global+4][Nx_global+4]));
+        float (*const v_value)[Ny_global+4][Nx_global+4] = calloc(Nz_global+4, sizeof(float [Ny_global+4][Nx_global+4]));
+        float (*const w_value)[Ny_global+4][Nx_global+4] = calloc(Nz_global+4, sizeof(float [Ny_global+4][Nx_global+4]));
+        float (*const p_value)[Ny_global+4][Nx_global+4] = calloc(Nz_global+4, sizeof(float [Ny_global+4][Nx_global+4]));
 
         /* Struct containing time and iter. */
         struct time_iter time_iter;
@@ -89,39 +87,39 @@ void IBMSolver_init_flow_file(
         /* Open file. */
         stat = nc_open(filename_ext, NC_NOWRITE, &ncid);
         if (stat != NC_NOERR) {
-            printf("cannot open file %s\n", filename);
+            fprintf(stderr, "error: cannot open file %s\n", filename);
             goto error;
         }
 
         /* Get variable id. */
         stat = nc_inq_varid(ncid, "time", &time_varid);
         if (stat != NC_NOERR) {
-            printf("varible 'time' not found\n");
+            fprintf(stderr, "error: varible 'time' not found\n");
             goto error;
         }
         stat = nc_inq_varid(ncid, "iter", &iter_varid);
         if (stat != NC_NOERR) {
-            printf("variable 'iter' not found\n");
+            fprintf(stderr, "error: variable 'iter' not found\n");
             goto error;
         }
         stat = nc_inq_varid(ncid, "u", &u_varid);
         if (stat != NC_NOERR) {
-            printf("variable 'u' not found\n");
+            fprintf(stderr, "error: variable 'u' not found\n");
             goto error;
         }
         stat = nc_inq_varid(ncid, "v", &v_varid);
         if (stat != NC_NOERR) {
-            printf("variable 'v' not found\n");
+            fprintf(stderr, "error: variable 'v' not found\n");
             goto error;
         }
         stat = nc_inq_varid(ncid, "w", &w_varid);
         if (stat != NC_NOERR) {
-            printf("variable 'w' not found\n");
+            fprintf(stderr, "error: variable 'w' not found\n");
             goto error;
         }
         stat = nc_inq_varid(ncid, "p", &p_varid);
         if (stat != NC_NOERR) {
-            printf("variable 'p' not found\n");
+            fprintf(stderr, "error: variable 'p' not found\n");
             goto error;
         }
 
@@ -136,77 +134,93 @@ void IBMSolver_init_flow_file(
         /* Close file. */
         nc_close(ncid);
 
-        /* Convert column-major order to row-major order. */
-        for (int i = 0; i <= Nx_global+1; i++) {
-            for (int j = 0; j <= Ny+1; j++) {
-                for (int k = 0; k <= Nz+1; k++) {
-                    u1_global[i][j][k] = u_value[k][j][i];
-                    u2_global[i][j][k] = v_value[k][j][i];
-                    u3_global[i][j][k] = w_value[k][j][i];
-                    p_global[i][j][k] = p_value[k][j][i];
+        /* Data to process 0. */
+        for (int i = solver->ilower_out; i < solver->iupper_out; i++) {
+            for (int j = solver->jlower_out; j < solver->jupper_out; j++) {
+                for (int k = solver->klower_out; k < solver->kupper_out; k++) {
+                    c3e(solver->u1, i, j, k) = u_value[k+2][j+2][i+2];
+                    c3e(solver->u2, i, j, k) = v_value[k+2][j+2][i+2];
+                    c3e(solver->u3, i, j, k) = w_value[k+2][j+2][i+2];
+                    c3e(solver->p, i, j, k) = p_value[k+2][j+2][i+2];
                 }
             }
         }
-
-        free(u_value);
-        free(v_value);
-        free(w_value);
-        free(p_value);
-
-        /* Data to process 0. */
-        memcpy(u1, u1_global, sizeof(double)*(Nx+2)*(Ny+2)*(Nz+2));
-        memcpy(u2, u2_global, sizeof(double)*(Nx+2)*(Ny+2)*(Nz+2));
-        memcpy(u3, u3_global, sizeof(double)*(Nx+2)*(Ny+2)*(Nz+2));
-        memcpy(p, p_global, sizeof(double)*(Nx+2)*(Ny+2)*(Nz+2));
 
         /* Set time and iter. */
         time_iter.time = solver->time;
         time_iter.iter = solver->iter;
 
         /* Send to other processes. */
-        for (int r = 1; r < solver->num_process; r++) {
-            const int ilower_r = r * Nx_global / solver->num_process + 1;
-            const int iupper_r = (r+1) * Nx_global / solver->num_process;
-            const int Nx_r = iupper_r - ilower_r + 1;
+        for (int rank = 1; rank < solver->num_process; rank++) {
+            const int ri = rank / (solver->Py * solver->Pz);
+            const int rj = rank % (solver->Py * solver->Pz) / solver->Pz;
+            const int rk = rank % solver->Pz;
 
-            MPI_Send(u1_global[ilower_r-1], (Nx_r+2)*(Ny+2)*(Nz+2), MPI_DOUBLE, r, 0, MPI_COMM_WORLD);
-            MPI_Send(u2_global[ilower_r-1], (Nx_r+2)*(Ny+2)*(Nz+2), MPI_DOUBLE, r, 1, MPI_COMM_WORLD);
-            MPI_Send(u3_global[ilower_r-1], (Nx_r+2)*(Ny+2)*(Nz+2), MPI_DOUBLE, r, 2, MPI_COMM_WORLD);
-            MPI_Send(p_global[ilower_r-1], (Nx_r+2)*(Ny+2)*(Nz+2), MPI_DOUBLE, r, 3, MPI_COMM_WORLD);
-            MPI_Send(&time_iter, 1, MPI_DOUBLE_INT, r, 4, MPI_COMM_WORLD);
+            const int ilower = ri * (Nx_global+4) / solver->Px - 2;
+            const int jlower = rj * (Ny_global+4) / solver->Py - 2;
+            const int klower = rk * (Nz_global+4) / solver->Pz - 2;
+
+            const int iupper = (ri+1) * (Nx_global+4) / solver->Px - 2;
+            const int jupper = (rj+1) * (Ny_global+4) / solver->Py - 2;
+            const int kupper = (rk+1) * (Nz_global+4) / solver->Pz - 2;
+
+            cnt = 0;
+            for (int i = ilower; i < iupper; i++) {
+                for (int j = jlower; j < jupper; j++) {
+                    for (int k = klower; k < kupper; k++) {
+                        buffer[cnt++] = u_value[k+2][j+2][i+2];
+                        buffer[cnt++] = v_value[k+2][j+2][i+2];
+                        buffer[cnt++] = w_value[k+2][j+2][i+2];
+                        buffer[cnt++] = p_value[k+2][j+2][i+2];
+                    }
+                }
+            }
+            MPI_Send(buffer, 4*(iupper-ilower)*(jupper-jlower)*(kupper-klower), MPI_DOUBLE, rank, 0, MPI_COMM_WORLD);
+            MPI_Send(&time_iter, 1, MPI_DOUBLE_INT, rank, 1, MPI_COMM_WORLD);
         }
 
-        free(u1_global);
-        free(u2_global);
-        free(u3_global);
-        free(p_global);
-
-        return;
-
-error:
-        MPI_Abort(MPI_COMM_WORLD, -1);
+        free(u_value);
+        free(v_value);
+        free(w_value);
+        free(p_value);
     }
     else {
+        int ifirst, ilast, jfirst, jlast, kfirst, klast;
         struct time_iter time_iter;
 
+        ifirst = solver->ri == 0 ? -2 : 0;
+        jfirst = solver->rj == 0 ? -2 : 0;
+        kfirst = solver->rk == 0 ? -2 : 0;
+
+        ilast = solver->ri != solver->Px-1 ? Nx : Nx+2;
+        jlast = solver->rj != solver->Py-1 ? Ny : Ny+2;
+        klast = solver->rk != solver->Pz-1 ? Nz : Nz+2;
+
         /* Receive from process 0. */
-        MPI_Recv(u1, (Nx+2)*(Ny+2)*(Nz+2), MPI_DOUBLE, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-        MPI_Recv(u2, (Nx+2)*(Ny+2)*(Nz+2), MPI_DOUBLE, 0, 1, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-        MPI_Recv(u3, (Nx+2)*(Ny+2)*(Nz+2), MPI_DOUBLE, 0, 2, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-        MPI_Recv(p, (Nx+2)*(Ny+2)*(Nz+2), MPI_DOUBLE, 0, 3, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-        MPI_Recv(&time_iter, 1, MPI_DOUBLE_INT, 0, 4, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        MPI_Recv(buffer, 4*(ilast-ifirst)*(jlast-jfirst)*(klast-kfirst), MPI_DOUBLE, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        cnt = 0;
+        for (int i = ifirst; i < ilast; i++) {
+            for (int j = jfirst; j < jlast; j++) {
+                for (int k = kfirst; k < klast; k++) {
+                    c3e(solver->u1, i, j, k) = buffer[cnt++];
+                    c3e(solver->u2, i, j, k) = buffer[cnt++];
+                    c3e(solver->u3, i, j, k) = buffer[cnt++];
+                    c3e(solver->p, i, j, k) = buffer[cnt++];
+                }
+            }
+        }
 
         /* Set time and iter. */
+        MPI_Recv(&time_iter, 1, MPI_DOUBLE_INT, 0, 1, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
         solver->time = time_iter.time;
         solver->iter = time_iter.iter;
     }
 
-    srand(0);
-    FOR_INNER_CELL (i, j, k) {
-        u1[i][j][k] += (double)rand() / RAND_MAX * 0.02 - 0.01;
-        u2[i][j][k] += (double)rand() / RAND_MAX * 0.02 - 0.01;
-        u3[i][j][k] += (double)rand() / RAND_MAX * 0.02 - 0.01;
-    }
+    free(buffer);
+    return;
+
+error:
+    MPI_Abort(MPI_COMM_WORLD, -1);
 }
 
 /**
