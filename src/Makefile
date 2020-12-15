@@ -1,7 +1,10 @@
 UNAME = $(shell uname)
 
 CC = mpicc
-CFLAGS = -Wall -Wextra -O3 -Wno-unused-result
+CFLAGS = -Wall -Wextra -O3
+
+# Uncomment if debug mode.
+# CFLAGS += -g -rdynamic
 
 ifeq ($(UNAME), Darwin)
 	INCLUDE = -I/usr/local/Cellar/glib/2.66.0/include/glib-2.0 -I/usr/local/include

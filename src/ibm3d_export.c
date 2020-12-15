@@ -23,11 +23,6 @@ void IBMSolver_export_result(IBMSolver *solver, const char *filename) {
     const int Ny_global = solver->Ny_global;
     const int Nz_global = solver->Nz_global;
 
-    const double *const u1 = solver->u1;
-    const double *const u2 = solver->u2;
-    const double *const u3 = solver->u3;
-    const double *const p = solver->p;
-
     double *const buffer = calloc(
         4 * divceil(Nx_global+4, solver->Px) * divceil(Ny_global+4, solver->Py) * divceil(Nz_global+4, solver->Pz),
         sizeof(double)
@@ -59,7 +54,7 @@ void IBMSolver_export_result(IBMSolver *solver, const char *filename) {
         float (*const v_value)[Ny_global+4][Nx_global+4] = calloc(Nz_global+4, sizeof(float [Ny_global+4][Nx_global+4]));
         float (*const w_value)[Ny_global+4][Nx_global+4] = calloc(Nz_global+4, sizeof(float [Ny_global+4][Nx_global+4]));
         float (*const p_value)[Ny_global+4][Nx_global+4] = calloc(Nz_global+4, sizeof(float [Ny_global+4][Nx_global+4]));
-        float (*const vort_value)[Ny_global+4][Nx_global+4] = calloc(Nz_global+2, sizeof(float [Ny_global+4][Nx_global+4]));
+        float (*const vort_value)[Ny_global+4][Nx_global+4] = calloc(Nz_global+4, sizeof(float [Ny_global+4][Nx_global+4]));
 
         /* Velocity gradients. */
         int iprev, inext, jprev, jnext, kprev, knext;
@@ -77,10 +72,10 @@ void IBMSolver_export_result(IBMSolver *solver, const char *filename) {
         for (int i = solver->ilower_out; i < solver->iupper_out; i++) {
             for (int j = solver->jlower_out; j < solver->jupper_out; j++) {
                 for (int k = solver->klower_out; k < solver->kupper_out; k++) {
-                    u_value[k+2][j+2][i+2] = c3e(u1, i, j, k);
-                    v_value[k+2][j+2][i+2] = c3e(u2, i, j, k);
-                    w_value[k+2][j+2][i+2] = c3e(u3, i, j, k);
-                    p_value[k+2][j+2][i+2] = c3e(p, i, j, k);
+                    u_value[k+2][j+2][i+2] = c3e(solver->u1, i, j, k);
+                    v_value[k+2][j+2][i+2] = c3e(solver->u2, i, j, k);
+                    w_value[k+2][j+2][i+2] = c3e(solver->u3, i, j, k);
+                    p_value[k+2][j+2][i+2] = c3e(solver->p, i, j, k);
                 }
             }
         }
@@ -118,11 +113,11 @@ void IBMSolver_export_result(IBMSolver *solver, const char *filename) {
             for (int j = 0; j < Ny_global+4; j++) {
                 for (int i = 0; i < Nx_global+4; i++) {
                     iprev = max(i-1, 0);
-                    inext = min(i+1, Nx_global+4);
+                    inext = min(i+1, Nx_global+3);
                     jprev = max(j-1, 0);
-                    jnext = min(j+1, Ny_global+4);
+                    jnext = min(j+1, Ny_global+3);
                     kprev = max(k-1, 0);
-                    knext = min(k+1, Nz_global+4);
+                    knext = min(k+1, Nz_global+3);
 
                     dudy = (u_value[k][jnext][i] - u_value[k][jprev][i]) / (y_value[jnext] - y_value[jprev]);
                     dudz = (u_value[knext][j][i] - u_value[kprev][j][i]) / (z_value[knext] - z_value[kprev]);
@@ -140,11 +135,8 @@ void IBMSolver_export_result(IBMSolver *solver, const char *filename) {
             }
         }
 
-        fprintf(stderr, "%s\n", filename_ext);
-
         /* Create file. */
         stat = nc_create(filename_ext, NC_CLOBBER, &ncid);
-        fprintf(stderr, "hi\n");
         if (stat != NC_NOERR) {
             fprintf(stderr, "error: cannot open file %s\n", filename_ext);
             goto error;
@@ -237,10 +229,10 @@ error:
         for (int i = ifirst; i < ilast; i++) {
             for (int j = jfirst; j < jlast; j++) {
                 for (int k = kfirst; k < klast; k++) {
-                    buffer[cnt++] = c3e(u1, i, j, k);
-                    buffer[cnt++] = c3e(u2, i, j, k);
-                    buffer[cnt++] = c3e(u3, i, j, k);
-                    buffer[cnt++] = c3e(p, i, j, k);
+                    buffer[cnt++] = c3e(solver->u1, i, j, k);
+                    buffer[cnt++] = c3e(solver->u2, i, j, k);
+                    buffer[cnt++] = c3e(solver->u3, i, j, k);
+                    buffer[cnt++] = c3e(solver->p, i, j, k);
                 }
             }
         }
@@ -265,16 +257,13 @@ void IBMSolver_export_lvset_flag(IBMSolver *solver, const char *filename) {
     const int Ny_global = solver->Ny_global;
     const int Nz_global = solver->Nz_global;
 
-    const double *const lvset = solver->lvset;
-    const int *const flag = solver->flag;
-
     double *const buffer_lvset = calloc(
         divceil(Nx_global+4, solver->Px) * divceil(Ny_global+4, solver->Py) * divceil(Nz_global+4, solver->Pz),
         sizeof(double)
     );
-    int *const buffer_flag = calloc(
+    int32_t *const buffer_flag = calloc(
         divceil(Nx_global+4, solver->Px) * divceil(Ny_global+4, solver->Py) * divceil(Nz_global+4, solver->Pz),
-        sizeof(int)
+        sizeof(int32_t)
     );
     int cnt;
 
@@ -296,8 +285,8 @@ void IBMSolver_export_lvset_flag(IBMSolver *solver, const char *filename) {
         const double *const y_value = solver->yc_global;
         const double *const z_value = solver->zc_global;
 
-        float (*const lvset_value)[Ny_global+2][Nx_global+2] = calloc(Nz_global+2, sizeof(float [Ny_global+2][Nx_global+2]));
-        int (*const flag_value)[Ny_global+2][Nx_global+2] = calloc(Nz_global+2, sizeof(signed char [Ny_global+2][Nx_global+2]));
+        float (*const lvset_value)[Ny_global+4][Nx_global+4] = calloc(Nz_global+4, sizeof(float [Ny_global+4][Nx_global+4]));
+        int32_t (*const flag_value)[Ny_global+4][Nx_global+4] = calloc(Nz_global+4, sizeof(int32_t [Ny_global+4][Nx_global+4]));
 
         /* netCDF function return value. */
         int stat;
@@ -309,8 +298,8 @@ void IBMSolver_export_lvset_flag(IBMSolver *solver, const char *filename) {
         for (int i = solver->ilower_out; i < solver->iupper_out; i++) {
             for (int j = solver->jlower_out; j < solver->jupper_out; j++) {
                 for (int k = solver->klower_out; k < solver->kupper_out; k++) {
-                    lvset_value[k+2][j+2][i+2] = c3e(lvset, i, j, k);
-                    flag_value[k+2][j+2][i+2] = c3e(flag, i, j, k);
+                    lvset_value[k+2][j+2][i+2] = c3e(solver->lvset, i, j, k);
+                    flag_value[k+2][j+2][i+2] = c3e(solver->flag, i, j, k);
                 }
             }
         }
@@ -348,8 +337,6 @@ void IBMSolver_export_lvset_flag(IBMSolver *solver, const char *filename) {
                 }
             }
         }
-
-        fprintf(stderr, "%s\n", filename_ext);
 
         /* Create file. */
         stat = nc_create(filename_ext, NC_CLOBBER, &ncid);
@@ -392,7 +379,10 @@ void IBMSolver_export_lvset_flag(IBMSolver *solver, const char *filename) {
         nc_put_var_double(ncid, z_varid, z_value);
 
         nc_put_var_float(ncid, lvset_varid, (float *)lvset_value);
-        nc_put_var_int(ncid, flag_varid, (int *)flag_value);
+        nc_put_var_int(ncid, flag_varid, (int32_t *)flag_value);
+
+        /* Close file. */
+        nc_close(ncid);
 
 error:
         free(lvset_value);
@@ -414,16 +404,16 @@ error:
         for (int i = ifirst; i < ilast; i++) {
             for (int j = jfirst; j < jlast; j++) {
                 for (int k = kfirst; k < klast; k++) {
-                    buffer_lvset[cnt++] = c3e(lvset, i, j, k);
+                    buffer_lvset[cnt++] = c3e(solver->lvset, i, j, k);
                 }
             }
         }
         MPI_Send(buffer_lvset, (ilast-ifirst)*(jlast-jfirst)*(klast-kfirst), MPI_DOUBLE, 0, 0, MPI_COMM_WORLD);
         cnt = 0;
-                for (int i = ifirst; i < ilast; i++) {
+        for (int i = ifirst; i < ilast; i++) {
             for (int j = jfirst; j < jlast; j++) {
                 for (int k = kfirst; k < klast; k++) {
-                    buffer_flag[cnt++] = c3e(flag, i, j, k);
+                    buffer_flag[cnt++] = c3e(solver->flag, i, j, k);
                 }
             }
         }

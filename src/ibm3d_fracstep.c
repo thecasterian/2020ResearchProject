@@ -362,9 +362,12 @@ static inline void calc_u_star(
 
     HYPRE_ParCSRBiCGSTABSetup(solver->linear_solver, solver->parcsr_A_u1, solver->par_b, solver->par_x);
     hypre_ierr = HYPRE_ParCSRBiCGSTABSolve(solver->linear_solver, solver->parcsr_A_u1, solver->par_b, solver->par_x);
-    if (hypre_ierr) {
-        printf("error: floating pointer error raised in u1_star\n");
+    if (HYPRE_CheckError(hypre_ierr, HYPRE_ERROR_GENERIC)) {
+        fprintf(stderr, "error: floating pointer error raised in u1_star\n");
         MPI_Abort(MPI_COMM_WORLD, -1);
+    }
+    if (HYPRE_CheckError(hypre_ierr, HYPRE_ERROR_CONV)) {
+        fprintf(stderr, "warning: u1_star did not converge\n");
     }
 
     HYPRE_IJVectorGetValues(solver->x, solver->idx_last-solver->idx_first, solver->vector_rows, solver->vector_res);
@@ -486,9 +489,12 @@ static inline void calc_u_star(
 
     HYPRE_ParCSRBiCGSTABSetup(solver->linear_solver, solver->parcsr_A_u2, solver->par_b, solver->par_x);
     hypre_ierr = HYPRE_ParCSRBiCGSTABSolve(solver->linear_solver, solver->parcsr_A_u2, solver->par_b, solver->par_x);
-    if (hypre_ierr) {
-        printf("error: floating pointer error raised in u2_star\n");
+    if (HYPRE_CheckError(hypre_ierr, HYPRE_ERROR_GENERIC)) {
+        fprintf(stderr, "error: floating pointer error raised in u2_star\n");
         MPI_Abort(MPI_COMM_WORLD, -1);
+    }
+    if (HYPRE_CheckError(hypre_ierr, HYPRE_ERROR_CONV)) {
+        fprintf(stderr, "warning: u2_star did not converge\n");
     }
 
     HYPRE_IJVectorGetValues(solver->x, solver->idx_last-solver->idx_first, solver->vector_rows, solver->vector_res);
@@ -610,9 +616,12 @@ static inline void calc_u_star(
 
     HYPRE_ParCSRBiCGSTABSetup(solver->linear_solver, solver->parcsr_A_u3, solver->par_b, solver->par_x);
     hypre_ierr = HYPRE_ParCSRBiCGSTABSolve(solver->linear_solver, solver->parcsr_A_u3, solver->par_b, solver->par_x);
-    if (hypre_ierr) {
-        printf("error: floating pointer error raised in u3_star\n");
+    if (HYPRE_CheckError(hypre_ierr, HYPRE_ERROR_GENERIC)) {
+        fprintf(stderr, "error: floating pointer error raised in u3_star\n");
         MPI_Abort(MPI_COMM_WORLD, -1);
+    }
+    if (HYPRE_CheckError(hypre_ierr, HYPRE_ERROR_CONV)) {
+        fprintf(stderr, "warning: u3_star did not converge\n");
     }
 
     HYPRE_IJVectorGetValues(solver->x, solver->idx_last-solver->idx_first, solver->vector_rows, solver->vector_res);
@@ -1071,9 +1080,12 @@ static inline void calc_p_prime(IBMSolver *solver, double *final_norm_p) {
         break;
     default:;
     }
-    if (hypre_ierr) {
-        printf("error: floating pointer error raised in p_prime\n");
+    if (HYPRE_CheckError(hypre_ierr, HYPRE_ERROR_GENERIC)) {
+        fprintf(stderr, "error: floating pointer error raised in p_prime\n");
         MPI_Abort(MPI_COMM_WORLD, -1);
+    }
+    if (HYPRE_CheckError(hypre_ierr, HYPRE_ERROR_CONV)) {
+        fprintf(stderr, "warning: p_prime did not converge\n");
     }
 
     HYPRE_IJVectorGetValues(solver->x, solver->idx_last-solver->idx_first, solver->vector_rows, solver->vector_res);
@@ -1536,7 +1548,7 @@ static void update_outer(IBMSolver *solver) {
                 }
             }
             a = c1e(solver->dx, Nx-2) / 2 + c1e(solver->dx, Nx-1);
-            b = c1e(solver->dx, Nx) + c1e(solver->dx, Nx+1);
+            b = c1e(solver->dx, Nx) + c1e(solver->dx, Nx+1) / 2;
             for (int j = -2; j < Ny+2; j++) {
                 for (int k = -2; k < Nz+2; k++) {
                     c3e(u1, Nx+1, j, k) = (a+b)/a*bc_val_u1(solver, DIR_EAST, solver->time, xmax, c1e(yc, j), c1e(zc, k)) - b/a*c3e(u1, Nx-2, j, k);
@@ -1675,8 +1687,8 @@ static void update_outer(IBMSolver *solver) {
             b = c1e(solver->dy, 0) / 2;
             for (int i = -2; i < Nx+2; i++) {
                 for (int k = -2; k < Nz+2; k++) {
-                    c3e(u1, i, -1, k) = -a/b*c3e(u1, i, 0, k);
-                    c3e(u2, i, -1, k) = c3e(u2, i, 0, k);
+                    c3e(u1, i, -1, k) = c3e(u1, i, 0, k);
+                    c3e(u2, i, -1, k) = -a/b*c3e(u2, i, 0, k);
                     c3e(u3, i, -1, k) = c3e(u3, i, 0, k);
                 }
             }
@@ -1684,8 +1696,8 @@ static void update_outer(IBMSolver *solver) {
             b = c1e(solver->dy, 0) + c1e(solver->dy, 1) / 2;
             for (int i = -2; i < Nx+2; i++) {
                 for (int k = -2; k < Nz+2; k++) {
-                    c3e(u1, i, -2, k) = -a/b*c3e(u1, i, 1, k);
-                    c3e(u2, i, -2, k) = c3e(u2, i, 1, k);
+                    c3e(u1, i, -2, k) = c3e(u1, i, 1, k);
+                    c3e(u2, i, -2, k) = -a/b*c3e(u2, i, 1, k);
                     c3e(u3, i, -2, k) = c3e(u3, i, 1, k);
                 }
             }
@@ -1746,7 +1758,7 @@ static void update_outer(IBMSolver *solver) {
                 }
             }
             a = c1e(solver->dy, Ny-2) / 2 + c1e(solver->dy, Ny-1);
-            b = c1e(solver->dy, Ny) + c1e(solver->dy, Ny+1);
+            b = c1e(solver->dy, Ny) + c1e(solver->dy, Ny+1) / 2;
             for (int i = -2; i < Nx+2; i++) {
                 for (int k = -2; k < Nz+2; k++) {
                     c3e(u1, i, Ny+1, k) = (a+b)/a*bc_val_u1(solver, DIR_NORTH, solver->time, c1e(xc, i), ymax, c1e(zc, k)) - b/a*c3e(u1, i, Ny-2, k);
@@ -1780,8 +1792,8 @@ static void update_outer(IBMSolver *solver) {
             b = c1e(solver->dy, Ny) / 2;
             for (int i = -2; i < Nx+2; i++) {
                 for (int k = -2; k < Nz+2; k++) {
-                    c3e(u1, i, Ny, k) = -b/a*c3e(u1, i, Ny-1, k);
-                    c3e(u2, i, Ny, k) = c3e(u2, i, Ny-1, k);
+                    c3e(u1, i, Ny, k) = c3e(u1, i, Ny-1, k);
+                    c3e(u2, i, Ny, k) = -b/a*c3e(u2, i, Ny-1, k);
                     c3e(u3, i, Ny, k) = c3e(u3, i, Ny-1, k);
                 }
             }
@@ -1789,8 +1801,8 @@ static void update_outer(IBMSolver *solver) {
             b = c1e(solver->dy, Ny) + c1e(solver->dy, Ny+1) / 2;
             for (int i = -2; i < Nx+2; i++) {
                 for (int k = -2; k < Nz+2; k++) {
-                    c3e(u1, i, Ny+1, k) = -b/a*c3e(u1, i, Ny-2, k);
-                    c3e(u2, i, Ny+1, k) = c3e(u2, i, Ny-2, k);
+                    c3e(u1, i, Ny+1, k) = c3e(u1, i, Ny-2, k);
+                    c3e(u2, i, Ny+1, k) = -b/a*c3e(u2, i, Ny-2, k);
                     c3e(u3, i, Ny+1, k) = c3e(u3, i, Ny-2, k);
                 }
             }
@@ -1885,18 +1897,18 @@ static void update_outer(IBMSolver *solver) {
             b = c1e(solver->dz, 0) / 2;
             for (int i = -2; i < Nx+2; i++) {
                 for (int j = -2; j < Ny+2; j++) {
-                    c3e(u1, i, j, -1) = -a/b*c3e(u1, i, j, 0);
+                    c3e(u1, i, j, -1) = c3e(u1, i, j, 0);
                     c3e(u2, i, j, -1) = c3e(u2, i, j, 0);
-                    c3e(u3, i, j, -1) = c3e(u3, i, j, 0);
+                    c3e(u3, i, j, -1) = -a/b*c3e(u3, i, j, 0);
                 }
             }
             a = c1e(solver->dz, -2) / 2 + c1e(solver->dz, -1);
             b = c1e(solver->dz, 0) + c1e(solver->dz, 1) / 2;
             for (int i = -2; i < Nx+2; i++) {
                 for (int j = -2; j < Ny+2; j++) {
-                    c3e(u1, i, j, -2) = -a/b*c3e(u1, i, j, 1);
+                    c3e(u1, i, j, -2) = c3e(u1, i, j, 1);
                     c3e(u2, i, j, -2) = c3e(u2, i, j, 1);
-                    c3e(u3, i, j, -2) = c3e(u3, i, j, 1);
+                    c3e(u3, i, j, -2) = -a/b*c3e(u3, i, j, 1);
                 }
             }
             break;
@@ -1956,7 +1968,7 @@ static void update_outer(IBMSolver *solver) {
                 }
             }
             a = c1e(solver->dz, Nz-2) / 2 + c1e(solver->dz, Nz-1);
-            b = c1e(solver->dz, Nz) + c1e(solver->dz, Nz+1);
+            b = c1e(solver->dz, Nz) + c1e(solver->dz, Nz+1) / 2;
             for (int i = -2; i < Nx+2; i++) {
                 for (int j = -2; j < Ny+2; j++) {
                     c3e(u1, i, j, Nz+1) = (a+b)/a*bc_val_u1(solver, DIR_UP, solver->time, c1e(xc, i), c1e(yc, j), zmax) - b/a*c3e(u1, i, j, Nz-2);
@@ -1990,18 +2002,18 @@ static void update_outer(IBMSolver *solver) {
             b = c1e(solver->dz, Nz) / 2;
             for (int i = -2; i < Nx+2; i++) {
                 for (int j = -2; j < Ny+2; j++) {
-                    c3e(u1, i, j, Nz) = -b/a*c3e(u1, i, j, Nz-1);
+                    c3e(u1, i, j, Nz) = c3e(u1, i, j, Nz-1);
                     c3e(u2, i, j, Nz) = c3e(u2, i, j, Nz-1);
-                    c3e(u3, i, j, Nz) = c3e(u3, i, j, Nz-1);
+                    c3e(u3, i, j, Nz) = -b/a*c3e(u3, i, j, Nz-1);
                 }
             }
             a = c1e(solver->dz, Nz-2) / 2 + c1e(solver->dz, Nz-1);
             b = c1e(solver->dz, Nz) + c1e(solver->dz, Nz+1) / 2;
             for (int i = -2; i < Nx+2; i++) {
                 for (int j = -2; j < Ny+2; j++) {
-                    c3e(u1, i, j, Nz+1) = -b/a*c3e(u1, i, j, Nz-2);
+                    c3e(u1, i, j, Nz+1) = c3e(u1, i, j, Nz-2);
                     c3e(u2, i, j, Nz+1) = c3e(u2, i, j, Nz-2);
-                    c3e(u3, i, j, Nz+1) = c3e(u3, i, j, Nz-2);
+                    c3e(u3, i, j, Nz+1) = -b/a*c3e(u3, i, j, Nz-2);
                 }
             }
             break;
@@ -2689,6 +2701,9 @@ static void update_ghost(IBMSolver *solver) {
             c3e(u2, i, j, k) = -sum_u2 / coeff_lhs_u;
             c3e(u3, i, j, k) = -sum_u3 / coeff_lhs_u;
             c3e(p, i, j, k) = sum_p / coeff_lhs_p;
+        }
+        else if (c3e(flag, i, j, k) == FLAG_SOLID) {
+            c3e(u1, i, j, k) = c3e(u2, i, j, k) = c3e(u3, i, j, k) = c3e(p, i, j, k) = NAN;
         }
     }
 

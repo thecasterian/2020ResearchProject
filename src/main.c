@@ -5,7 +5,7 @@
 #include "geo3d.h"
 #include "ibm3d.h"
 
-#define PATH "/home/jeonukim/data/sphere"
+#define PATH "/home/jeongukim/data/sphere"
 
 int main(int argc, char **argv) {
     /*===== Initialize program and parse arguments. ==========================*/
@@ -130,7 +130,7 @@ int main(int argc, char **argv) {
 
     /*===== Set solver. ======================================================*/
 
-    IBMSolver *solver = IBMSolver_new(num_process, rank, 2, 1, 3);
+    IBMSolver *solver = IBMSolver_new(num_process, rank, 6, 1, 1);
 
     IBMSolver_set_grid(solver, Nx, Ny, Nz, xf, yf, zf);
     IBMSolver_set_params(solver, Re, dt);
@@ -158,15 +158,15 @@ int main(int argc, char **argv) {
         IBMSolver_init_flow_file(solver, init_file);
     }
 
+    IBMSolver_export_lvset_flag(solver, PATH "/lvset_flag");
+
     if (rank == 0) {
         printf("\nInitialization done\n");
     }
-    MPI_Barrier(MPI_COMM_WORLD);
 
     /*===== Run. =============================================================*/
 
     IBMSolver_iterate(solver, num_time_steps, true);
-    goto end;
 
     /*===== Export results. ==================================================*/
 
@@ -174,7 +174,6 @@ int main(int argc, char **argv) {
 
     /*===== Free memory and finalize. ========================================*/
 
-end:
     free(xf); free(yf); free(zf);
     IBMSolver_destroy(solver);
 

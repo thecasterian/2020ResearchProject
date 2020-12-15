@@ -14,6 +14,9 @@ ex5: ex5.c
 ex3: ex3.c
 	$(CC) $(INCLUDE) $^ $(HYPRE) -o $@ $(LDLIBS) $(CFLAGS)
 
+netcdf: netcdf.c
+	gcc netcdf.c -o netcdf -lnetcdf $(CFLAGS)
+
 clean:
 	rm -rf IJsolver
 	rm -rf ex5

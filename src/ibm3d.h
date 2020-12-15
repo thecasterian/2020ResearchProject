@@ -134,7 +134,7 @@ typedef struct _ibm_solver {
 
     /* Obstacle. */
     Polyhedron *poly;
-    /* Flag of each cell (1: fluid cell, 2: ghost cell, 0: solid cell) */
+    /* Flag of each cell. */
     int *flag;
     /* Level set function. */
     double *lvset;
