@@ -8,7 +8,7 @@
 #define Ny 126
 #define Nz 103
 
-#define PATH "/home/jeongukim/data"
+#define PATH "/home/jeongukim/data/building"
 
 const double Re = 500;
 const double dt = 0.01;
@@ -25,7 +25,9 @@ double initfunc_u2(double, double, double);
 double initfunc_u3(double, double, double);
 double initfunc_p(double, double, double);
 
-double inlet_vel(double, double, double, double);
+double inlet_vel_x(double, double, double, double);
+double inlet_vel_y(double, double, double, double);
+double inlet_vel_z(double, double, double, double);
 
 int main(int argc, char **argv) {
     /* Number of all processes. */
@@ -33,7 +35,7 @@ int main(int argc, char **argv) {
     /* Rank of current process. */
     int rank;
     /* Building STL. */
-    FILE *fp_building = fopen("../stl/building.stl", "rb");
+    FILE *fp_building = fopen("../stl/building3.stl", "rb");
     Polyhedron *poly = Polyhedron_new();
     /* IBM solver. */
     IBMSolver *solver;
@@ -53,12 +55,12 @@ int main(int argc, char **argv) {
     Polyhedron_read_stl(poly, fp_building);
 
     /* Set solver. */
-    solver = IBMSolver_new(num_process, rank);
+    solver = IBMSolver_new(num_process, rank, 6, 1, 1);
 
     IBMSolver_set_grid(solver, Nx, Ny, Nz, xf, yf, zf);
     IBMSolver_set_params(solver, Re, dt);
 
-    IBMSolver_set_bc(solver, DIR_WEST, BC_VELOCITY_COMPONENT, BC_FUNC, inlet_vel);
+    IBMSolver_set_bc(solver, DIR_WEST, BC_VELOCITY_COMPONENT, BC_FUNC, inlet_vel_x, inlet_vel_y, inlet_vel_z);
     IBMSolver_set_bc(solver, DIR_EAST, BC_PRESSURE, BC_CONST, 0.);
     IBMSolver_set_bc(solver, DIR_SOUTH | DIR_NORTH | DIR_UP, BC_FREE_SLIP_WALL);
     IBMSolver_set_bc(solver, DIR_DOWN, BC_STATIONARY_WALL);
@@ -99,14 +101,14 @@ int main(int argc, char **argv) {
         );
     }
     else {
-        IBMSolver_init_flow_file(solver, PATH "/building");
+        IBMSolver_init_flow_file(solver, PATH "/building3");
     }
 
     /* Iterate. */
-    IBMSolver_iterate(solver, 50, true);
+    IBMSolver_iterate(solver, 400, true);
 
     /* Export result. */
-    IBMSolver_export_result(solver, PATH "/building");
+    IBMSolver_export_result(solver, PATH "/building3");
 
     /* Finalize. */
     IBMSolver_destroy(solver);
@@ -133,6 +135,14 @@ double initfunc_p(double x, double y, double z) {
     return 0;
 }
 
-double inlet_vel(double t, double x, double y, double z) {
+double inlet_vel_x(double t, double x, double y, double z) {
     return pow(z/8, 1./7);
+}
+
+double inlet_vel_y(double t, double x, double y, double z) {
+    return 0;
+}
+
+double inlet_vel_z(double t, double x, double y, double z) {
+    return 0;
 }
