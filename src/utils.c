@@ -31,33 +31,7 @@ FILE *fopen_check(const char *restrict filename, const char *restrict modes) {
  *
  * @remark \p arr must not be NULL nor an array with length less than \p len.
  */
-int lower_bound_double(const int len, const double arr[const static len], const double val) {
-    int l = 0;
-    int h = len;
-    while (l < h) {
-        int mid =  l + (h - l) / 2;
-        if (val <= arr[mid]) {
-            h = mid;
-        } else {
-            l = mid + 1;
-        }
-    }
-    return l;
-}
-
-/**
- * @brief Finds the index of the first element in \p arr which is greater than
- *        or equal to \p val. \p arr must be sorted in increasing order.
- *
- * @param len Length of array.
- * @param arr Array where to find the value.
- * @param val Value to find.
- *
- * @return Index found.
- *
- * @remark \p arr must not be NULL nor an array with length less than \p len.
- */
-int lower_bound_int(const int len, const int arr[const static len], const int val) {
+int lower_bound(const int len, const double arr[const static len], const double val) {
     int l = 0;
     int h = len;
     while (l < h) {
@@ -83,34 +57,7 @@ int lower_bound_int(const int len, const int arr[const static len], const int va
  *
  * @remark \p arr must not be NULL nor an array with length less than \p len.
  */
-int upper_bound_double(const int len, const double arr[const static len], const double val) {
-    int l = 0;
-    int h = len;
-    while (l < h) {
-        int mid =  l + (h - l) / 2;
-        if (val >= arr[mid]) {
-            l = mid + 1;
-        }
-        else {
-            h = mid;
-        }
-    }
-    return l;
-}
-
-/**
- * @brief Finds the index of the first element in \p arr which is greater than
- *        \p val. \p arr must be sorted in increasing order.
- *
- * @param len Length of array.
- * @param arr Array where to find the value.
- * @param val Value to find.
- *
- * @return Index found.
- *
- * @remark \p arr must not be NULL nor an array with length less than \p len.
- */
-int upper_bound_int(const int len, const int arr[const static len], const int val) {
+int upper_bound(const int len, const double arr[const static len], const double val) {
     int l = 0;
     int h = len;
     while (l < h) {
@@ -177,9 +124,9 @@ void IBMSolver_ghost_interp(
         -2*c3e(solver->lvset, i, j, k), n
     );
 
-    const int im = upper_bound_double(Nx+4, solver->xc, m.x) - 3;
-    const int jm = upper_bound_double(Ny+4, solver->yc, m.y) - 3;
-    const int km = upper_bound_double(Nz+4, solver->zc, m.z) - 3;
+    const int im = upper_bound(Nx+4, solver->xc, m.x) - 3;
+    const int jm = upper_bound(Ny+4, solver->yc, m.y) - 3;
+    const int km = upper_bound(Nz+4, solver->zc, m.z) - 3;
 
     /* Order of cells:
             011        111

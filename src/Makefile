@@ -23,7 +23,6 @@ all: $(TARGET)
 
 clean:
 	rm -f $(TARGET)
-	rm -f *.a
 	rm -f *.o
 
 $(TARGET): $(TARGET).c $(OBJS)

@@ -143,7 +143,7 @@ int main(int argc, char **argv) {
 
     IBMSolver_set_linear_solver(solver, SOLVER_BiCGSTAB, PRECOND_AMG, 1e-6);
 
-    IBMSolver_set_autosave(solver, output_file, 10);
+    // IBMSolver_set_autosave(solver, output_file, 10);
 
     IBMSolver_assemble(solver);
 

@@ -26,8 +26,11 @@ static double bc_val_u2(IBMSolver *, IBMSolverDirection, double, double, double,
 static double bc_val_u3(IBMSolver *, IBMSolverDirection, double, double, double, double);
 static double bc_val_p(IBMSolver *, IBMSolverDirection, double, double, double, double);
 
+static void exchange_var(IBMSolver *, double *);
+
 /**
- * @brief Iterate solver for \p num_time_steps steps.
+ * @brief Iterate \p solver for \p num_time_steps steps using fractional step
+ *        method.
  *
  * @param solver IBMSolver.
  * @param num_time_steps Number of time steps to iterate.
@@ -121,79 +124,44 @@ static inline void calc_N(IBMSolver *solver) {
     const double *const dy = solver->dy;
     const double *const dz = solver->dz;
 
-    const double *const u1 = solver->u1;
-    const double *const u2 = solver->u2;
-    const double *const u3 = solver->u3;
+    const double *u[3] = {solver->u1, solver->u2, solver->u3};
 
     const double *const U1 = solver->U1;
     const double *const U2 = solver->U2;
     const double *const U3 = solver->U3;
 
-    double *const N1 = solver->N1;
-    double *const N2 = solver->N2;
-    double *const N3 = solver->N3;
+    double *N[3] = {solver->N1, solver->N2, solver->N3};
 
-    double u1_w, u1_e, u1_s, u1_n, u1_d, u1_u;
-    double u2_w, u2_e, u2_s, u2_n, u2_d, u2_u;
-    double u3_w, u3_e, u3_s, u3_n, u3_d, u3_u;
+    /* Velocities on cell faces. */
+    double uw, ue, us, un, ud, uu;
 
     FOR_INNER_CELL (i, j, k) {
         if (c3e(solver->flag, i, j, k) == FLAG_FLUID) {
-            u1_w = (c3e(u1, i-1, j, k)*c1e(dx, i) + c3e(u1, i, j, k)*c1e(dx, i-1))
-                / (c1e(dx, i-1) + c1e(dx, i));
-            u2_w = (c3e(u2, i-1, j, k)*c1e(dx, i) + c3e(u2, i, j, k)*c1e(dx, i-1))
-                / (c1e(dx, i-1) + c1e(dx, i));
-            u3_w = (c3e(u3, i-1, j, k)*c1e(dx, i) + c3e(u3, i, j, k)*c1e(dx, i-1))
-                / (c1e(dx, i-1) + c1e(dx, i));
+            for (int l = 0; l < 3; l++) {
+                uw = (c3e(u[l], i-1, j, k)*c1e(dx, i) + c3e(u[l], i, j, k)*c1e(dx, i-1))
+                    / (c1e(dx, i-1) + c1e(dx, i));
+                ue = (c3e(u[l], i, j, k)*c1e(dx, i+1) + c3e(u[l], i+1, j, k)*c1e(dx, i))
+                    / (c1e(dx, i) + c1e(dx, i+1));
+                us = (c3e(u[l], i, j-1, k)*c1e(dy, j) + c3e(u[l], i, j, k)*c1e(dy, j-1))
+                    / (c1e(dy, j-1) + c1e(dy, j));
+                un = (c3e(u[l], i, j, k)*c1e(dy, j+1) + c3e(u[l], i, j+1, k)*c1e(dy, j))
+                    / (c1e(dy, j) + c1e(dy, j+1));
+                ud = (c3e(u[l], i, j, k-1)*c1e(dz, k) + c3e(u[l], i, j, k)*c1e(dz, k-1))
+                    / (c1e(dz, k-1) + c1e(dz, k));
+                uu = (c3e(u[l], i, j, k)*c1e(dz, k+1) + c3e(u[l], i, j, k+1)*c1e(dz, k))
+                    / (c1e(dz, k) + c1e(dz, k+1));
 
-            u1_e = (c3e(u1, i, j, k)*c1e(dx, i+1) + c3e(u1, i+1, j, k)*c1e(dx, i))
-                / (c1e(dx, i) + c1e(dx, i+1));
-            u2_e = (c3e(u2, i, j, k)*c1e(dx, i+1) + c3e(u2, i+1, j, k)*c1e(dx, i))
-                / (c1e(dx, i) + c1e(dx, i+1));
-            u3_e = (c3e(u3, i, j, k)*c1e(dx, i+1) + c3e(u3, i+1, j, k)*c1e(dx, i))
-                / (c1e(dx, i) + c1e(dx, i+1));
-
-            u1_s = (c3e(u1, i, j-1, k)*c1e(dy, j) + c3e(u1, i, j, k)*c1e(dy, j-1))
-                / (c1e(dy, j-1) + c1e(dy, j));
-            u2_s = (c3e(u2, i, j-1, k)*c1e(dy, j) + c3e(u2, i, j, k)*c1e(dy, j-1))
-                / (c1e(dy, j-1) + c1e(dy, j));
-            u3_s = (c3e(u3, i, j-1, k)*c1e(dy, j) + c3e(u3, i, j, k)*c1e(dy, j-1))
-                / (c1e(dy, j-1) + c1e(dy, j));
-
-            u1_n = (c3e(u1, i, j, k)*c1e(dy, j+1) + c3e(u1, i, j+1, k)*c1e(dy, j))
-                / (c1e(dy, j) + c1e(dy, j+1));
-            u2_n = (c3e(u2, i, j, k)*c1e(dy, j+1) + c3e(u2, i, j+1, k)*c1e(dy, j))
-                / (c1e(dy, j) + c1e(dy, j+1));
-            u3_n = (c3e(u3, i, j, k)*c1e(dy, j+1) + c3e(u3, i, j+1, k)*c1e(dy, j))
-                / (c1e(dy, j) + c1e(dy, j+1));
-
-            u1_d = (c3e(u1, i, j, k-1)*c1e(dz, k) + c3e(u1, i, j, k)*c1e(dz, k-1))
-                / (c1e(dz, k-1) + c1e(dz, k));
-            u2_d = (c3e(u2, i, j, k-1)*c1e(dz, k) + c3e(u2, i, j, k)*c1e(dz, k-1))
-                / (c1e(dz, k-1) + c1e(dz, k));
-            u3_d = (c3e(u3, i, j, k-1)*c1e(dz, k) + c3e(u3, i, j, k)*c1e(dz, k-1))
-                / (c1e(dz, k-1) + c1e(dz, k));
-
-            u1_u = (c3e(u1, i, j, k)*c1e(dz, k+1) + c3e(u1, i, j, k+1)*c1e(dz, k))
-                / (c1e(dz, k) + c1e(dz, k+1));
-            u2_u = (c3e(u2, i, j, k)*c1e(dz, k+1) + c3e(u2, i, j, k+1)*c1e(dz, k))
-                / (c1e(dz, k) + c1e(dz, k+1));
-            u3_u = (c3e(u3, i, j, k)*c1e(dz, k+1) + c3e(u3, i, j, k+1)*c1e(dz, k))
-                / (c1e(dz, k) + c1e(dz, k+1));
-
-            /* Ni = d(U1ui)/dx + d(U2ui)/dy + d(U3ui)/dz */
-            c3e(N1, i, j, k) = (xse(U1, i+1, j, k)*u1_e - xse(U1, i, j, k)*u1_w) / c1e(dx, i)
-                + (yse(U2, i, j+1, k)*u1_n - yse(U2, i, j, k)*u1_s) / c1e(dy, j)
-                + (zse(U3, i, j, k+1)*u1_u - zse(U3, i, j, k)*u1_d) / c1e(dz, k);
-            c3e(N2, i, j, k) = (xse(U1, i+1, j, k)*u2_e - xse(U1, i, j, k)*u2_w) / c1e(dx, i)
-                + (yse(U2, i, j+1, k)*u2_n - yse(U2, i, j, k)*u2_s) / c1e(dy, j)
-                + (zse(U3, i, j, k+1)*u2_u - zse(U3, i, j, k)*u2_d) / c1e(dz, k);
-            c3e(N3, i, j, k) = (xse(U1, i+1, j, k)*u3_e - xse(U1, i, j, k)*u3_w) / c1e(dx, i)
-                + (yse(U2, i, j+1, k)*u3_n - yse(U2, i, j, k)*u3_s) / c1e(dy, j)
-                + (zse(U3, i, j, k+1)*u3_u - zse(U3, i, j, k)*u3_d) / c1e(dz, k);
+                /* Ni = d(U1ui)/dx + d(U2ui)/dy + d(U3ui)/dz */
+                c3e(N[l], i, j, k)
+                    = (xse(U1, i+1, j, k)*ue - xse(U1, i, j, k)*uw) / c1e(dx, i)
+                    + (yse(U2, i, j+1, k)*un - yse(U2, i, j, k)*us) / c1e(dy, j)
+                    + (zse(U3, i, j, k+1)*uu - zse(U3, i, j, k)*ud) / c1e(dz, k);
+            }
         }
         else {
-            c3e(N1, i, j, k) = c3e(N2, i, j, k) = c3e(N3, i, j, k) = NAN;
+            for (int l = 0; l < 3; l++) {
+                c3e(N[l], i, j, k) = NAN;
+            }
         }
     }
 }
@@ -243,8 +211,6 @@ static inline void calc_u_star(
     int idx;
 
     int hypre_ierr = 0;
-
-    int cnt;
 
     ifirst = solver->ri == 0 ? -2 : 0;
     ilast = solver->ri != solver->Px-1 ? Nx : Nx+2;
@@ -635,174 +601,9 @@ static inline void calc_u_star(
     HYPRE_ParCSRBiCGSTABGetFinalRelativeResidualNorm(solver->linear_solver, final_norm_u3);
 
     /* Exchange u_star between adjacent processes. */
-
-    /* X. */
-    if (solver->ri != solver->Px-1) {
-        /* Send to next process. */
-        cnt = 0;
-        for (int i = Nx-2; i <= Nx-1; i++) {
-            for (int j = -2; j < Ny+2; j++) {
-                for (int k = -2; k < Nz+2; k++) {
-                    solver->x_exchg[cnt++] = c3e(solver->u1_star, i, j, k);
-                    solver->x_exchg[cnt++] = c3e(solver->u2_star, i, j, k);
-                    solver->x_exchg[cnt++] = c3e(solver->u3_star, i, j, k);
-                }
-            }
-        }
-        MPI_Send(solver->x_exchg, 6*(Ny+4)*(Nz+4), MPI_DOUBLE, solver->rank + solver->Py*solver->Pz, 0, MPI_COMM_WORLD);
-    }
-    if (solver->ri != 0) {
-        /* Receive from previous process. */
-        MPI_Recv(solver->x_exchg, 6*(Ny+4)*(Nz+4), MPI_DOUBLE, solver->rank - solver->Py*solver->Pz, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-        cnt = 0;
-        for (int i = -2; i <= -1; i++) {
-            for (int j = -2; j < Ny+2; j++) {
-                for (int k = -2; k < Nz+2; k++) {
-                    c3e(solver->u1_star, i, j, k) = solver->x_exchg[cnt++];
-                    c3e(solver->u2_star, i, j, k) = solver->x_exchg[cnt++];
-                    c3e(solver->u3_star, i, j, k) = solver->x_exchg[cnt++];
-                }
-            }
-        }
-        /* Send to previous process. */
-        cnt = 0;
-        for (int i = 0; i <= 1; i++) {
-            for (int j = -2; j < Ny+2; j++) {
-                for (int k = -2; k < Nz+2; k++) {
-                    solver->x_exchg[cnt++] = c3e(solver->u1_star, i, j, k);
-                    solver->x_exchg[cnt++] = c3e(solver->u2_star, i, j, k);
-                    solver->x_exchg[cnt++] = c3e(solver->u3_star, i, j, k);
-                }
-            }
-        }
-        MPI_Send(solver->x_exchg, 6*(Ny+4)*(Nz+4), MPI_DOUBLE, solver->rank - solver->Py*solver->Pz, 0, MPI_COMM_WORLD);
-    }
-    if (solver->ri != solver->Px-1) {
-        /* Receive from next process. */
-        MPI_Recv(solver->x_exchg, 6*(Ny+4)*(Nz+4), MPI_DOUBLE, solver->rank + solver->Py*solver->Pz, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-        cnt = 0;
-        for (int i = Nx; i <= Nx+1; i++) {
-            for (int j = -2; j < Ny+2; j++) {
-                for (int k = -2; k < Nz+2; k++) {
-                    c3e(solver->u1_star, i, j, k) = solver->x_exchg[cnt++];
-                    c3e(solver->u2_star, i, j, k) = solver->x_exchg[cnt++];
-                    c3e(solver->u3_star, i, j, k) = solver->x_exchg[cnt++];
-                }
-            }
-        }
-    }
-
-    /* Y. */
-    if (solver->rj != solver->Py-1) {
-        /* Send to next process. */
-        cnt = 0;
-        for (int i = -2; i < Nx+2; i++) {
-            for (int j = Ny-2; j <= Ny-1; j++) {
-                for (int k = -2; k < Nz+2; k++) {
-                    solver->y_exchg[cnt++] = c3e(solver->u1_star, i, j, k);
-                    solver->y_exchg[cnt++] = c3e(solver->u2_star, i, j, k);
-                    solver->y_exchg[cnt++] = c3e(solver->u3_star, i, j, k);
-                }
-            }
-        }
-        MPI_Send(solver->y_exchg, 6*(Nx+4)*(Nz+4), MPI_DOUBLE, solver->rank + solver->Pz, 0, MPI_COMM_WORLD);
-    }
-    if (solver->rj != 0) {
-        /* Receive from previous process. */
-        MPI_Recv(solver->y_exchg, 6*(Nx+4)*(Nz+4), MPI_DOUBLE, solver->rank - solver->Pz, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-        cnt = 0;
-        for (int i = -2; i < Nx+2; i++) {
-            for (int j = -2; j <= -1; j++) {
-                for (int k = -2; k < Nz+2; k++) {
-                    c3e(solver->u1_star, i, j, k) = solver->y_exchg[cnt++];
-                    c3e(solver->u2_star, i, j, k) = solver->y_exchg[cnt++];
-                    c3e(solver->u3_star, i, j, k) = solver->y_exchg[cnt++];
-                }
-            }
-        }
-        /* Send to previous process. */
-        cnt = 0;
-        for (int i = -2; i < Nx+2; i++) {
-            for (int j = 0; j <= 1; j++) {
-                for (int k = -2; k < Nz+2; k++) {
-                    solver->y_exchg[cnt++] = c3e(solver->u1_star, i, j, k);
-                    solver->y_exchg[cnt++] = c3e(solver->u2_star, i, j, k);
-                    solver->y_exchg[cnt++] = c3e(solver->u3_star, i, j, k);
-                }
-            }
-        }
-        MPI_Send(solver->y_exchg, 6*(Nx+4)*(Nz+4), MPI_DOUBLE, solver->rank - solver->Pz, 0, MPI_COMM_WORLD);
-    }
-    if (solver->rj != solver->Py-1) {
-        /* Receive from next process. */
-        MPI_Recv(solver->y_exchg, 6*(Nx+4)*(Nz+4), MPI_DOUBLE, solver->rank + solver->Pz, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-        cnt = 0;
-        for (int i = -2; i < Nx+2; i++) {
-            for (int j = Ny; j <= Ny+1; j++) {
-                for (int k = -2; k < Nz+2; k++) {
-                    c3e(solver->u1_star, i, j, k) = solver->y_exchg[cnt++];
-                    c3e(solver->u2_star, i, j, k) = solver->y_exchg[cnt++];
-                    c3e(solver->u3_star, i, j, k) = solver->y_exchg[cnt++];
-                }
-            }
-        }
-    }
-
-    /* Z. */
-    if (solver->rk != solver->Pz-1) {
-        /* Send to next process. */
-        cnt = 0;
-        for (int i = -2; i < Nx+2; i++) {
-            for (int j = -2; j < Ny+2; j++) {
-                for (int k = Nz-2; k <= Nz-1; k++) {
-                    solver->z_exchg[cnt++] = c3e(solver->u1_star, i, j, k);
-                    solver->z_exchg[cnt++] = c3e(solver->u2_star, i, j, k);
-                    solver->z_exchg[cnt++] = c3e(solver->u3_star, i, j, k);
-                }
-            }
-        }
-        MPI_Send(solver->z_exchg, 6*(Nx+4)*(Ny+4), MPI_DOUBLE, solver->rank + 1, 0, MPI_COMM_WORLD);
-    }
-    if (solver->rk != 0) {
-        /* Receive from previous process. */
-        MPI_Recv(solver->z_exchg, 6*(Nx+4)*(Ny+4), MPI_DOUBLE, solver->rank - 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-        cnt = 0;
-        for (int i = -2; i < Nx+2; i++) {
-            for (int j = -2; j < Ny+2; j++) {
-                for (int k = -2; k <= -1; k++) {
-                    c3e(solver->u1_star, i, j, k) = solver->z_exchg[cnt++];
-                    c3e(solver->u2_star, i, j, k) = solver->z_exchg[cnt++];
-                    c3e(solver->u3_star, i, j, k) = solver->z_exchg[cnt++];
-                }
-            }
-        }
-        /* Send to previous process. */
-        cnt = 0;
-        for (int i = -2; i < Nx+2; i++) {
-            for (int j = -2; j < Ny+2; j++) {
-                for (int k = 0; k <= 1; k++) {
-                    solver->z_exchg[cnt++] = c3e(solver->u1_star, i, j, k);
-                    solver->z_exchg[cnt++] = c3e(solver->u2_star, i, j, k);
-                    solver->z_exchg[cnt++] = c3e(solver->u3_star, i, j, k);
-                }
-            }
-        }
-        MPI_Send(solver->z_exchg, 6*(Nx+4)*(Ny+4), MPI_DOUBLE, solver->rank - 1, 0, MPI_COMM_WORLD);
-    }
-    if (solver->rk != solver->Pz-1) {
-        /* Receive from next process. */
-        MPI_Recv(solver->z_exchg, 6*(Nx+4)*(Ny+4), MPI_DOUBLE, solver->rank + 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-        cnt = 0;
-        for (int i = -2; i < Nx+2; i++) {
-            for (int j = -2; j < Ny+2; j++) {
-                for (int k = Nz; k <= Nz+1; k++) {
-                    c3e(solver->u1_star, i, j, k) = solver->z_exchg[cnt++];
-                    c3e(solver->u2_star, i, j, k) = solver->z_exchg[cnt++];
-                    c3e(solver->u3_star, i, j, k) = solver->z_exchg[cnt++];
-                }
-            }
-        }
-    }
+    exchange_var(solver, solver->u1_star);
+    exchange_var(solver, solver->u2_star);
+    exchange_var(solver, solver->u3_star);
 }
 
 static inline void calc_u_tilde(IBMSolver *solver) {
@@ -937,8 +738,6 @@ static inline void calc_p_prime(IBMSolver *solver, double *final_norm_p) {
     int idx;
 
     int hypre_ierr = 0;
-
-    int cnt;
 
     ifirst = solver->ri == 0 ? -2 : 0;
     ilast = solver->ri != solver->Px-1 ? Nx : Nx+2;
@@ -1113,150 +912,7 @@ static inline void calc_p_prime(IBMSolver *solver, double *final_norm_p) {
     }
 
     /* Exchange p_prime between adjacent processes. */
-
-    /* X. */
-    if (solver->ri != solver->Px-1) {
-        /* Send to next process. */
-        cnt = 0;
-        for (int i = Nx-2; i <= Nx-1; i++) {
-            for (int j = -2; j < Ny+2; j++) {
-                for (int k = -2; k < Nz+2; k++) {
-                    solver->x_exchg[cnt++] = c3e(solver->p_prime, i, j, k);
-                }
-            }
-        }
-        MPI_Send(solver->x_exchg, 2*(Ny+4)*(Nz+4), MPI_DOUBLE, solver->rank + solver->Py*solver->Pz, 0, MPI_COMM_WORLD);
-    }
-    if (solver->ri != 0) {
-        /* Receive from previous process. */
-        MPI_Recv(solver->x_exchg, 2*(Ny+4)*(Nz+4), MPI_DOUBLE, solver->rank - solver->Py*solver->Pz, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-        cnt = 0;
-        for (int i = -2; i <= -1; i++) {
-            for (int j = -2; j < Ny+2; j++) {
-                for (int k = -2; k < Nz+2; k++) {
-                    c3e(solver->p_prime, i, j, k) = solver->x_exchg[cnt++];
-                }
-            }
-        }
-        /* Send to previous process. */
-        cnt = 0;
-        for (int i = 0; i <= 1; i++) {
-            for (int j = -2; j < Ny+2; j++) {
-                for (int k = -2; k < Nz+2; k++) {
-                    solver->x_exchg[cnt++] = c3e(solver->p_prime, i, j, k);
-                }
-            }
-        }
-        MPI_Send(solver->x_exchg, 2*(Ny+4)*(Nz+4), MPI_DOUBLE, solver->rank - solver->Py*solver->Pz, 0, MPI_COMM_WORLD);
-    }
-    if (solver->ri != solver->Px-1) {
-        /* Receive from next process. */
-        MPI_Recv(solver->x_exchg, 2*(Ny+4)*(Nz+4), MPI_DOUBLE, solver->rank + solver->Py*solver->Pz, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-        cnt = 0;
-        for (int i = Nx; i <= Nx+1; i++) {
-            for (int j = -2; j < Ny+2; j++) {
-                for (int k = -2; k < Nz+2; k++) {
-                    c3e(solver->p_prime, i, j, k) = solver->x_exchg[cnt++];
-                }
-            }
-        }
-    }
-
-    /* Y. */
-    if (solver->rj != solver->Py-1) {
-        /* Send to next process. */
-        cnt = 0;
-        for (int i = -2; i < Nx+2; i++) {
-            for (int j = Ny-2; j <= Ny-1; j++) {
-                for (int k = -2; k < Nz+2; k++) {
-                    solver->y_exchg[cnt++] = c3e(solver->p_prime, i, j, k);
-                }
-            }
-        }
-        MPI_Send(solver->y_exchg, 2*(Nx+4)*(Nz+4), MPI_DOUBLE, solver->rank + solver->Pz, 0, MPI_COMM_WORLD);
-    }
-    if (solver->rj != 0) {
-        /* Receive from previous process. */
-        MPI_Recv(solver->y_exchg, 2*(Nx+4)*(Nz+4), MPI_DOUBLE, solver->rank - solver->Pz, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-        cnt = 0;
-        for (int i = -2; i < Nx+2; i++) {
-            for (int j = -2; j <= -1; j++) {
-                for (int k = -2; k < Nz+2; k++) {
-                    c3e(solver->p_prime, i, j, k) = solver->y_exchg[cnt++];
-                }
-            }
-        }
-        /* Send to previous process. */
-        cnt = 0;
-        for (int i = -2; i < Nx+2; i++) {
-            for (int j = 0; j <= 1; j++) {
-                for (int k = -2; k < Nz+2; k++) {
-                    solver->y_exchg[cnt++] = c3e(solver->p_prime, i, j, k);
-                }
-            }
-        }
-        MPI_Send(solver->y_exchg, 2*(Nx+4)*(Nz+4), MPI_DOUBLE, solver->rank - solver->Pz, 0, MPI_COMM_WORLD);
-    }
-    if (solver->rj != solver->Py-1) {
-        /* Receive from next process. */
-        MPI_Recv(solver->y_exchg, 2*(Nx+4)*(Nz+4), MPI_DOUBLE, solver->rank + solver->Pz, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-        cnt = 0;
-        for (int i = -2; i < Nx+2; i++) {
-            for (int j = Ny; j <= Ny+1; j++) {
-                for (int k = -2; k < Nz+2; k++) {
-                    c3e(solver->p_prime, i, j, k) = solver->y_exchg[cnt++];
-                }
-            }
-        }
-    }
-
-    /* Z. */
-    if (solver->rk != solver->Pz-1) {
-        /* Send to next process. */
-        cnt = 0;
-        for (int i = -2; i < Nx+2; i++) {
-            for (int j = -2; j < Ny+2; j++) {
-                for (int k = Nz-2; k <= Nz-1; k++) {
-                    solver->z_exchg[cnt++] = c3e(solver->p_prime, i, j, k);
-                }
-            }
-        }
-        MPI_Send(solver->z_exchg, 2*(Nx+4)*(Ny+4), MPI_DOUBLE, solver->rank + 1, 0, MPI_COMM_WORLD);
-    }
-    if (solver->rk != 0) {
-        /* Receive from previous process. */
-        MPI_Recv(solver->z_exchg, 2*(Nx+4)*(Ny+4), MPI_DOUBLE, solver->rank - 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-        cnt = 0;
-        for (int i = -2; i < Nx+2; i++) {
-            for (int j = -2; j < Ny+2; j++) {
-                for (int k = -2; k <= -1; k++) {
-                    c3e(solver->p_prime, i, j, k) = solver->z_exchg[cnt++];
-                }
-            }
-        }
-        /* Send to previous process. */
-        cnt = 0;
-        for (int i = -2; i < Nx+2; i++) {
-            for (int j = -2; j < Ny+2; j++) {
-                for (int k = 0; k <= 1; k++) {
-                    solver->z_exchg[cnt++] = c3e(solver->p_prime, i, j, k);
-                }
-            }
-        }
-        MPI_Send(solver->z_exchg, 2*(Nx+4)*(Ny+4), MPI_DOUBLE, solver->rank - 1, 0, MPI_COMM_WORLD);
-    }
-    if (solver->rk != solver->Pz-1) {
-        /* Receive from next process. */
-        MPI_Recv(solver->z_exchg, 2*(Nx+4)*(Ny+4), MPI_DOUBLE, solver->rank + 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-        cnt = 0;
-        for (int i = -2; i < Nx+2; i++) {
-            for (int j = -2; j < Ny+2; j++) {
-                for (int k = Nz; k <= Nz+1; k++) {
-                    c3e(solver->p_prime, i, j, k) = solver->z_exchg[cnt++];
-                }
-            }
-        }
-    }
+    exchange_var(solver, solver->p_prime);
 }
 
 static inline void update_next(IBMSolver *solver) {
@@ -2453,191 +2109,10 @@ static void update_outer(IBMSolver *solver) {
 }
 
 static void adj_exchange(IBMSolver *solver) {
-    const int Nx = solver->Nx;
-    const int Ny = solver->Ny;
-    const int Nz = solver->Nz;
-
-    int cnt = 0;
-
-    /* X. */
-    if (solver->ri != solver->Px-1) {
-        /* Send to next process. */
-        cnt = 0;
-        for (int i = Nx-2; i <= Nx-1; i++) {
-            for (int j = -2; j < Ny+2; j++) {
-                for (int k = -2; k < Nz+2; k++) {
-                    solver->x_exchg[cnt++] = c3e(solver->u1, i, j, k);
-                    solver->x_exchg[cnt++] = c3e(solver->u2, i, j, k);
-                    solver->x_exchg[cnt++] = c3e(solver->u3, i, j, k);
-                    solver->x_exchg[cnt++] = c3e(solver->p, i, j, k);
-                }
-            }
-        }
-        MPI_Send(solver->x_exchg, 8*(Ny+4)*(Nz+4), MPI_DOUBLE, solver->rank + solver->Py*solver->Pz, 0, MPI_COMM_WORLD);
-    }
-    if (solver->ri != 0) {
-        /* Receive from previous process. */
-        MPI_Recv(solver->x_exchg, 8*(Ny+4)*(Nz+4), MPI_DOUBLE, solver->rank - solver->Py*solver->Pz, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-        cnt = 0;
-        for (int i = -2; i <= -1; i++) {
-            for (int j = -2; j < Ny+2; j++) {
-                for (int k = -2; k < Nz+2; k++) {
-                    c3e(solver->u1, i, j, k) = solver->x_exchg[cnt++];
-                    c3e(solver->u2, i, j, k) = solver->x_exchg[cnt++];
-                    c3e(solver->u3, i, j, k) = solver->x_exchg[cnt++];
-                    c3e(solver->p, i, j, k) = solver->x_exchg[cnt++];
-                }
-            }
-        }
-        /* Send to previous process. */
-        cnt = 0;
-        for (int i = 0; i <= 1; i++) {
-            for (int j = -2; j < Ny+2; j++) {
-                for (int k = -2; k < Nz+2; k++) {
-                    solver->x_exchg[cnt++] = c3e(solver->u1, i, j, k);
-                    solver->x_exchg[cnt++] = c3e(solver->u2, i, j, k);
-                    solver->x_exchg[cnt++] = c3e(solver->u3, i, j, k);
-                    solver->x_exchg[cnt++] = c3e(solver->p, i, j, k);
-                }
-            }
-        }
-        MPI_Send(solver->x_exchg, 8*(Ny+4)*(Nz+4), MPI_DOUBLE, solver->rank - solver->Py*solver->Pz, 0, MPI_COMM_WORLD);
-    }
-    if (solver->ri != solver->Px-1) {
-        /* Receive from next process. */
-        MPI_Recv(solver->x_exchg, 8*(Ny+4)*(Nz+4), MPI_DOUBLE, solver->rank + solver->Py*solver->Pz, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-        cnt = 0;
-        for (int i = Nx; i <= Nx+1; i++) {
-            for (int j = -2; j < Ny+2; j++) {
-                for (int k = -2; k < Nz+2; k++) {
-                    c3e(solver->u1, i, j, k) = solver->x_exchg[cnt++];
-                    c3e(solver->u2, i, j, k) = solver->x_exchg[cnt++];
-                    c3e(solver->u3, i, j, k) = solver->x_exchg[cnt++];
-                    c3e(solver->p, i, j, k) = solver->x_exchg[cnt++];
-                }
-            }
-        }
-    }
-
-    /* Y. */
-    if (solver->rj != solver->Py-1) {
-        /* Send to next process. */
-        cnt = 0;
-        for (int i = -2; i < Nx+2; i++) {
-            for (int j = Ny-2; j <= Ny-1; j++) {
-                for (int k = -2; k < Nz+2; k++) {
-                    solver->y_exchg[cnt++] = c3e(solver->u1, i, j, k);
-                    solver->y_exchg[cnt++] = c3e(solver->u2, i, j, k);
-                    solver->y_exchg[cnt++] = c3e(solver->u3, i, j, k);
-                    solver->y_exchg[cnt++] = c3e(solver->p, i, j, k);
-                }
-            }
-        }
-        MPI_Send(solver->y_exchg, 8*(Nx+4)*(Nz+4), MPI_DOUBLE, solver->rank + solver->Pz, 0, MPI_COMM_WORLD);
-    }
-    if (solver->rj != 0) {
-        /* Receive from previous process. */
-        MPI_Recv(solver->y_exchg, 8*(Nx+4)*(Nz+4), MPI_DOUBLE, solver->rank - solver->Pz, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-        cnt = 0;
-        for (int i = -2; i < Nx+2; i++) {
-            for (int j = -2; j <= -1; j++) {
-                for (int k = -2; k < Nz+2; k++) {
-                    c3e(solver->u1, i, j, k) = solver->y_exchg[cnt++];
-                    c3e(solver->u2, i, j, k) = solver->y_exchg[cnt++];
-                    c3e(solver->u3, i, j, k) = solver->y_exchg[cnt++];
-                    c3e(solver->p, i, j, k) = solver->y_exchg[cnt++];
-                }
-            }
-        }
-        /* Send to previous process. */
-        cnt = 0;
-        for (int i = -2; i < Nx+2; i++) {
-            for (int j = 0; j <= 1; j++) {
-                for (int k = -2; k < Nz+2; k++) {
-                    solver->y_exchg[cnt++] = c3e(solver->u1, i, j, k);
-                    solver->y_exchg[cnt++] = c3e(solver->u2, i, j, k);
-                    solver->y_exchg[cnt++] = c3e(solver->u3, i, j, k);
-                    solver->y_exchg[cnt++] = c3e(solver->p, i, j, k);
-                }
-            }
-        }
-        MPI_Send(solver->y_exchg, 8*(Nx+4)*(Nz+4), MPI_DOUBLE, solver->rank - solver->Pz, 0, MPI_COMM_WORLD);
-    }
-    if (solver->rj != solver->Py-1) {
-        /* Receive from next process. */
-        MPI_Recv(solver->y_exchg, 8*(Nx+4)*(Nz+4), MPI_DOUBLE, solver->rank + solver->Pz, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-        cnt = 0;
-        for (int i = -2; i < Nx+2; i++) {
-            for (int j = Ny; j <= Ny+1; j++) {
-                for (int k = -2; k < Nz+2; k++) {
-                    c3e(solver->u1, i, j, k) = solver->y_exchg[cnt++];
-                    c3e(solver->u2, i, j, k) = solver->y_exchg[cnt++];
-                    c3e(solver->u3, i, j, k) = solver->y_exchg[cnt++];
-                    c3e(solver->p, i, j, k) = solver->y_exchg[cnt++];
-                }
-            }
-        }
-    }
-
-    /* Z. */
-    if (solver->rk != solver->Pz-1) {
-        /* Send to next process. */
-        cnt = 0;
-        for (int i = -2; i < Nx+2; i++) {
-            for (int j = -2; j < Ny+2; j++) {
-                for (int k = Nz-2; k <= Nz-1; k++) {
-                    solver->z_exchg[cnt++] = c3e(solver->u1, i, j, k);
-                    solver->z_exchg[cnt++] = c3e(solver->u2, i, j, k);
-                    solver->z_exchg[cnt++] = c3e(solver->u3, i, j, k);
-                    solver->z_exchg[cnt++] = c3e(solver->p, i, j, k);
-                }
-            }
-        }
-        MPI_Send(solver->z_exchg, 8*(Nx+4)*(Ny+4), MPI_DOUBLE, solver->rank + 1, 0, MPI_COMM_WORLD);
-    }
-    if (solver->rk != 0) {
-        /* Receive from previous process. */
-        MPI_Recv(solver->z_exchg, 8*(Nx+4)*(Ny+4), MPI_DOUBLE, solver->rank - 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-        cnt = 0;
-        for (int i = -2; i < Nx+2; i++) {
-            for (int j = -2; j < Ny+2; j++) {
-                for (int k = -2; k <= -1; k++) {
-                    c3e(solver->u1, i, j, k) = solver->z_exchg[cnt++];
-                    c3e(solver->u2, i, j, k) = solver->z_exchg[cnt++];
-                    c3e(solver->u3, i, j, k) = solver->z_exchg[cnt++];
-                    c3e(solver->p, i, j, k) = solver->z_exchg[cnt++];
-                }
-            }
-        }
-        /* Send to previous process. */
-        cnt = 0;
-        for (int i = -2; i < Nx+2; i++) {
-            for (int j = -2; j < Ny+2; j++) {
-                for (int k = 0; k <= 1; k++) {
-                    solver->z_exchg[cnt++] = c3e(solver->u1, i, j, k);
-                    solver->z_exchg[cnt++] = c3e(solver->u2, i, j, k);
-                    solver->z_exchg[cnt++] = c3e(solver->u3, i, j, k);
-                    solver->z_exchg[cnt++] = c3e(solver->p, i, j, k);
-                }
-            }
-        }
-        MPI_Send(solver->z_exchg, 8*(Nx+4)*(Ny+4), MPI_DOUBLE, solver->rank - 1, 0, MPI_COMM_WORLD);
-    }
-    if (solver->rk != solver->Pz-1) {
-        /* Receive from next process. */
-        MPI_Recv(solver->z_exchg, 8*(Nx+4)*(Ny+4), MPI_DOUBLE, solver->rank + 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-        cnt = 0;
-        for (int i = -2; i < Nx+2; i++) {
-            for (int j = -2; j < Ny+2; j++) {
-                for (int k = Nz; k <= Nz+1; k++) {
-                    c3e(solver->u1, i, j, k) = solver->z_exchg[cnt++];
-                    c3e(solver->u2, i, j, k) = solver->z_exchg[cnt++];
-                    c3e(solver->u3, i, j, k) = solver->z_exchg[cnt++];
-                    c3e(solver->p, i, j, k) = solver->z_exchg[cnt++];
-                }
-            }
-        }
-    }
+    exchange_var(solver, solver->u1);
+    exchange_var(solver, solver->u2);
+    exchange_var(solver, solver->u3);
+    exchange_var(solver, solver->p);
 }
 
 static void update_ghost(IBMSolver *solver) {
@@ -2775,4 +2250,156 @@ static double bc_val_p(
     return solver->bc[idx].val_type == BC_CONST
         ? solver->bc[idx].const_p
         : solver->bc[idx].func_p(t, x, y, z);
+}
+
+static void exchange_var(IBMSolver *solver, double *var) {
+    const int Nx = solver->Nx;
+    const int Ny = solver->Ny;
+    const int Nz = solver->Nz;
+
+    int cnt;
+
+    /* X. */
+    if (solver->ri != solver->Px-1) {
+        /* Send to next process. */
+        cnt = 0;
+        for (int i = Nx-2; i <= Nx-1; i++) {
+            for (int j = -2; j < Ny+2; j++) {
+                for (int k = -2; k < Nz+2; k++) {
+                    solver->x_exchg[cnt++] = c3e(var, i, j, k);
+                }
+            }
+        }
+        MPI_Send(solver->x_exchg, 2*(Ny+4)*(Nz+4), MPI_DOUBLE, solver->rank + solver->Py*solver->Pz, 0, MPI_COMM_WORLD);
+    }
+    if (solver->ri != 0) {
+        /* Receive from previous process. */
+        MPI_Recv(solver->x_exchg, 2*(Ny+4)*(Nz+4), MPI_DOUBLE, solver->rank - solver->Py*solver->Pz, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        cnt = 0;
+        for (int i = -2; i <= -1; i++) {
+            for (int j = -2; j < Ny+2; j++) {
+                for (int k = -2; k < Nz+2; k++) {
+                    c3e(var, i, j, k) = solver->x_exchg[cnt++];
+                }
+            }
+        }
+        /* Send to previous process. */
+        cnt = 0;
+        for (int i = 0; i <= 1; i++) {
+            for (int j = -2; j < Ny+2; j++) {
+                for (int k = -2; k < Nz+2; k++) {
+                    solver->x_exchg[cnt++] = c3e(var, i, j, k);
+                }
+            }
+        }
+        MPI_Send(solver->x_exchg, 2*(Ny+4)*(Nz+4), MPI_DOUBLE, solver->rank - solver->Py*solver->Pz, 0, MPI_COMM_WORLD);
+    }
+    if (solver->ri != solver->Px-1) {
+        /* Receive from next process. */
+        MPI_Recv(solver->x_exchg, 2*(Ny+4)*(Nz+4), MPI_DOUBLE, solver->rank + solver->Py*solver->Pz, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        cnt = 0;
+        for (int i = Nx; i <= Nx+1; i++) {
+            for (int j = -2; j < Ny+2; j++) {
+                for (int k = -2; k < Nz+2; k++) {
+                    c3e(var, i, j, k) = solver->x_exchg[cnt++];
+                }
+            }
+        }
+    }
+
+    /* Y. */
+    if (solver->rj != solver->Py-1) {
+        /* Send to next process. */
+        cnt = 0;
+        for (int i = -2; i < Nx+2; i++) {
+            for (int j = Ny-2; j <= Ny-1; j++) {
+                for (int k = -2; k < Nz+2; k++) {
+                    solver->y_exchg[cnt++] = c3e(var, i, j, k);
+                }
+            }
+        }
+        MPI_Send(solver->y_exchg, 2*(Nx+4)*(Nz+4), MPI_DOUBLE, solver->rank + solver->Pz, 0, MPI_COMM_WORLD);
+    }
+    if (solver->rj != 0) {
+        /* Receive from previous process. */
+        MPI_Recv(solver->y_exchg, 2*(Nx+4)*(Nz+4), MPI_DOUBLE, solver->rank - solver->Pz, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        cnt = 0;
+        for (int i = -2; i < Nx+2; i++) {
+            for (int j = -2; j <= -1; j++) {
+                for (int k = -2; k < Nz+2; k++) {
+                    c3e(var, i, j, k) = solver->y_exchg[cnt++];
+                }
+            }
+        }
+        /* Send to previous process. */
+        cnt = 0;
+        for (int i = -2; i < Nx+2; i++) {
+            for (int j = 0; j <= 1; j++) {
+                for (int k = -2; k < Nz+2; k++) {
+                    solver->y_exchg[cnt++] = c3e(var, i, j, k);
+                }
+            }
+        }
+        MPI_Send(solver->y_exchg, 2*(Nx+4)*(Nz+4), MPI_DOUBLE, solver->rank - solver->Pz, 0, MPI_COMM_WORLD);
+    }
+    if (solver->rj != solver->Py-1) {
+        /* Receive from next process. */
+        MPI_Recv(solver->y_exchg, 2*(Nx+4)*(Nz+4), MPI_DOUBLE, solver->rank + solver->Pz, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        cnt = 0;
+        for (int i = -2; i < Nx+2; i++) {
+            for (int j = Ny; j <= Ny+1; j++) {
+                for (int k = -2; k < Nz+2; k++) {
+                    c3e(var, i, j, k) = solver->y_exchg[cnt++];
+                }
+            }
+        }
+    }
+
+    /* Z. */
+    if (solver->rk != solver->Pz-1) {
+        /* Send to next process. */
+        cnt = 0;
+        for (int i = -2; i < Nx+2; i++) {
+            for (int j = -2; j < Ny+2; j++) {
+                for (int k = Nz-2; k <= Nz-1; k++) {
+                    solver->z_exchg[cnt++] = c3e(var, i, j, k);
+                }
+            }
+        }
+        MPI_Send(solver->z_exchg, 2*(Nx+4)*(Ny+4), MPI_DOUBLE, solver->rank + 1, 0, MPI_COMM_WORLD);
+    }
+    if (solver->rk != 0) {
+        /* Receive from previous process. */
+        MPI_Recv(solver->z_exchg, 2*(Nx+4)*(Ny+4), MPI_DOUBLE, solver->rank - 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        cnt = 0;
+        for (int i = -2; i < Nx+2; i++) {
+            for (int j = -2; j < Ny+2; j++) {
+                for (int k = -2; k <= -1; k++) {
+                    c3e(var, i, j, k) = solver->z_exchg[cnt++];
+                }
+            }
+        }
+        /* Send to previous process. */
+        cnt = 0;
+        for (int i = -2; i < Nx+2; i++) {
+            for (int j = -2; j < Ny+2; j++) {
+                for (int k = 0; k <= 1; k++) {
+                    solver->z_exchg[cnt++] = c3e(var, i, j, k);
+                }
+            }
+        }
+        MPI_Send(solver->z_exchg, 2*(Nx+4)*(Ny+4), MPI_DOUBLE, solver->rank - 1, 0, MPI_COMM_WORLD);
+    }
+    if (solver->rk != solver->Pz-1) {
+        /* Receive from next process. */
+        MPI_Recv(solver->z_exchg, 2*(Nx+4)*(Ny+4), MPI_DOUBLE, solver->rank + 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        cnt = 0;
+        for (int i = -2; i < Nx+2; i++) {
+            for (int j = -2; j < Ny+2; j++) {
+                for (int k = Nz; k <= Nz+1; k++) {
+                    c3e(var, i, j, k) = solver->z_exchg[cnt++];
+                }
+            }
+        }
+    }
 }

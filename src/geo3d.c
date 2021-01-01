@@ -216,7 +216,7 @@ Polyhedron *Polyhedron_new(void) {
 }
 
 void Polyhedron_destroy(Polyhedron *poly) {
-    for (int i = 0; i < poly->num_vertices; i++) {
+    for (int i = 0; i < (int)poly->num_vertices; i++) {
         free(poly->vertex_list[i].face_idx);
     }
     free(poly->vertex_list);
@@ -246,7 +246,7 @@ void Polyhedron_read_stl(Polyhedron *poly, FILE *f) {
     /* Vertex search tree. Vector -> VertTreeValue */
     GTree *vert_tree = g_tree_new_full(cmp_vertex, NULL, g_free, g_free);
 
-    for (int i = 0; i < poly->num_faces; i++) {
+    for (int i = 0; i < (int)poly->num_faces; i++) {
         /* Read normal vector. (3 x 4 bytes) */
         fread(coord, 4, 3, f);
         poly->face_list[i].n.x = coord[0];
@@ -302,7 +302,7 @@ void Polyhedron_read_stl(Polyhedron *poly, FILE *f) {
 
     PairInt etmp;
 
-    for (int i = 0; i < poly->num_faces; i++) {
+    for (int i = 0; i < (int)poly->num_faces; i++) {
         for (int j = 0; j < 3; j++) {
             etmp.first = poly->face_list[i].vertex_idx[j];
             etmp.second = poly->face_list[i].vertex_idx[(j+1)%3];
@@ -342,7 +342,7 @@ void Polyhedron_read_stl(Polyhedron *poly, FILE *f) {
     g_tree_destroy(edge_tree);
 
     /* For each vertex, find faces containing it. */
-    for (int i = 0; i < poly->num_vertices; i++) {
+    for (int i = 0; i < (int)poly->num_vertices; i++) {
         int cur_face_idx = poly->vertex_list[i].face_idx[0];
         int cur_edge_idx;
         for (int j = 1; j < poly->vertex_list[i].num_faces; j++) {
@@ -411,7 +411,7 @@ void Polyhedron_print_stats(Polyhedron *poly) {
         poly->num_edges,
         poly->num_vertices
     );
-    for (int i = 0; i < poly->num_vertices; i++) {
+    for (int i = 0; i < (int)poly->num_vertices; i++) {
         const Vector v = poly->vertex_list[i].coord;
         xmin = min(xmin, v.x);
         xmax = max(xmax, v.x);
@@ -426,7 +426,7 @@ void Polyhedron_print_stats(Polyhedron *poly) {
 }
 
 void Polyhedron_scale(Polyhedron *poly, double scale) {
-    for (int i = 0; i < poly->num_vertices; i++) {
+    for (int i = 0; i < (int)poly->num_vertices; i++) {
         poly->vertex_list[i].coord.x *= scale;
         poly->vertex_list[i].coord.y *= scale;
         poly->vertex_list[i].coord.z *= scale;
@@ -456,7 +456,7 @@ void Polyhedron_cpt(
     }
 
     /* Face extrusions. */
-    for (int i = 0; i < poly->num_faces; i++) {
+    for (int i = 0; i < (int)poly->num_faces; i++) {
         /* Outward extrusions. */
         for (int j = 0; j < 3; j++) {
             fe.pts[j] = poly->vertex_list[poly->face_list[i].vertex_idx[j]].coord;
@@ -475,7 +475,7 @@ void Polyhedron_cpt(
     }
 
     /* Edge extrusions. */
-    for (int i = 0; i < poly->num_edges; i++) {
+    for (int i = 0; i < (int)poly->num_edges; i++) {
         ee.pts[0] = poly->vertex_list[poly->edge_list[i].vertex_idx[0]].coord;
         ee.pts[1] = poly->vertex_list[poly->edge_list[i].vertex_idx[1]].coord;
 
@@ -570,7 +570,7 @@ void Polyhedron_cpt(
     }
 
     /* Vertex extrusions. */
-    for (int i = 0; i < poly->num_vertices; i++) {
+    for (int i = 0; i < (int)poly->num_vertices; i++) {
         int adj_vertex_idx[poly->vertex_list[i].num_faces];
         double adj_angle = 0;
         bool is_convex = true, is_concave = true;
@@ -794,12 +794,12 @@ static inline void VertexExtrusion_cpt(
     Vector d;
     double dist;
 
-    xmax_idx = upper_bound_double(nx, x, ve.vertex.x + ve.radius);
-    xmin_idx = lower_bound_double(nx, x, ve.vertex.x - ve.radius);
-    ymax_idx = upper_bound_double(ny, y, ve.vertex.y + ve.radius);
-    ymin_idx = lower_bound_double(ny, y, ve.vertex.y - ve.radius);
-    zmax_idx = upper_bound_double(nz, z, ve.vertex.z + ve.radius);
-    zmin_idx = lower_bound_double(nz, z, ve.vertex.z - ve.radius);
+    xmax_idx = upper_bound(nx, x, ve.vertex.x + ve.radius);
+    xmin_idx = lower_bound(nx, x, ve.vertex.x - ve.radius);
+    ymax_idx = upper_bound(ny, y, ve.vertex.y + ve.radius);
+    ymin_idx = lower_bound(ny, y, ve.vertex.y - ve.radius);
+    zmax_idx = upper_bound(nz, z, ve.vertex.z + ve.radius);
+    zmin_idx = lower_bound(nz, z, ve.vertex.z - ve.radius);
 
     for (int i = xmin_idx; i < xmax_idx; i++) {
         for (int j = ymin_idx; j < ymax_idx; j++) {
@@ -843,12 +843,12 @@ static inline void EdgeExtrusion_cpt(
         zmin = min(zmin, ee.pts[i].z);
     }
 
-    xmax_idx = upper_bound_double(nx, x, xmax);
-    xmin_idx = lower_bound_double(nx, x, xmin);
-    ymax_idx = upper_bound_double(ny, y, ymax);
-    ymin_idx = lower_bound_double(ny, y, ymin);
-    zmax_idx = upper_bound_double(nz, z, zmax);
-    zmin_idx = lower_bound_double(nz, z, zmin);
+    xmax_idx = upper_bound(nx, x, xmax);
+    xmin_idx = lower_bound(nx, x, xmin);
+    ymax_idx = upper_bound(ny, y, ymax);
+    ymin_idx = lower_bound(ny, y, ymin);
+    zmax_idx = upper_bound(nz, z, zmax);
+    zmin_idx = lower_bound(nz, z, zmin);
 
     ee_faces[0] = Plane_3pts(ee.pts[0], ee.pts[4], ee.pts[2]);
     ee_faces[1] = Plane_3pts(ee.pts[1], ee.pts[3], ee.pts[5]);
@@ -903,12 +903,12 @@ static inline void FaceExtrusion_cpt(
         zmin = min(zmin, fe.pts[i].z);
     }
 
-    xmax_idx = upper_bound_double(nx, x, xmax);
-    xmin_idx = lower_bound_double(nx, x, xmin);
-    ymax_idx = upper_bound_double(ny, y, ymax);
-    ymin_idx = lower_bound_double(ny, y, ymin);
-    zmax_idx = upper_bound_double(nz, z, zmax);
-    zmin_idx = lower_bound_double(nz, z, zmin);
+    xmax_idx = upper_bound(nx, x, xmax);
+    xmin_idx = lower_bound(nx, x, xmin);
+    ymax_idx = upper_bound(ny, y, ymax);
+    ymin_idx = lower_bound(ny, y, ymin);
+    zmax_idx = upper_bound(nz, z, zmax);
+    zmin_idx = lower_bound(nz, z, zmin);
 
     fe_faces[0] = Plane_3pts(fe.pts[0], fe.pts[2], fe.pts[1]);
     fe_faces[1] = Plane_3pts(fe.pts[3], fe.pts[4], fe.pts[5]);

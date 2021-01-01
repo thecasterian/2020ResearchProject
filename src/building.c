@@ -3,6 +3,7 @@
 
 #include "geo3d.h"
 #include "ibm3d.h"
+#include "utils.h"
 
 #define Nx 184
 #define Ny 126
@@ -94,7 +95,7 @@ int main(int argc, char **argv) {
     }
 
     /* Initialize. */
-    if (0) {
+    if (1) {
         IBMSolver_init_flow_func(
             solver,
             initfunc_u1, initfunc_u2, initfunc_u3, initfunc_p
@@ -105,7 +106,7 @@ int main(int argc, char **argv) {
     }
 
     /* Iterate. */
-    IBMSolver_iterate(solver, 400, true);
+    IBMSolver_iterate(solver, 50, true);
 
     /* Export result. */
     IBMSolver_export_result(solver, PATH "/building3");
@@ -119,30 +120,30 @@ int main(int argc, char **argv) {
     return 0;
 }
 
-double initfunc_u1(double x, double y, double z) {
+double initfunc_u1(double x UNUSED, double y UNUSED, double z) {
     return pow(z/8, 1./7);
 }
 
-double initfunc_u2(double x, double y, double z) {
+double initfunc_u2(double x UNUSED, double y UNUSED, double z UNUSED) {
     return 0;
 }
 
-double initfunc_u3(double x, double y, double z) {
+double initfunc_u3(double x UNUSED, double y UNUSED, double z UNUSED) {
     return 0;
 }
 
-double initfunc_p(double x, double y, double z) {
+double initfunc_p(double x UNUSED, double y UNUSED, double z UNUSED) {
     return 0;
 }
 
-double inlet_vel_x(double t, double x, double y, double z) {
+double inlet_vel_x(double t UNUSED, double x UNUSED, double y UNUSED, double z) {
     return pow(z/8, 1./7);
 }
 
-double inlet_vel_y(double t, double x, double y, double z) {
+double inlet_vel_y(double t UNUSED, double x UNUSED, double y UNUSED, double z UNUSED) {
     return 0;
 }
 
-double inlet_vel_z(double t, double x, double y, double z) {
+double inlet_vel_z(double t UNUSED, double x UNUSED, double y UNUSED, double z UNUSED) {
     return 0;
 }

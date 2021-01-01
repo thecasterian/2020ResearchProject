@@ -32,6 +32,9 @@
         for (int j = 0; j < Ny; j++) \
             for (int k = 0; k <= Nz; k++)
 
+/* Use for an unused variable or parameter to prevent a warning. */
+#define UNUSED __attribute__((unused))
+
 #define max(a, b) ({typeof(a) _a = a; typeof(b) _b = b; _a > _b ? _a : _b;})
 #define min(a, b) ({typeof(a) _a = a; typeof(b) _b = b; _a < _b ? _a : _b;})
 
@@ -39,11 +42,8 @@
 
 FILE *fopen_check(const char *restrict filename, const char *restrict modes);
 
-int lower_bound_double(const int, const double [], const double);
-int upper_bound_double(const int, const double [], const double);
-
-int lower_bound_int(const int, const int [], const int);
-int upper_bound_int(const int, const int [], const int);
+int lower_bound(const int, const double [], const double);
+int upper_bound(const int, const double [], const double);
 
 int dir_to_idx(IBMSolverDirection);
 
