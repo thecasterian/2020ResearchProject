@@ -21,9 +21,7 @@ static void update_outer(IBMSolver *);
 static void adj_exchange(IBMSolver *);
 static void update_ghost(IBMSolver *);
 
-static double bc_val_u1(IBMSolver *, IBMSolverDirection, double, double, double, double);
-static double bc_val_u2(IBMSolver *, IBMSolverDirection, double, double, double, double);
-static double bc_val_u3(IBMSolver *, IBMSolverDirection, double, double, double, double);
+static double bc_val_u(IBMSolver *, int, IBMSolverDirection, double, double, double, double);
 static double bc_val_p(IBMSolver *, IBMSolverDirection, double, double, double, double);
 
 static void exchange_var(IBMSolver *, double *);
@@ -124,20 +122,24 @@ static inline void calc_N(IBMSolver *solver) {
     const double *const dy = solver->dy;
     const double *const dz = solver->dz;
 
-    const double *u[3] = {solver->u1, solver->u2, solver->u3};
+    const double *u[4] = {
+        [1] = solver->u1, [2] = solver->u2, [3] = solver->u3
+    };
 
     const double *const U1 = solver->U1;
     const double *const U2 = solver->U2;
     const double *const U3 = solver->U3;
 
-    double *N[3] = {solver->N1, solver->N2, solver->N3};
+    double *N[4] = {
+        [1] = solver->N1, [2] = solver->N2, [3] = solver->N3
+    };
 
     /* Velocities on cell faces. */
     double uw, ue, us, un, ud, uu;
 
     FOR_INNER_CELL (i, j, k) {
         if (c3e(solver->flag, i, j, k) == FLAG_FLUID) {
-            for (int l = 0; l < 3; l++) {
+            for (int l = 1; l <= 3; l++) {
                 uw = (c3e(u[l], i-1, j, k)*c1e(dx, i) + c3e(u[l], i, j, k)*c1e(dx, i-1))
                     / (c1e(dx, i-1) + c1e(dx, i));
                 ue = (c3e(u[l], i, j, k)*c1e(dx, i+1) + c3e(u[l], i+1, j, k)*c1e(dx, i))
@@ -159,7 +161,7 @@ static inline void calc_N(IBMSolver *solver) {
             }
         }
         else {
-            for (int l = 0; l < 3; l++) {
+            for (int l = 1; l <= 3; l++) {
                 c3e(N[l], i, j, k) = NAN;
             }
         }
@@ -186,29 +188,36 @@ static inline void calc_u_star(
     const double *const kz_D = solver->kz_D;
     const double *const kz_U = solver->kz_U;
 
-    const double *const u1 = solver->u1;
-    const double *const u2 = solver->u2;
-    const double *const u3 = solver->u3;
-
-    double *const u1_star = solver->u1_star;
-    double *const u2_star = solver->u2_star;
-    double *const u3_star = solver->u3_star;
+    const double *const u[4] = {
+        [1] = solver->u1, [2] = solver->u2, [3] = solver->u3
+    };
+    double *const u_star[4] = {
+        [1] = solver->u1_star, [2] = solver->u2_star, [3] = solver->u3_star
+    };
 
     const double *const p = solver->p;
 
-    const double *const N1 = solver->N1;
-    const double *const N2 = solver->N2;
-    const double *const N3 = solver->N3;
-    const double *const N1_prev = solver->N1_prev;
-    const double *const N2_prev = solver->N2_prev;
-    const double *const N3_prev = solver->N3_prev;
+    const double *const N[4] = {
+        [1] = solver->N1, [2] = solver->N2, [3] = solver->N3
+    };
+    const double *const N_prev[4] = {
+        [1] = solver->N1_prev, [2] = solver->N2_prev, [3] = solver->N3_prev
+    };
 
     const double xmin = solver->xmin, xmax = solver->xmax;
     const double ymin = solver->ymin, ymax = solver->ymax;
     const double zmin = solver->zmin, zmax = solver->zmax;
 
+    const HYPRE_ParCSRMatrix parcsr_A_u[4] = {
+        [1] = solver->parcsr_A_u1, [2] = solver->parcsr_A_u2, [3] = solver->parcsr_A_u3
+    };
+    double *const final_norm_u[4] = {
+        [1] = final_norm_u1, [2] = final_norm_u2, [3] = final_norm_u3
+    };
+
     int ifirst, ilast, jfirst, jlast, kfirst, klast;
     int idx;
+    double dpdxl;
 
     int hypre_ierr = 0;
 
@@ -219,386 +228,143 @@ static inline void calc_u_star(
     kfirst = solver->rk == 0 ? -2 : 0;
     klast = solver->rk != solver->Pz-1 ? Nz : Nz+2;
 
-    /* u1_star. */
+    for (int l = 1; l <= 3; l++) {
+        memcpy(solver->vector_values, solver->vector_zeros, sizeof(double)*(solver->idx_last-solver->idx_first));
 
-    memcpy(solver->vector_values, solver->vector_zeros, sizeof(double)*(solver->idx_last-solver->idx_first));
-
-    FOR_INNER_CELL (i, j, k) {
-        idx = c3e(solver->cell_idx, i, j, k) - solver->idx_first;
-        if (c3e(solver->flag, i, j, k) == FLAG_FLUID) {
-            solver->vector_values[idx]
-                = -dt/2 * (3*c3e(N1, i, j, k) - c3e(N1_prev, i, j, k))
-                - dt * (c3e(p, i+1, j, k) - c3e(p, i-1, j, k)) / (c1e(xc, i+1) - c1e(xc, i-1))
-                + (1-c1e(kx_W, i)-c1e(kx_E, i)-c1e(ky_S, j)-c1e(ky_N, j)-c1e(kz_D, k)-c1e(kz_U, k))*c3e(u1, i, j, k)
-                + c1e(kx_W, i)*c3e(u1, i-1, j, k) + c1e(kx_E, i)*c3e(u1, i+1, j, k)
-                + c1e(ky_S, j)*c3e(u1, i, j-1, k) + c1e(ky_N, j)*c3e(u1, i, j+1, k)
-                + c1e(kz_D, k)*c3e(u1, i, j, k-1) + c1e(kz_U, k)*c3e(u1, i, j, k+1);
+        FOR_INNER_CELL (i, j, k) {
+            idx = c3e(solver->cell_idx, i, j, k) - solver->idx_first;
+            switch (l) {
+            case 1:
+                dpdxl = (c3e(p, i+1, j, k) - c3e(p, i-1, j, k)) / (c1e(xc, i+1) - c1e(xc, i-1));
+                break;
+            case 2:
+                dpdxl = (c3e(p, i, j+1, k) - c3e(p, i, j-1, k)) / (c1e(yc, j+1) - c1e(yc, j-1));
+                break;
+            case 3:
+                dpdxl = (c3e(p, i, j, k+1) - c3e(p, i, j, k-1)) / (c1e(zc, k+1) - c1e(zc, k-1));
+                break;
+            }
+            if (c3e(solver->flag, i, j, k) == FLAG_FLUID) {
+                solver->vector_values[idx]
+                    = -dt/2 * (3*c3e(N[l], i, j, k) - c3e(N_prev[l], i, j, k))
+                    - dt * dpdxl
+                    + (1-c1e(kx_W, i)-c1e(kx_E, i)-c1e(ky_S, j)-c1e(ky_N, j)-c1e(kz_D, k)-c1e(kz_U, k))*c3e(u[l], i, j, k)
+                    + c1e(kx_W, i)*c3e(u[l], i-1, j, k) + c1e(kx_E, i)*c3e(u[l], i+1, j, k)
+                    + c1e(ky_S, j)*c3e(u[l], i, j-1, k) + c1e(ky_N, j)*c3e(u[l], i, j+1, k)
+                    + c1e(kz_D, k)*c3e(u[l], i, j, k-1) + c1e(kz_U, k)*c3e(u[l], i, j, k+1);
+            }
         }
-    }
 
-    if (solver->ri == 0) {
-        switch (solver->bc[3].type) {
-        case BC_VELOCITY_COMPONENT:
-            for (int j = 0; j < Ny; j++) {
-                for (int k = 0; k < Nz; k++) {
-                    solver->vector_values[c3e(solver->cell_idx, -1, j, k) - solver->idx_first]
-                        = solver->vector_values[c3e(solver->cell_idx, -2, j, k) - solver->idx_first]
-                        = bc_val_u1(solver, DIR_WEST, solver->time, xmin, c1e(yc, j), c1e(zc, k));
+        if (solver->ri == 0) {
+            switch (solver->bc[3].type) {
+            case BC_VELOCITY_COMPONENT:
+                for (int j = 0; j < Ny; j++) {
+                    for (int k = 0; k < Nz; k++) {
+                        solver->vector_values[c3e(solver->cell_idx, -1, j, k) - solver->idx_first]
+                            = solver->vector_values[c3e(solver->cell_idx, -2, j, k) - solver->idx_first]
+                            = bc_val_u(solver, l, DIR_WEST, solver->time, xmin, c1e(yc, j), c1e(zc, k));
+                    }
+                }
+                break;
+            default:;
+            }
+        }
+        if (solver->ri == solver->Px-1) {
+            switch (solver->bc[1].type) {
+            case BC_VELOCITY_COMPONENT:
+                for (int j = 0; j < Ny; j++) {
+                    for (int k = 0; k < Nz; k++) {
+                        solver->vector_values[c3e(solver->cell_idx, Nx, j, k) - solver->idx_first]
+                            = solver->vector_values[c3e(solver->cell_idx, Nx+1, j, k) - solver->idx_first]
+                            = bc_val_u(solver, l, DIR_EAST, solver->time, xmax, c1e(yc, j), c1e(zc, k));
+                    }
+                }
+                break;
+            default:;
+            }
+        }
+        if (solver->rj == 0) {
+            switch (solver->bc[2].type) {
+            case BC_VELOCITY_COMPONENT:
+                for (int i = ifirst; i < ilast; i++) {
+                    for (int k = 0; k < Nz; k++) {
+                        solver->vector_values[c3e(solver->cell_idx, i, -1, k) - solver->idx_first]
+                            = solver->vector_values[c3e(solver->cell_idx, i, -2, k) - solver->idx_first]
+                            = bc_val_u(solver, l, DIR_SOUTH, solver->time, c1e(xc, i), ymin, c1e(zc, k));
+                    }
+                }
+            default:;
+            }
+        }
+        if (solver->rj == solver->Py-1) {
+            switch (solver->bc[0].type) {
+            case BC_VELOCITY_COMPONENT:
+                for (int i = ifirst; i < ilast; i++) {
+                    for (int k = 0; k < Nz; k++) {
+                        solver->vector_values[c3e(solver->cell_idx, i, Ny, k) - solver->idx_first]
+                            = solver->vector_values[c3e(solver->cell_idx, i, Ny+1, k) - solver->idx_first]
+                            = bc_val_u(solver, l, DIR_NORTH, solver->time, c1e(xc, i), ymax, c1e(zc, k));
+                    }
+                }
+            default:;
+            }
+        }
+        if (solver->rk == 0) {
+            switch (solver->bc[4].type) {
+            case BC_VELOCITY_COMPONENT:
+                for (int i = ifirst; i < ilast; i++) {
+                    for (int j = jfirst; j < jlast; j++) {
+                        solver->vector_values[c3e(solver->cell_idx, i, j, -1) - solver->idx_first]
+                            = solver->vector_values[c3e(solver->cell_idx, i, j, -2) - solver->idx_first]
+                            = bc_val_u(solver, l, DIR_DOWN, solver->time, c1e(xc, i), c1e(yc, j), zmin);
+                    }
+                }
+                break;
+            default:;
+            }
+        }
+        if (solver->rk == solver->Pz-1) {
+            switch (solver->bc[5].type) {
+            case BC_VELOCITY_COMPONENT:
+                for (int i = ifirst; i < ilast; i++) {
+                    for (int j = jfirst; j < jlast; j++) {
+                        solver->vector_values[c3e(solver->cell_idx, i, j, Nz) - solver->idx_first]
+                            = solver->vector_values[c3e(solver->cell_idx, i, j, Nz+1) - solver->idx_first]
+                            = bc_val_u(solver, l, DIR_UP, solver->time, c1e(xc, i), c1e(yc, j), zmax);
+                    }
+                }
+                break;
+            default:;
+            }
+        }
+
+        HYPRE_IJVectorSetValues(solver->b, solver->idx_last-solver->idx_first, solver->vector_rows, solver->vector_values);
+        HYPRE_IJVectorSetValues(solver->x, solver->idx_last-solver->idx_first, solver->vector_rows, solver->vector_zeros);
+        HYPRE_IJVectorAssemble(solver->b);
+        HYPRE_IJVectorAssemble(solver->x);
+        HYPRE_IJVectorGetObject(solver->b, (void **)&solver->par_b);
+        HYPRE_IJVectorGetObject(solver->x, (void **)&solver->par_x);
+
+        HYPRE_ParCSRBiCGSTABSetup(solver->linear_solver, parcsr_A_u[l], solver->par_b, solver->par_x);
+        hypre_ierr = HYPRE_ParCSRBiCGSTABSolve(solver->linear_solver, parcsr_A_u[l], solver->par_b, solver->par_x);
+        if (HYPRE_CheckError(hypre_ierr, HYPRE_ERROR_GENERIC)) {
+            fprintf(stderr, "error: floating pointer error raised in u%d_star\n", l);
+            MPI_Abort(MPI_COMM_WORLD, -1);
+        }
+        if (HYPRE_CheckError(hypre_ierr, HYPRE_ERROR_CONV)) {
+            fprintf(stderr, "warning: u%d_star did not converge\n", l);
+        }
+
+        HYPRE_IJVectorGetValues(solver->x, solver->idx_last-solver->idx_first, solver->vector_rows, solver->vector_res);
+        for (int i = ifirst; i < ilast; i++) {
+            for (int j = jfirst; j < jlast; j++) {
+                for (int k = kfirst; k < klast; k++) {
+                    c3e(u_star[l], i, j, k) = solver->vector_res[c3e(solver->cell_idx, i, j, k)-solver->idx_first];
                 }
             }
-            break;
-        default:;
         }
+        HYPRE_ParCSRBiCGSTABGetFinalRelativeResidualNorm(solver->linear_solver, final_norm_u[l]);
     }
-    if (solver->ri == solver->Px-1) {
-        switch (solver->bc[1].type) {
-        case BC_VELOCITY_COMPONENT:
-            for (int j = 0; j < Ny; j++) {
-                for (int k = 0; k < Nz; k++) {
-                    solver->vector_values[c3e(solver->cell_idx, Nx, j, k) - solver->idx_first]
-                        = solver->vector_values[c3e(solver->cell_idx, Nx+1, j, k) - solver->idx_first]
-                        = bc_val_u1(solver, DIR_EAST, solver->time, xmax, c1e(yc, j), c1e(zc, k));
-                }
-            }
-            break;
-        default:;
-        }
-    }
-    if (solver->rj == 0) {
-        switch (solver->bc[2].type) {
-        case BC_VELOCITY_COMPONENT:
-            for (int i = ifirst; i < ilast; i++) {
-                for (int k = 0; k < Nz; k++) {
-                    solver->vector_values[c3e(solver->cell_idx, i, -1, k) - solver->idx_first]
-                        = solver->vector_values[c3e(solver->cell_idx, i, -2, k) - solver->idx_first]
-                        = bc_val_u1(solver, DIR_SOUTH, solver->time, c1e(xc, i), ymin, c1e(zc, k));
-                }
-            }
-        default:;
-        }
-    }
-    if (solver->rj == solver->Py-1) {
-        switch (solver->bc[0].type) {
-        case BC_VELOCITY_COMPONENT:
-            for (int i = ifirst; i < ilast; i++) {
-                for (int k = 0; k < Nz; k++) {
-                    solver->vector_values[c3e(solver->cell_idx, i, Ny, k) - solver->idx_first]
-                        = solver->vector_values[c3e(solver->cell_idx, i, Ny+1, k) - solver->idx_first]
-                        = bc_val_u1(solver, DIR_NORTH, solver->time, c1e(xc, i), ymax, c1e(zc, k));
-                }
-            }
-        default:;
-        }
-    }
-    if (solver->rk == 0) {
-        switch (solver->bc[4].type) {
-        case BC_VELOCITY_COMPONENT:
-            for (int i = ifirst; i < ilast; i++) {
-                for (int j = jfirst; j < jlast; j++) {
-                    solver->vector_values[c3e(solver->cell_idx, i, j, -1) - solver->idx_first]
-                        = solver->vector_values[c3e(solver->cell_idx, i, j, -2) - solver->idx_first]
-                        = bc_val_u1(solver, DIR_DOWN, solver->time, c1e(xc, i), c1e(yc, j), zmin);
-                }
-            }
-            break;
-        default:;
-        }
-    }
-    if (solver->rk == solver->Pz-1) {
-        switch (solver->bc[5].type) {
-        case BC_VELOCITY_COMPONENT:
-            for (int i = ifirst; i < ilast; i++) {
-                for (int j = jfirst; j < jlast; j++) {
-                    solver->vector_values[c3e(solver->cell_idx, i, j, Nz) - solver->idx_first]
-                        = solver->vector_values[c3e(solver->cell_idx, i, j, Nz+1) - solver->idx_first]
-                        = bc_val_u1(solver, DIR_UP, solver->time, c1e(xc, i), c1e(yc, j), zmax);
-                }
-            }
-            break;
-        default:;
-        }
-    }
-
-    HYPRE_IJVectorSetValues(solver->b, solver->idx_last-solver->idx_first, solver->vector_rows, solver->vector_values);
-    HYPRE_IJVectorSetValues(solver->x, solver->idx_last-solver->idx_first, solver->vector_rows, solver->vector_zeros);
-    HYPRE_IJVectorAssemble(solver->b);
-    HYPRE_IJVectorAssemble(solver->x);
-    HYPRE_IJVectorGetObject(solver->b, (void **)&solver->par_b);
-    HYPRE_IJVectorGetObject(solver->x, (void **)&solver->par_x);
-
-    HYPRE_ParCSRBiCGSTABSetup(solver->linear_solver, solver->parcsr_A_u1, solver->par_b, solver->par_x);
-    hypre_ierr = HYPRE_ParCSRBiCGSTABSolve(solver->linear_solver, solver->parcsr_A_u1, solver->par_b, solver->par_x);
-    if (HYPRE_CheckError(hypre_ierr, HYPRE_ERROR_GENERIC)) {
-        fprintf(stderr, "error: floating pointer error raised in u1_star\n");
-        MPI_Abort(MPI_COMM_WORLD, -1);
-    }
-    if (HYPRE_CheckError(hypre_ierr, HYPRE_ERROR_CONV)) {
-        fprintf(stderr, "warning: u1_star did not converge\n");
-    }
-
-    HYPRE_IJVectorGetValues(solver->x, solver->idx_last-solver->idx_first, solver->vector_rows, solver->vector_res);
-    for (int i = ifirst; i < ilast; i++) {
-        for (int j = jfirst; j < jlast; j++) {
-            for (int k = kfirst; k < klast; k++) {
-                c3e(u1_star, i, j, k) = solver->vector_res[c3e(solver->cell_idx, i, j, k)-solver->idx_first];
-            }
-        }
-    }
-    HYPRE_ParCSRBiCGSTABGetFinalRelativeResidualNorm(solver->linear_solver, final_norm_u1);
-
-    /* u2_star. */
-
-    memcpy(solver->vector_values, solver->vector_zeros, sizeof(double)*(solver->idx_last-solver->idx_first));
-
-    FOR_INNER_CELL (i, j, k) {
-        idx = c3e(solver->cell_idx, i, j, k) - solver->idx_first;
-        if (c3e(solver->flag, i, j, k) == FLAG_FLUID) {
-            solver->vector_values[idx]
-                = -dt/2 * (3*c3e(N2, i, j, k) - c3e(N2_prev, i, j, k))
-                - dt * (c3e(p, i, j+1, k) - c3e(p, i, j-1, k)) / (c1e(yc, j+1) - c1e(yc, j-1))
-                + (1-c1e(kx_W, i)-c1e(kx_E, i)-c1e(ky_S, j)-c1e(ky_N, j)-c1e(kz_D, k)-c1e(kz_U, k))*c3e(u2, i, j, k)
-                + c1e(kx_W, i)*c3e(u2, i-1, j, k) + c1e(kx_E, i)*c3e(u2, i+1, j, k)
-                + c1e(ky_S, j)*c3e(u2, i, j-1, k) + c1e(ky_N, j)*c3e(u2, i, j+1, k)
-                + c1e(kz_D, k)*c3e(u2, i, j, k-1) + c1e(kz_U, k)*c3e(u2, i, j, k+1);
-        }
-    }
-
-    if (solver->ri == 0) {
-        switch (solver->bc[3].type) {
-        case BC_VELOCITY_COMPONENT:
-            for (int j = 0; j < Ny; j++) {
-                for (int k = 0; k < Nz; k++) {
-                    solver->vector_values[c3e(solver->cell_idx, -1, j, k) - solver->idx_first]
-                        = solver->vector_values[c3e(solver->cell_idx, -2, j, k) - solver->idx_first]
-                        = bc_val_u2(solver, DIR_WEST, solver->time, xmin, c1e(yc, j), c1e(zc, k));
-                }
-            }
-            break;
-        default:;
-        }
-    }
-    if (solver->ri == solver->Px-1) {
-        switch (solver->bc[1].type) {
-        case BC_VELOCITY_COMPONENT:
-            for (int j = 0; j < Ny; j++) {
-                for (int k = 0; k < Nz; k++) {
-                    solver->vector_values[c3e(solver->cell_idx, Nx, j, k) - solver->idx_first]
-                        = solver->vector_values[c3e(solver->cell_idx, Nx+1, j, k) - solver->idx_first]
-                        = bc_val_u2(solver, DIR_EAST, solver->time, xmax, c1e(yc, j), c1e(zc, k));
-                }
-            }
-            break;
-        default:;
-        }
-    }
-    if (solver->rj == 0) {
-        switch (solver->bc[2].type) {
-        case BC_VELOCITY_COMPONENT:
-            for (int i = ifirst; i < ilast; i++) {
-                for (int k = 0; k < Nz; k++) {
-                    solver->vector_values[c3e(solver->cell_idx, i, -1, k) - solver->idx_first]
-                        = solver->vector_values[c3e(solver->cell_idx, i, -2, k) - solver->idx_first]
-                        = bc_val_u2(solver, DIR_SOUTH, solver->time, c1e(xc, i), ymin, c1e(zc, k));
-                }
-            }
-        default:;
-        }
-    }
-    if (solver->rj == solver->Py-1) {
-        switch (solver->bc[0].type) {
-        case BC_VELOCITY_COMPONENT:
-            for (int i = ifirst; i < ilast; i++) {
-                for (int k = 0; k < Nz; k++) {
-                    solver->vector_values[c3e(solver->cell_idx, i, Ny, k) - solver->idx_first]
-                        = solver->vector_values[c3e(solver->cell_idx, i, Ny+1, k) - solver->idx_first]
-                        = bc_val_u2(solver, DIR_NORTH, solver->time, c1e(xc, i), ymax, c1e(zc, k));
-                }
-            }
-        default:;
-        }
-    }
-    if (solver->rk == 0) {
-        switch (solver->bc[4].type) {
-        case BC_VELOCITY_COMPONENT:
-            for (int i = ifirst; i < ilast; i++) {
-                for (int j = jfirst; j < jlast; j++) {
-                    solver->vector_values[c3e(solver->cell_idx, i, j, -1) - solver->idx_first]
-                        = solver->vector_values[c3e(solver->cell_idx, i, j, -2) - solver->idx_first]
-                        = bc_val_u2(solver, DIR_DOWN, solver->time, c1e(xc, i), c1e(yc, j), zmin);
-                }
-            }
-            break;
-        default:;
-        }
-    }
-    if (solver->rk == solver->Pz-1) {
-        switch (solver->bc[5].type) {
-        case BC_VELOCITY_COMPONENT:
-            for (int i = ifirst; i < ilast; i++) {
-                for (int j = jfirst; j < jlast; j++) {
-                    solver->vector_values[c3e(solver->cell_idx, i, j, Nz) - solver->idx_first]
-                        = solver->vector_values[c3e(solver->cell_idx, i, j, Nz+1) - solver->idx_first]
-                        = bc_val_u2(solver, DIR_UP, solver->time, c1e(xc, i), c1e(yc, j), zmax);
-                }
-            }
-            break;
-        default:;
-        }
-    }
-
-    HYPRE_IJVectorSetValues(solver->b, solver->idx_last-solver->idx_first, solver->vector_rows, solver->vector_values);
-    HYPRE_IJVectorSetValues(solver->x, solver->idx_last-solver->idx_first, solver->vector_rows, solver->vector_zeros);
-    HYPRE_IJVectorAssemble(solver->b);
-    HYPRE_IJVectorAssemble(solver->x);
-    HYPRE_IJVectorGetObject(solver->b, (void **)&solver->par_b);
-    HYPRE_IJVectorGetObject(solver->x, (void **)&solver->par_x);
-
-    HYPRE_ParCSRBiCGSTABSetup(solver->linear_solver, solver->parcsr_A_u2, solver->par_b, solver->par_x);
-    hypre_ierr = HYPRE_ParCSRBiCGSTABSolve(solver->linear_solver, solver->parcsr_A_u2, solver->par_b, solver->par_x);
-    if (HYPRE_CheckError(hypre_ierr, HYPRE_ERROR_GENERIC)) {
-        fprintf(stderr, "error: floating pointer error raised in u2_star\n");
-        MPI_Abort(MPI_COMM_WORLD, -1);
-    }
-    if (HYPRE_CheckError(hypre_ierr, HYPRE_ERROR_CONV)) {
-        fprintf(stderr, "warning: u2_star did not converge\n");
-    }
-
-    HYPRE_IJVectorGetValues(solver->x, solver->idx_last-solver->idx_first, solver->vector_rows, solver->vector_res);
-    for (int i = ifirst; i < ilast; i++) {
-        for (int j = jfirst; j < jlast; j++) {
-            for (int k = kfirst; k < klast; k++) {
-                c3e(u2_star, i, j, k) = solver->vector_res[c3e(solver->cell_idx, i, j, k)-solver->idx_first];
-            }
-        }
-    }
-    HYPRE_ParCSRBiCGSTABGetFinalRelativeResidualNorm(solver->linear_solver, final_norm_u2);
-
-    /* u3_star. */
-
-    memcpy(solver->vector_values, solver->vector_zeros, sizeof(double)*(solver->idx_last-solver->idx_first));
-
-    FOR_INNER_CELL (i, j, k) {
-        idx = c3e(solver->cell_idx, i, j, k) - solver->idx_first;
-        if (c3e(solver->flag, i, j, k) == FLAG_FLUID) {
-            solver->vector_values[idx]
-                = -dt/2 * (3*c3e(N3, i, j, k) - c3e(N3_prev, i, j, k))
-                - dt * (c3e(p, i, j, k+1) - c3e(p, i, j, k-1)) / (c1e(zc, k+1) - c1e(zc, k-1))
-                + (1-c1e(kx_W, i)-c1e(kx_E, i)-c1e(ky_S, j)-c1e(ky_N, j)-c1e(kz_D, k)-c1e(kz_U, k))*c3e(u3, i, j, k)
-                + c1e(kx_W, i)*c3e(u3, i-1, j, k) + c1e(kx_E, i)*c3e(u3, i+1, j, k)
-                + c1e(ky_S, j)*c3e(u3, i, j-1, k) + c1e(ky_N, j)*c3e(u3, i, j+1, k)
-                + c1e(kz_D, k)*c3e(u3, i, j, k-1) + c1e(kz_U, k)*c3e(u3, i, j, k+1);
-        }
-    }
-
-    if (solver->ri == 0) {
-        switch (solver->bc[3].type) {
-        case BC_VELOCITY_COMPONENT:
-            for (int j = 0; j < Ny; j++) {
-                for (int k = 0; k < Nz; k++) {
-                    solver->vector_values[c3e(solver->cell_idx, -1, j, k) - solver->idx_first]
-                        = solver->vector_values[c3e(solver->cell_idx, -2, j, k) - solver->idx_first]
-                        = bc_val_u3(solver, DIR_WEST, solver->time, xmin, c1e(yc, j), c1e(zc, k));
-                }
-            }
-            break;
-        default:;
-        }
-    }
-    if (solver->ri == solver->Px-1) {
-        switch (solver->bc[1].type) {
-        case BC_VELOCITY_COMPONENT:
-            for (int j = 0; j < Ny; j++) {
-                for (int k = 0; k < Nz; k++) {
-                    solver->vector_values[c3e(solver->cell_idx, Nx, j, k) - solver->idx_first]
-                        = solver->vector_values[c3e(solver->cell_idx, Nx+1, j, k) - solver->idx_first]
-                        = bc_val_u3(solver, DIR_EAST, solver->time, xmax, c1e(yc, j), c1e(zc, k));
-                }
-            }
-            break;
-        default:;
-        }
-    }
-    if (solver->rj == 0) {
-        switch (solver->bc[2].type) {
-        case BC_VELOCITY_COMPONENT:
-            for (int i = ifirst; i < ilast; i++) {
-                for (int k = 0; k < Nz; k++) {
-                    solver->vector_values[c3e(solver->cell_idx, i, -1, k) - solver->idx_first]
-                        = solver->vector_values[c3e(solver->cell_idx, i, -2, k) - solver->idx_first]
-                        = bc_val_u3(solver, DIR_SOUTH, solver->time, c1e(xc, i), ymin, c1e(zc, k));
-                }
-            }
-        default:;
-        }
-    }
-    if (solver->rj == solver->Py-1) {
-        switch (solver->bc[0].type) {
-        case BC_VELOCITY_COMPONENT:
-            for (int i = ifirst; i < ilast; i++) {
-                for (int k = 0; k < Nz; k++) {
-                    solver->vector_values[c3e(solver->cell_idx, i, Ny, k) - solver->idx_first]
-                        = solver->vector_values[c3e(solver->cell_idx, i, Ny+1, k) - solver->idx_first]
-                        = bc_val_u3(solver, DIR_NORTH, solver->time, c1e(xc, i), ymax, c1e(zc, k));
-                }
-            }
-        default:;
-        }
-    }
-    if (solver->rk == 0) {
-        switch (solver->bc[4].type) {
-        case BC_VELOCITY_COMPONENT:
-            for (int i = ifirst; i < ilast; i++) {
-                for (int j = jfirst; j < jlast; j++) {
-                    solver->vector_values[c3e(solver->cell_idx, i, j, -1) - solver->idx_first]
-                        = solver->vector_values[c3e(solver->cell_idx, i, j, -2) - solver->idx_first]
-                        = bc_val_u3(solver, DIR_DOWN, solver->time, c1e(xc, i), c1e(yc, j), zmin);
-                }
-            }
-            break;
-        default:;
-        }
-    }
-    if (solver->rk == solver->Pz-1) {
-        switch (solver->bc[5].type) {
-        case BC_VELOCITY_COMPONENT:
-            for (int i = ifirst; i < ilast; i++) {
-                for (int j = jfirst; j < jlast; j++) {
-                    solver->vector_values[c3e(solver->cell_idx, i, j, Nz) - solver->idx_first]
-                        = solver->vector_values[c3e(solver->cell_idx, i, j, Nz+1) - solver->idx_first]
-                        = bc_val_u3(solver, DIR_UP, solver->time, c1e(xc, i), c1e(yc, j), zmax);
-                }
-            }
-            break;
-        default:;
-        }
-    }
-
-    HYPRE_IJVectorSetValues(solver->b, solver->idx_last-solver->idx_first, solver->vector_rows, solver->vector_values);
-    HYPRE_IJVectorSetValues(solver->x, solver->idx_last-solver->idx_first, solver->vector_rows, solver->vector_zeros);
-    HYPRE_IJVectorAssemble(solver->b);
-    HYPRE_IJVectorAssemble(solver->x);
-    HYPRE_IJVectorGetObject(solver->b, (void **)&solver->par_b);
-    HYPRE_IJVectorGetObject(solver->x, (void **)&solver->par_x);
-
-    HYPRE_ParCSRBiCGSTABSetup(solver->linear_solver, solver->parcsr_A_u3, solver->par_b, solver->par_x);
-    hypre_ierr = HYPRE_ParCSRBiCGSTABSolve(solver->linear_solver, solver->parcsr_A_u3, solver->par_b, solver->par_x);
-    if (HYPRE_CheckError(hypre_ierr, HYPRE_ERROR_GENERIC)) {
-        fprintf(stderr, "error: floating pointer error raised in u3_star\n");
-        MPI_Abort(MPI_COMM_WORLD, -1);
-    }
-    if (HYPRE_CheckError(hypre_ierr, HYPRE_ERROR_CONV)) {
-        fprintf(stderr, "warning: u3_star did not converge\n");
-    }
-
-    HYPRE_IJVectorGetValues(solver->x, solver->idx_last-solver->idx_first, solver->vector_rows, solver->vector_res);
-    for (int i = ifirst; i < ilast; i++) {
-        for (int j = jfirst; j < jlast; j++) {
-            for (int k = kfirst; k < klast; k++) {
-                c3e(u3_star, i, j, k) = solver->vector_res[c3e(solver->cell_idx, i, j, k)-solver->idx_first];
-            }
-        }
-    }
-    HYPRE_ParCSRBiCGSTABGetFinalRelativeResidualNorm(solver->linear_solver, final_norm_u3);
 
     /* Exchange u_star between adjacent processes. */
     exchange_var(solver, solver->u1_star);
@@ -1093,18 +859,18 @@ static void update_outer(IBMSolver *solver) {
             b = c1e(solver->dx, 0) / 2;
             for (int j = -2; j < Ny+2; j++) {
                 for (int k = -2; k < Nz+2; k++) {
-                    c3e(u1, -1, j, k) = (a+b)/b*bc_val_u1(solver, DIR_WEST, solver->time, xmin, c1e(yc, j), c1e(zc, k)) - a/b*c3e(u1, 0, j, k);
-                    c3e(u2, -1, j, k) = (a+b)/b*bc_val_u2(solver, DIR_WEST, solver->time, xmin, c1e(yc, j), c1e(zc, k)) - a/b*c3e(u2, 0, j, k);
-                    c3e(u3, -1, j, k) = (a+b)/b*bc_val_u3(solver, DIR_WEST, solver->time, xmin, c1e(yc, j), c1e(zc, k)) - a/b*c3e(u3, 0, j, k);
+                    c3e(u1, -1, j, k) = (a+b)/b*bc_val_u(solver, 1, DIR_WEST, solver->time, xmin, c1e(yc, j), c1e(zc, k)) - a/b*c3e(u1, 0, j, k);
+                    c3e(u2, -1, j, k) = (a+b)/b*bc_val_u(solver, 2, DIR_WEST, solver->time, xmin, c1e(yc, j), c1e(zc, k)) - a/b*c3e(u2, 0, j, k);
+                    c3e(u3, -1, j, k) = (a+b)/b*bc_val_u(solver, 3, DIR_WEST, solver->time, xmin, c1e(yc, j), c1e(zc, k)) - a/b*c3e(u3, 0, j, k);
                 }
             }
             a = c1e(solver->dx, -2) / 2 + c1e(solver->dx, -1);
             b = c1e(solver->dx, 0) + c1e(solver->dx, 1) / 2;
             for (int j = -2; j < Ny+2; j++) {
                 for (int k = -2; k < Nz+2; k++) {
-                    c3e(u1, -2, j, k) = (a+b)/b*bc_val_u1(solver, DIR_WEST, solver->time, xmin, c1e(yc, j), c1e(zc, k)) - a/b*c3e(u1, 1, j, k);
-                    c3e(u2, -2, j, k) = (a+b)/b*bc_val_u2(solver, DIR_WEST, solver->time, xmin, c1e(yc, j), c1e(zc, k)) - a/b*c3e(u2, 1, j, k);
-                    c3e(u3, -2, j, k) = (a+b)/b*bc_val_u3(solver, DIR_WEST, solver->time, xmin, c1e(yc, j), c1e(zc, k)) - a/b*c3e(u3, 1, j, k);
+                    c3e(u1, -2, j, k) = (a+b)/b*bc_val_u(solver, 1, DIR_WEST, solver->time, xmin, c1e(yc, j), c1e(zc, k)) - a/b*c3e(u1, 1, j, k);
+                    c3e(u2, -2, j, k) = (a+b)/b*bc_val_u(solver, 2, DIR_WEST, solver->time, xmin, c1e(yc, j), c1e(zc, k)) - a/b*c3e(u2, 1, j, k);
+                    c3e(u3, -2, j, k) = (a+b)/b*bc_val_u(solver, 3, DIR_WEST, solver->time, xmin, c1e(yc, j), c1e(zc, k)) - a/b*c3e(u3, 1, j, k);
                 }
             }
             break;
@@ -1198,18 +964,18 @@ static void update_outer(IBMSolver *solver) {
             b = c1e(solver->dx, Nx) / 2;
             for (int j = -2; j < Ny+2; j++) {
                 for (int k = -2; k < Nz+2; k++) {
-                    c3e(u1, Nx, j, k) = (a+b)/a*bc_val_u1(solver, DIR_EAST, solver->time, xmax, c1e(yc, j), c1e(zc, k)) - b/a*c3e(u1, Nx-1, j, k);
-                    c3e(u2, Nx, j, k) = (a+b)/a*bc_val_u2(solver, DIR_EAST, solver->time, xmax, c1e(yc, j), c1e(zc, k)) - b/a*c3e(u2, Nx-1, j, k);
-                    c3e(u3, Nx, j, k) = (a+b)/a*bc_val_u3(solver, DIR_EAST, solver->time, xmax, c1e(yc, j), c1e(zc, k)) - b/a*c3e(u3, Nx-1, j, k);
+                    c3e(u1, Nx, j, k) = (a+b)/a*bc_val_u(solver, 1, DIR_EAST, solver->time, xmax, c1e(yc, j), c1e(zc, k)) - b/a*c3e(u1, Nx-1, j, k);
+                    c3e(u2, Nx, j, k) = (a+b)/a*bc_val_u(solver, 2, DIR_EAST, solver->time, xmax, c1e(yc, j), c1e(zc, k)) - b/a*c3e(u2, Nx-1, j, k);
+                    c3e(u3, Nx, j, k) = (a+b)/a*bc_val_u(solver, 3, DIR_EAST, solver->time, xmax, c1e(yc, j), c1e(zc, k)) - b/a*c3e(u3, Nx-1, j, k);
                 }
             }
             a = c1e(solver->dx, Nx-2) / 2 + c1e(solver->dx, Nx-1);
             b = c1e(solver->dx, Nx) + c1e(solver->dx, Nx+1) / 2;
             for (int j = -2; j < Ny+2; j++) {
                 for (int k = -2; k < Nz+2; k++) {
-                    c3e(u1, Nx+1, j, k) = (a+b)/a*bc_val_u1(solver, DIR_EAST, solver->time, xmax, c1e(yc, j), c1e(zc, k)) - b/a*c3e(u1, Nx-2, j, k);
-                    c3e(u2, Nx+1, j, k) = (a+b)/a*bc_val_u2(solver, DIR_EAST, solver->time, xmax, c1e(yc, j), c1e(zc, k)) - b/a*c3e(u2, Nx-2, j, k);
-                    c3e(u3, Nx+1, j, k) = (a+b)/a*bc_val_u3(solver, DIR_EAST, solver->time, xmax, c1e(yc, j), c1e(zc, k)) - b/a*c3e(u3, Nx-2, j, k);
+                    c3e(u1, Nx+1, j, k) = (a+b)/a*bc_val_u(solver, 1, DIR_EAST, solver->time, xmax, c1e(yc, j), c1e(zc, k)) - b/a*c3e(u1, Nx-2, j, k);
+                    c3e(u2, Nx+1, j, k) = (a+b)/a*bc_val_u(solver, 2, DIR_EAST, solver->time, xmax, c1e(yc, j), c1e(zc, k)) - b/a*c3e(u2, Nx-2, j, k);
+                    c3e(u3, Nx+1, j, k) = (a+b)/a*bc_val_u(solver, 3, DIR_EAST, solver->time, xmax, c1e(yc, j), c1e(zc, k)) - b/a*c3e(u3, Nx-2, j, k);
                 }
             }
             break;
@@ -1303,18 +1069,18 @@ static void update_outer(IBMSolver *solver) {
             b = c1e(solver->dy, 0) / 2;
             for (int i = -2; i < Nx+2; i++) {
                 for (int k = -2; k < Nz+2; k++) {
-                    c3e(u1, i, -1, k) = (a+b)/b*bc_val_u1(solver, DIR_SOUTH, solver->time, c1e(xc, i), ymin, c1e(zc, k)) - a/b*c3e(u1, i, 0, k);
-                    c3e(u2, i, -1, k) = (a+b)/b*bc_val_u2(solver, DIR_SOUTH, solver->time, c1e(xc, i), ymin, c1e(zc, k)) - a/b*c3e(u2, i, 0, k);
-                    c3e(u3, i, -1, k) = (a+b)/b*bc_val_u3(solver, DIR_SOUTH, solver->time, c1e(xc, i), ymin, c1e(zc, k)) - a/b*c3e(u3, i, 0, k);
+                    c3e(u1, i, -1, k) = (a+b)/b*bc_val_u(solver, 1, DIR_SOUTH, solver->time, c1e(xc, i), ymin, c1e(zc, k)) - a/b*c3e(u1, i, 0, k);
+                    c3e(u2, i, -1, k) = (a+b)/b*bc_val_u(solver, 2, DIR_SOUTH, solver->time, c1e(xc, i), ymin, c1e(zc, k)) - a/b*c3e(u2, i, 0, k);
+                    c3e(u3, i, -1, k) = (a+b)/b*bc_val_u(solver, 3, DIR_SOUTH, solver->time, c1e(xc, i), ymin, c1e(zc, k)) - a/b*c3e(u3, i, 0, k);
                 }
             }
             a = c1e(solver->dy, -2) / 2 + c1e(solver->dy, -1);
             b = c1e(solver->dy, 0) + c1e(solver->dy, 1) / 2;
             for (int i = -2; i < Nx+2; i++) {
                 for (int k = -2; k < Nz+2; k++) {
-                    c3e(u1, i, -2, k) = (a+b)/b*bc_val_u1(solver, DIR_SOUTH, solver->time, c1e(xc, i), ymin, c1e(zc, k)) - a/b*c3e(u1, i, 1, k);
-                    c3e(u2, i, -2, k) = (a+b)/b*bc_val_u2(solver, DIR_SOUTH, solver->time, c1e(xc, i), ymin, c1e(zc, k)) - a/b*c3e(u2, i, 1, k);
-                    c3e(u3, i, -2, k) = (a+b)/b*bc_val_u3(solver, DIR_SOUTH, solver->time, c1e(xc, i), ymin, c1e(zc, k)) - a/b*c3e(u3, i, 1, k);
+                    c3e(u1, i, -2, k) = (a+b)/b*bc_val_u(solver, 1, DIR_SOUTH, solver->time, c1e(xc, i), ymin, c1e(zc, k)) - a/b*c3e(u1, i, 1, k);
+                    c3e(u2, i, -2, k) = (a+b)/b*bc_val_u(solver, 2, DIR_SOUTH, solver->time, c1e(xc, i), ymin, c1e(zc, k)) - a/b*c3e(u2, i, 1, k);
+                    c3e(u3, i, -2, k) = (a+b)/b*bc_val_u(solver, 3, DIR_SOUTH, solver->time, c1e(xc, i), ymin, c1e(zc, k)) - a/b*c3e(u3, i, 1, k);
                 }
             }
             break;
@@ -1408,18 +1174,18 @@ static void update_outer(IBMSolver *solver) {
             b = c1e(solver->dy, Ny) / 2;
             for (int i = -2; i < Nx+2; i++) {
                 for (int k = -2; k < Nz+2; k++) {
-                    c3e(u1, i, Ny, k) = (a+b)/a*bc_val_u1(solver, DIR_NORTH, solver->time, c1e(xc, i), ymax, c1e(zc, k)) - b/a*c3e(u1, i, Ny-1, k);
-                    c3e(u2, i, Ny, k) = (a+b)/a*bc_val_u2(solver, DIR_NORTH, solver->time, c1e(xc, i), ymax, c1e(zc, k)) - b/a*c3e(u2, i, Ny-1, k);
-                    c3e(u3, i, Ny, k) = (a+b)/a*bc_val_u3(solver, DIR_NORTH, solver->time, c1e(xc, i), ymax, c1e(zc, k)) - b/a*c3e(u3, i, Ny-1, k);
+                    c3e(u1, i, Ny, k) = (a+b)/a*bc_val_u(solver, 1, DIR_NORTH, solver->time, c1e(xc, i), ymax, c1e(zc, k)) - b/a*c3e(u1, i, Ny-1, k);
+                    c3e(u2, i, Ny, k) = (a+b)/a*bc_val_u(solver, 2, DIR_NORTH, solver->time, c1e(xc, i), ymax, c1e(zc, k)) - b/a*c3e(u2, i, Ny-1, k);
+                    c3e(u3, i, Ny, k) = (a+b)/a*bc_val_u(solver, 3, DIR_NORTH, solver->time, c1e(xc, i), ymax, c1e(zc, k)) - b/a*c3e(u3, i, Ny-1, k);
                 }
             }
             a = c1e(solver->dy, Ny-2) / 2 + c1e(solver->dy, Ny-1);
             b = c1e(solver->dy, Ny) + c1e(solver->dy, Ny+1) / 2;
             for (int i = -2; i < Nx+2; i++) {
                 for (int k = -2; k < Nz+2; k++) {
-                    c3e(u1, i, Ny+1, k) = (a+b)/a*bc_val_u1(solver, DIR_NORTH, solver->time, c1e(xc, i), ymax, c1e(zc, k)) - b/a*c3e(u1, i, Ny-2, k);
-                    c3e(u2, i, Ny+1, k) = (a+b)/a*bc_val_u2(solver, DIR_NORTH, solver->time, c1e(xc, i), ymax, c1e(zc, k)) - b/a*c3e(u2, i, Ny-2, k);
-                    c3e(u3, i, Ny+1, k) = (a+b)/a*bc_val_u3(solver, DIR_NORTH, solver->time, c1e(xc, i), ymax, c1e(zc, k)) - b/a*c3e(u3, i, Ny-2, k);
+                    c3e(u1, i, Ny+1, k) = (a+b)/a*bc_val_u(solver, 1, DIR_NORTH, solver->time, c1e(xc, i), ymax, c1e(zc, k)) - b/a*c3e(u1, i, Ny-2, k);
+                    c3e(u2, i, Ny+1, k) = (a+b)/a*bc_val_u(solver, 2, DIR_NORTH, solver->time, c1e(xc, i), ymax, c1e(zc, k)) - b/a*c3e(u2, i, Ny-2, k);
+                    c3e(u3, i, Ny+1, k) = (a+b)/a*bc_val_u(solver, 3, DIR_NORTH, solver->time, c1e(xc, i), ymax, c1e(zc, k)) - b/a*c3e(u3, i, Ny-2, k);
                 }
             }
             break;
@@ -1513,18 +1279,18 @@ static void update_outer(IBMSolver *solver) {
             b = c1e(solver->dz, 0) / 2;
             for (int i = -2; i < Nx+2; i++) {
                 for (int j = -2; j < Ny+2; j++) {
-                    c3e(u1, i, j, -1) = (a+b)/b*bc_val_u1(solver, DIR_DOWN, solver->time, c1e(xc, i), c1e(yc, j), zmin) - a/b*c3e(u1, i, j, 0);
-                    c3e(u2, i, j, -1) = (a+b)/b*bc_val_u2(solver, DIR_DOWN, solver->time, c1e(xc, i), c1e(yc, j), zmin) - a/b*c3e(u2, i, j, 0);
-                    c3e(u3, i, j, -1) = (a+b)/b*bc_val_u3(solver, DIR_DOWN, solver->time, c1e(xc, i), c1e(yc, j), zmin) - a/b*c3e(u3, i, j, 0);
+                    c3e(u1, i, j, -1) = (a+b)/b*bc_val_u(solver, 1, DIR_DOWN, solver->time, c1e(xc, i), c1e(yc, j), zmin) - a/b*c3e(u1, i, j, 0);
+                    c3e(u2, i, j, -1) = (a+b)/b*bc_val_u(solver, 2, DIR_DOWN, solver->time, c1e(xc, i), c1e(yc, j), zmin) - a/b*c3e(u2, i, j, 0);
+                    c3e(u3, i, j, -1) = (a+b)/b*bc_val_u(solver, 3, DIR_DOWN, solver->time, c1e(xc, i), c1e(yc, j), zmin) - a/b*c3e(u3, i, j, 0);
                 }
             }
             a = c1e(solver->dz, -2) / 2 + c1e(solver->dz, -1);
             b = c1e(solver->dz, 0) + c1e(solver->dz, 1) / 2;
             for (int i = -2; i < Nx+2; i++) {
                 for (int j = -2; j < Ny+2; j++) {
-                    c3e(u1, i, j, -2) = (a+b)/b*bc_val_u1(solver, DIR_DOWN, solver->time, c1e(xc, i), c1e(yc, j), zmin) - a/b*c3e(u1, i, j, 1);
-                    c3e(u2, i, j, -2) = (a+b)/b*bc_val_u2(solver, DIR_DOWN, solver->time, c1e(xc, i), c1e(yc, j), zmin) - a/b*c3e(u2, i, j, 1);
-                    c3e(u3, i, j, -2) = (a+b)/b*bc_val_u3(solver, DIR_DOWN, solver->time, c1e(xc, i), c1e(yc, j), zmin) - a/b*c3e(u3, i, j, 1);
+                    c3e(u1, i, j, -2) = (a+b)/b*bc_val_u(solver, 1, DIR_DOWN, solver->time, c1e(xc, i), c1e(yc, j), zmin) - a/b*c3e(u1, i, j, 1);
+                    c3e(u2, i, j, -2) = (a+b)/b*bc_val_u(solver, 2, DIR_DOWN, solver->time, c1e(xc, i), c1e(yc, j), zmin) - a/b*c3e(u2, i, j, 1);
+                    c3e(u3, i, j, -2) = (a+b)/b*bc_val_u(solver, 3, DIR_DOWN, solver->time, c1e(xc, i), c1e(yc, j), zmin) - a/b*c3e(u3, i, j, 1);
                 }
             }
             break;
@@ -1618,18 +1384,18 @@ static void update_outer(IBMSolver *solver) {
             b = c1e(solver->dz, Nz) / 2;
             for (int i = -2; i < Nx+2; i++) {
                 for (int j = -2; j < Ny+2; j++) {
-                    c3e(u1, i, j, Nz) = (a+b)/a*bc_val_u1(solver, DIR_UP, solver->time, c1e(xc, i), c1e(yc, j), zmax) - b/a*c3e(u1, i, j, Nz-1);
-                    c3e(u2, i, j, Nz) = (a+b)/a*bc_val_u2(solver, DIR_UP, solver->time, c1e(xc, i), c1e(yc, j), zmax) - b/a*c3e(u2, i, j, Nz-1);
-                    c3e(u3, i, j, Nz) = (a+b)/a*bc_val_u3(solver, DIR_UP, solver->time, c1e(xc, i), c1e(yc, j), zmax) - b/a*c3e(u3, i, j, Nz-1);
+                    c3e(u1, i, j, Nz) = (a+b)/a*bc_val_u(solver, 1, DIR_UP, solver->time, c1e(xc, i), c1e(yc, j), zmax) - b/a*c3e(u1, i, j, Nz-1);
+                    c3e(u2, i, j, Nz) = (a+b)/a*bc_val_u(solver, 2, DIR_UP, solver->time, c1e(xc, i), c1e(yc, j), zmax) - b/a*c3e(u2, i, j, Nz-1);
+                    c3e(u3, i, j, Nz) = (a+b)/a*bc_val_u(solver, 3, DIR_UP, solver->time, c1e(xc, i), c1e(yc, j), zmax) - b/a*c3e(u3, i, j, Nz-1);
                 }
             }
             a = c1e(solver->dz, Nz-2) / 2 + c1e(solver->dz, Nz-1);
             b = c1e(solver->dz, Nz) + c1e(solver->dz, Nz+1) / 2;
             for (int i = -2; i < Nx+2; i++) {
                 for (int j = -2; j < Ny+2; j++) {
-                    c3e(u1, i, j, Nz+1) = (a+b)/a*bc_val_u1(solver, DIR_UP, solver->time, c1e(xc, i), c1e(yc, j), zmax) - b/a*c3e(u1, i, j, Nz-2);
-                    c3e(u2, i, j, Nz+1) = (a+b)/a*bc_val_u2(solver, DIR_UP, solver->time, c1e(xc, i), c1e(yc, j), zmax) - b/a*c3e(u2, i, j, Nz-2);
-                    c3e(u3, i, j, Nz+1) = (a+b)/a*bc_val_u3(solver, DIR_UP, solver->time, c1e(xc, i), c1e(yc, j), zmax) - b/a*c3e(u3, i, j, Nz-2);
+                    c3e(u1, i, j, Nz+1) = (a+b)/a*bc_val_u(solver, 1, DIR_UP, solver->time, c1e(xc, i), c1e(yc, j), zmax) - b/a*c3e(u1, i, j, Nz-2);
+                    c3e(u2, i, j, Nz+1) = (a+b)/a*bc_val_u(solver, 2, DIR_UP, solver->time, c1e(xc, i), c1e(yc, j), zmax) - b/a*c3e(u2, i, j, Nz-2);
+                    c3e(u3, i, j, Nz+1) = (a+b)/a*bc_val_u(solver, 3, DIR_UP, solver->time, c1e(xc, i), c1e(yc, j), zmax) - b/a*c3e(u3, i, j, Nz-2);
                 }
             }
             break;
@@ -2208,37 +1974,29 @@ static void update_ghost(IBMSolver *solver) {
     }
 }
 
-static double bc_val_u1(
+static double bc_val_u(
     IBMSolver *solver,
+    int type,
     IBMSolverDirection dir,
     double t, double x, double y, double z
 ) {
     int idx = dir_to_idx(dir);
-    return solver->bc[idx].val_type == BC_CONST
-        ? solver->bc[idx].const_u1
-        : solver->bc[idx].func_u1(t, x, y, z);
-}
-
-static double bc_val_u2(
-    IBMSolver *solver,
-    IBMSolverDirection dir,
-    double t, double x, double y, double z
-) {
-    int idx = dir_to_idx(dir);
-    return solver->bc[idx].val_type == BC_CONST
-        ? solver->bc[idx].const_u2
-        : solver->bc[idx].func_u2(t, x, y, z);
-}
-
-static double bc_val_u3(
-    IBMSolver *solver,
-    IBMSolverDirection dir,
-    double t, double x, double y, double z
-) {
-    int idx = dir_to_idx(dir);
-    return solver->bc[idx].val_type == BC_CONST
-        ? solver->bc[idx].const_u3
-        : solver->bc[idx].func_u3(t, x, y, z);
+    switch (type) {
+    case 1:
+        return solver->bc[idx].val_type == BC_CONST
+            ? solver->bc[idx].const_u1
+            : solver->bc[idx].func_u1(t, x, y, z);
+    case 2:
+        return solver->bc[idx].val_type == BC_CONST
+            ? solver->bc[idx].const_u2
+            : solver->bc[idx].func_u2(t, x, y, z);
+    case 3:
+        return solver->bc[idx].val_type == BC_CONST
+            ? solver->bc[idx].const_u3
+            : solver->bc[idx].func_u3(t, x, y, z);
+    default:;
+    }
+    return NAN;
 }
 
 static double bc_val_p(
