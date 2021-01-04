@@ -37,7 +37,7 @@ void IBMSolver_export_result(IBMSolver *solver, const char *filename) {
         int x_dimid, y_dimid, z_dimid, time_dimid;
         /* Id of variables. */
         int x_varid, y_varid, z_varid, time_varid, iter_varid;
-        int u_varid, v_varid, w_varid, p_varid, vort_varid;
+        int u_varid, v_varid, w_varid, p_varid, vort_varid, q_varid;
         /* Array of dimension ids. */
         int dimids[4];
 
@@ -53,10 +53,11 @@ void IBMSolver_export_result(IBMSolver *solver, const char *filename) {
         float (*const w_value)[Ny_global+4][Nx_global+4] = calloc(Nz_global+4, sizeof(float [Ny_global+4][Nx_global+4]));
         float (*const p_value)[Ny_global+4][Nx_global+4] = calloc(Nz_global+4, sizeof(float [Ny_global+4][Nx_global+4]));
         float (*const vort_value)[Ny_global+4][Nx_global+4] = calloc(Nz_global+4, sizeof(float [Ny_global+4][Nx_global+4]));
+        float (*const q_value)[Ny_global+4][Nx_global+4] = calloc(Nz_global+4, sizeof(float [Ny_global+4][Nx_global+4]));
 
         /* Velocity gradients. */
         int iprev, inext, jprev, jnext, kprev, knext;
-        float dudy, dudz, dvdx, dvdz, dwdx, dwdy;
+        float dudx, dudy, dudz, dvdx, dvdy, dvdz, dwdx, dwdy, dwdz;
         /* Vorticity components. */
         float vortx, vorty, vortz;
 
@@ -106,7 +107,7 @@ void IBMSolver_export_result(IBMSolver *solver, const char *filename) {
             }
         }
 
-        /* Calculate vorticity. */
+        /* Calculate vorticity and invariant Q. */
         for (int k = 0; k < Nz_global+4; k++) {
             for (int j = 0; j < Ny_global+4; j++) {
                 for (int i = 0; i < Nx_global+4; i++) {
@@ -117,18 +118,24 @@ void IBMSolver_export_result(IBMSolver *solver, const char *filename) {
                     kprev = max(k-1, 0);
                     knext = min(k+1, Nz_global+3);
 
+                    dudx = (u_value[k][j][inext] - u_value[k][j][iprev]) / (x_value[inext] - x_value[iprev]);
                     dudy = (u_value[k][jnext][i] - u_value[k][jprev][i]) / (y_value[jnext] - y_value[jprev]);
                     dudz = (u_value[knext][j][i] - u_value[kprev][j][i]) / (z_value[knext] - z_value[kprev]);
                     dvdx = (v_value[k][j][inext] - v_value[k][j][iprev]) / (x_value[inext] - x_value[iprev]);
+                    dvdy = (v_value[k][jnext][i] - v_value[k][jprev][i]) / (y_value[jnext] - y_value[jprev]);
                     dvdz = (v_value[knext][j][i] - v_value[kprev][j][i]) / (z_value[knext] - z_value[kprev]);
                     dwdx = (w_value[k][j][inext] - w_value[k][j][iprev]) / (x_value[inext] - x_value[iprev]);
                     dwdy = (w_value[k][jnext][i] - w_value[k][jprev][i]) / (y_value[jnext] - y_value[jprev]);
+                    dwdz = (w_value[knext][j][i] - w_value[kprev][j][i]) / (z_value[knext] - z_value[kprev]);
 
                     vortx = dwdy - dvdz;
                     vorty = dudz - dwdx;
                     vortz = dvdx - dudy;
-
                     vort_value[k][j][i] = sqrt(vortx*vortx + vorty*vorty + vortz*vortz);
+
+                    q_value[k][j][i]
+                        = dudx*dvdy + dvdy*dwdz + dwdz*dudx
+                        - dudy*dvdx - dvdz*dwdy - dudz*dwdx;
                 }
             }
         }
@@ -185,6 +192,9 @@ void IBMSolver_export_result(IBMSolver *solver, const char *filename) {
         nc_def_var(ncid, "vorticity", NC_FLOAT, 4, dimids, &vort_varid);
         nc_put_att_text(ncid, vort_varid, "units", 3, "1/s");
 
+        nc_def_var(ncid, "Q", NC_FLOAT, 4, dimids, &q_varid);
+        nc_put_att_text(ncid, q_varid, "units", 5, "1/s^2");
+
         /* End of definitions. */
         nc_enddef(ncid);
 
@@ -200,6 +210,7 @@ void IBMSolver_export_result(IBMSolver *solver, const char *filename) {
         nc_put_var_float(ncid, w_varid, (float *)w_value);
         nc_put_var_float(ncid, p_varid, (float *)p_value);
         nc_put_var_float(ncid, vort_varid, (float *)vort_value);
+        nc_put_var_float(ncid, q_varid, (float *)q_value);
 
         /* Close file. */
         nc_close(ncid);
@@ -210,6 +221,7 @@ error:
         free(w_value);
         free(p_value);
         free(vort_value);
+        free(q_value);
     }
     else {
         int ifirst, ilast, jfirst, jlast, kfirst, klast;
