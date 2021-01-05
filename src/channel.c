@@ -2,6 +2,7 @@
 #include <math.h>
 
 #include "ibm3d.h"
+#include "utils.h"
 
 const int Nx = 192;
 const int Ny = 160;
@@ -18,6 +19,10 @@ double initfunc_u1(double, double, double);
 double initfunc_u2(double, double, double);
 double initfunc_u3(double, double, double);
 double initfunc_p(double, double, double);
+
+double inlet_vel_x(double, double, double, double);
+double inlet_vel_y(double, double, double, double);
+double inlet_vel_z(double, double, double, double);
 
 int main(int argc, char **argv) {
     /* Number of all processes. */
@@ -51,37 +56,41 @@ int main(int argc, char **argv) {
         zf[k] = -cos(PI * k / Nz);
     }
 
-    solver = IBMSolver_new(num_process, rank, 4, 2, 2);
+    solver = IBMSolver_new(num_process, rank, 16, 1, 1);
 
     IBMSolver_set_grid(solver, Nx, Ny, Nz, xf, yf, zf);
     IBMSolver_set_params(solver, Re, dt);
 
-    IBMSolver_set_bc(solver, DIR_WEST, BC_VELOCITY_PERIODIC, BC_CONST, 8*PI/Re);
-    IBMSolver_set_bc(solver, DIR_EAST, BC_VELOCITY_PERIODIC, BC_CONST, 0.);
+    IBMSolver_set_bc(solver, DIR_WEST, BC_VELOCITY_COMPONENT, BC_CONST, 1., 0., 0.);
+    IBMSolver_set_bc(solver, DIR_EAST, BC_PRESSURE, BC_CONST, 0.);
     IBMSolver_set_bc(solver, DIR_SOUTH | DIR_NORTH, BC_ALL_PERIODIC);
-    IBMSolver_set_bc(solver, DIR_DOWN | DIR_UP, BC_STATIONARY_WALL);
+    IBMSolver_set_bc(solver, DIR_DOWN, BC_STATIONARY_WALL);
+    IBMSolver_set_bc(solver, DIR_UP, BC_STATIONARY_WALL);
 
     IBMSolver_set_obstacle(solver, NULL);
 
     IBMSolver_set_linear_solver(solver, SOLVER_BiCGSTAB, PRECOND_AMG, 1e-6);
 
-    IBMSolver_set_autosave(solver, PATH "/channel", 100);
+    IBMSolver_set_autosave(solver, PATH "/channel", 5);
 
     IBMSolver_assemble(solver);
 
     /* Initialize. */
-    if (1) {
-        IBMSolver_init_flow_func(
-            solver,
-            initfunc_u1, initfunc_u2, initfunc_u3, initfunc_p
-        );
+    if (0) {
+        IBMSolver_init_flow_const(solver, 1, 0, 0, 0);
     }
     else {
-        IBMSolver_init_flow_file(solver, PATH "/channel-16700");
+        IBMSolver_init_flow_file(solver, PATH "/channel-00060");
+    }
+
+    if (rank == 0) {
+        printf("Initialization done\n");
     }
 
     /* Iterate. */
-    IBMSolver_iterate(solver, 20000, true);
+    IBMSolver_iterate(solver, 100000, true);
+
+    IBMSolver_export_result(solver, PATH "/channel");
 
     /* Finalize. */
     IBMSolver_destroy(solver);
@@ -90,20 +99,4 @@ int main(int argc, char **argv) {
     MPI_Finalize();
 
     return 0;
-}
-
-double initfunc_u1(double x, double y, double z) {
-    return 1 - z*z;
-}
-
-double initfunc_u2(double x, double y, double z) {
-    return 0;
-}
-
-double initfunc_u3(double x, double y, double z) {
-    return 0;
-}
-
-double initfunc_p(double x, double y, double z) {
-    return 4*PI/Re - 2/Re*x;
 }

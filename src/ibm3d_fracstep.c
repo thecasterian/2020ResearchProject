@@ -1231,7 +1231,7 @@ static void update_outer(IBMSolver *solver) {
             break;
         case BC_ALL_PERIODIC:
         case BC_VELOCITY_PERIODIC:
-            if (solver->num_process == 1) {
+            if (solver->Py == 1) {
                 for (int i = -2; i < Nx+2; i++) {
                     for (int j = Ny; j <= Ny+1; j++) {
                         for (int k = -2; k < Nz+2; k++) {
@@ -1243,7 +1243,7 @@ static void update_outer(IBMSolver *solver) {
                 }
             }
             else {
-                MPI_Recv(solver->x_exchg, 6*(Nx+4)*(Nz+4), MPI_DOUBLE, solver->rank - (solver->Py-1)*solver->Pz, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+                MPI_Recv(solver->y_exchg, 6*(Nx+4)*(Nz+4), MPI_DOUBLE, solver->rank - (solver->Py-1)*solver->Pz, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
                 cnt = 0;
                 for (int i = -2; i < Nx+2; i++) {
                     for (int j = Ny; j <= Ny+1; j++) {
@@ -1264,7 +1264,7 @@ static void update_outer(IBMSolver *solver) {
                         }
                     }
                 }
-                MPI_Send(solver->x_exchg, 6*(Nx+4)*(Nz+4), MPI_DOUBLE, solver->rank - (solver->Py-1)*solver->Pz, 0, MPI_COMM_WORLD);
+                MPI_Send(solver->y_exchg, 6*(Nx+4)*(Nz+4), MPI_DOUBLE, solver->rank - (solver->Py-1)*solver->Pz, 0, MPI_COMM_WORLD);
             }
             break;
         default:;
@@ -1441,7 +1441,7 @@ static void update_outer(IBMSolver *solver) {
             break;
         case BC_ALL_PERIODIC:
         case BC_VELOCITY_PERIODIC:
-            if (solver->num_process == 1) {
+            if (solver->Pz == 1) {
                 for (int i = -2; i < Nx+2; i++) {
                     for (int j = -2; j < Ny+2; j++) {
                         for (int k = Nz; k <= Nz+1; k++) {
@@ -1474,7 +1474,7 @@ static void update_outer(IBMSolver *solver) {
                         }
                     }
                 }
-                MPI_Send(solver->x_exchg, 6*(Nx+4)*(Ny+4), MPI_DOUBLE, solver->rank - (solver->Pz-1), 0, MPI_COMM_WORLD);
+                MPI_Send(solver->z_exchg, 6*(Nx+4)*(Ny+4), MPI_DOUBLE, solver->rank - (solver->Pz-1), 0, MPI_COMM_WORLD);
             }
             break;
         default:;
@@ -1645,7 +1645,7 @@ static void update_outer(IBMSolver *solver) {
             break;
         case BC_ALL_PERIODIC:
             if (solver->Py == 1) {
-                for (int i = -2; i < Ny+2; i++) {
+                for (int i = -2; i < Nx+2; i++) {
                     for (int j = -2; j <= -1; j++) {
                         for (int k = -2; k < Nz+2; k++) {
                             c3e(p, i, j, k) = c3e(p, i, j+Ny, k);
@@ -1658,7 +1658,7 @@ static void update_outer(IBMSolver *solver) {
                 for (int i = 0; i <= 1; i++) {
                     for (int j = -2; j < Ny+2; j++) {
                         for (int k = -2; k < Nz+2; k++) {
-                            solver->x_exchg[cnt++] = c3e(p, i, j, k);
+                            solver->y_exchg[cnt++] = c3e(p, i, j, k);
                         }
                     }
                 }
@@ -1866,7 +1866,7 @@ static void update_outer(IBMSolver *solver) {
                         }
                     }
                 }
-                MPI_Send(solver->x_exchg, 2*(Nx+4)*(Ny+4), MPI_DOUBLE, solver->rank - (solver->Pz-1), 0, MPI_COMM_WORLD);
+                MPI_Send(solver->z_exchg, 2*(Nx+4)*(Ny+4), MPI_DOUBLE, solver->rank - (solver->Pz-1), 0, MPI_COMM_WORLD);
             }
             break;
         default:;

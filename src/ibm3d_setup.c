@@ -135,7 +135,7 @@ void IBMSolver_destroy(IBMSolver *solver) {
     free(solver->vector_res);
 
     HYPRE_ParCSRBiCGSTABDestroy(solver->linear_solver);
-    // HYPRE_BoomerAMGDestroy(solver->precond);
+    HYPRE_BoomerAMGDestroy(solver->precond);
 
     switch (solver->linear_solver_type) {
     case SOLVER_AMG:
@@ -1324,13 +1324,13 @@ static void build_hypre(IBMSolver *solver) {
     HYPRE_BiCGSTABSetLogging(solver->linear_solver, 1);
     // HYPRE_BiCGSTABSetPrintLevel(solver->linear_solver, 2);
 
-    // HYPRE_BoomerAMGCreate(&solver->precond);
-    // HYPRE_BoomerAMGSetCoarsenType(solver->precond, 6);
-    // HYPRE_BoomerAMGSetOldDefault(solver->precond);
-    // HYPRE_BoomerAMGSetRelaxType(solver->precond, 6);
-    // HYPRE_BoomerAMGSetNumSweeps(solver->precond, 2);
-    // HYPRE_BoomerAMGSetTol(solver->precond, 0);
-    // HYPRE_BoomerAMGSetMaxIter(solver->precond, 1);
+    HYPRE_BoomerAMGCreate(&solver->precond);
+    HYPRE_BoomerAMGSetCoarsenType(solver->precond, 6);
+    HYPRE_BoomerAMGSetOldDefault(solver->precond);
+    HYPRE_BoomerAMGSetRelaxType(solver->precond, 6);
+    HYPRE_BoomerAMGSetNumSweeps(solver->precond, 2);
+    HYPRE_BoomerAMGSetTol(solver->precond, 0);
+    HYPRE_BoomerAMGSetMaxIter(solver->precond, 1);
     // HYPRE_BoomerAMGSetPrintLevel(solver->precond, 1);
 
     // HYPRE_BiCGSTABSetPrecond(
@@ -1383,7 +1383,7 @@ static void build_hypre(IBMSolver *solver) {
         HYPRE_ParCSRGMRESSetKDim(solver->linear_solver_p, 10);
         HYPRE_ParCSRGMRESSetTol(solver->linear_solver_p, solver->tol);
         HYPRE_ParCSRGMRESSetLogging(solver->linear_solver_p, 1);
-        // HYPRE_ParCSRGMRESSetPrintLevel(solver->hypre_solver_p, 2);
+        // HYPRE_ParCSRGMRESSetPrintLevel(solver->linear_solver_p, 2);
         break;
     default:
         if (solver->rank == 0) {
@@ -1409,7 +1409,7 @@ static void build_hypre(IBMSolver *solver) {
         HYPRE_BoomerAMGSetAggNumLevels(solver->precond_p, 1);
         HYPRE_BoomerAMGSetNumSweeps(solver->precond_p, 1);
         HYPRE_BoomerAMGSetRelaxType(solver->precond_p, 6);
-        HYPRE_BoomerAMGSetPrintLevel(solver->precond_p, 1);
+        // HYPRE_BoomerAMGSetPrintLevel(solver->precond_p, 1);
 
         switch (solver->linear_solver_type) {
         case SOLVER_PCG:
@@ -2613,8 +2613,8 @@ static HYPRE_IJMatrix create_matrix(IBMSolver *solver, int type) {
                     /* k = Nz */
                     cols[0] = c3e(solver->cell_idx, i, j, Nz);
                     cols[1] = c3e(solver->cell_idx, i, j, Nz-1);
-                    a = c1e(solver->dy, Ny-1) / 2;
-                    b = c1e(solver->dy, Ny) / 2;
+                    a = c1e(solver->dz, Nz-1) / 2;
+                    b = c1e(solver->dz, Nz) / 2;
                     if (type != 4) {
                         values[0] = a / (a+b);
                         values[1] = b / (a+b);
