@@ -21,6 +21,7 @@ static void update_outer(IBMSolver *);
 static void adj_exchange(IBMSolver *);
 static void update_ghost(IBMSolver *);
 
+static double ext_force(IBMSolver *, int, double, double, double, double);
 static double bc_val_u(IBMSolver *, int, IBMSolverDirection, double, double, double, double);
 static double bc_val_p(IBMSolver *, IBMSolverDirection, double, double, double, double);
 
@@ -78,7 +79,7 @@ void IBMSolver_iterate(IBMSolver *solver, int num_time_steps, bool verbose) {
             elapsed_time = (t_end.tv_sec*1000+t_end.tv_nsec/1000000)
                 - (t_start.tv_sec*1000+t_start.tv_nsec/1000000);
 
-            if (solver->iter % 10 == 1) {
+            if (solver->iter % 10 == 1 || i == 1) {
                 printf("\n  iter       u1 res       u2 res       u3 res        p res       time\n");
                 printf("---------------------------------------------------------------------\n");
             }
@@ -251,7 +252,8 @@ static inline void calc_u_star(
                     + (1-c1e(kx_W, i)-c1e(kx_E, i)-c1e(ky_S, j)-c1e(ky_N, j)-c1e(kz_D, k)-c1e(kz_U, k))*c3e(u[l], i, j, k)
                     + c1e(kx_W, i)*c3e(u[l], i-1, j, k) + c1e(kx_E, i)*c3e(u[l], i+1, j, k)
                     + c1e(ky_S, j)*c3e(u[l], i, j-1, k) + c1e(ky_N, j)*c3e(u[l], i, j+1, k)
-                    + c1e(kz_D, k)*c3e(u[l], i, j, k-1) + c1e(kz_U, k)*c3e(u[l], i, j, k+1);
+                    + c1e(kz_D, k)*c3e(u[l], i, j, k-1) + c1e(kz_U, k)*c3e(u[l], i, j, k+1)
+                    + ext_force(solver, l, solver->time, c1e(xc, i), c1e(yc, j), c1e(zc, k));
             }
         }
 
@@ -503,6 +505,8 @@ static inline void calc_p_prime(IBMSolver *solver, double *final_norm_p) {
     int ifirst, ilast, jfirst, jlast, kfirst, klast;
     int idx;
 
+    bool is_p_singular;
+
     int hypre_ierr = 0;
 
     ifirst = solver->ri == 0 ? -2 : 0;
@@ -512,11 +516,21 @@ static inline void calc_p_prime(IBMSolver *solver, double *final_norm_p) {
     kfirst = solver->rk == 0 ? -2 : 0;
     klast = solver->rk != solver->Pz-1 ? Nz : Nz+2;
 
+    is_p_singular = true;
+    for (int i = 0; i < 6; i++) {
+        if (solver->bc[i].type == BC_PRESSURE || solver->bc[i].type == BC_VELOCITY_PERIODIC) {
+            is_p_singular = false;
+        }
+    }
+
     memcpy(solver->vector_values, solver->vector_zeros, sizeof(double)*(solver->idx_last-solver->idx_first));
 
     FOR_INNER_CELL (i, j, k) {
         idx = c3e(solver->cell_idx, i, j, k) - solver->idx_first;
-        if (c3e(flag, i, j, k) == FLAG_FLUID) {
+        if (solver->rank == 0 && is_p_singular && i == 0 && j == 0 && k == 0) {
+            solver->vector_values[idx] = 0;
+        }
+        else if (c3e(flag, i, j, k) == FLAG_FLUID) {
             solver->vector_values[idx] = -1/(2*Re) * (
                     (xse(U1_star, i+1, j, k) - xse(U1_star, i, j, k)) / c1e(dx, i)
                     + (yse(U2_star, i, j+1, k) - yse(U2_star, i, j, k)) / c1e(dy, j)
@@ -1974,6 +1988,29 @@ static void update_ghost(IBMSolver *solver) {
     }
 }
 
+static double ext_force(
+    IBMSolver *solver,
+    int type,
+    double t, double x, double y, double z
+) {
+    switch (type) {
+    case 1:
+        return solver->ext_force.val_type == VAL_CONST
+            ? solver->ext_force.const_f1
+            : solver->ext_force.func_f1(t, x, y, z);
+    case 2:
+        return solver->ext_force.val_type == VAL_CONST
+            ? solver->ext_force.const_f2
+            : solver->ext_force.func_f2(t, x, y, z);
+    case 3:
+        return solver->ext_force.val_type == VAL_CONST
+            ? solver->ext_force.const_f3
+            : solver->ext_force.func_f3(t, x, y, z);
+    default:;
+    }
+    return NAN;
+}
+
 static double bc_val_u(
     IBMSolver *solver,
     int type,
@@ -1983,15 +2020,15 @@ static double bc_val_u(
     int idx = dir_to_idx(dir);
     switch (type) {
     case 1:
-        return solver->bc[idx].val_type == BC_CONST
+        return solver->bc[idx].val_type == VAL_CONST
             ? solver->bc[idx].const_u1
             : solver->bc[idx].func_u1(t, x, y, z);
     case 2:
-        return solver->bc[idx].val_type == BC_CONST
+        return solver->bc[idx].val_type == VAL_CONST
             ? solver->bc[idx].const_u2
             : solver->bc[idx].func_u2(t, x, y, z);
     case 3:
-        return solver->bc[idx].val_type == BC_CONST
+        return solver->bc[idx].val_type == VAL_CONST
             ? solver->bc[idx].const_u3
             : solver->bc[idx].func_u3(t, x, y, z);
     default:;
@@ -2005,7 +2042,7 @@ static double bc_val_p(
     double t, double x, double y, double z
 ) {
     int idx = dir_to_idx(dir);
-    return solver->bc[idx].val_type == BC_CONST
+    return solver->bc[idx].val_type == VAL_CONST
         ? solver->bc[idx].const_p
         : solver->bc[idx].func_p(t, x, y, z);
 }

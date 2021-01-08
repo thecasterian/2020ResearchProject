@@ -44,17 +44,17 @@ typedef enum _bc_type {
     BC_VELOCITY_PERIODIC,       /* Velocity periodic, pressure specified. */
 } IBMSolverBCType;
 
-typedef enum _bc_val_type {
-    BC_CONST,                   /* Set boundary value by a constant. */
-    BC_FUNC,                    /* Set boundary value by a function. */
-} IBMSolverBCValType;
+typedef enum _val_type {
+    VAL_CONST,                   /* Set boundary value by a constant. */
+    VAL_FUNC,                    /* Set boundary value by a function. */
+} IBMSolverValType;
 
 /* (t, x, y, z) => boundary value */
 typedef double (*IBMSolverBCValFunc)(double, double, double, double);
 
 typedef struct _bc {
     IBMSolverBCType type;
-    IBMSolverBCValType val_type;
+    IBMSolverValType val_type;
     union {
         struct {
             double const_u1, const_u2, const_u3, const_p;
@@ -64,6 +64,21 @@ typedef struct _bc {
         };
     };
 } IBMSolverBC;
+
+/* (t, x, y, z) => force value */
+typedef double (*IBMSolverForceFunc)(double, double, double, double);
+
+typedef struct _force {
+    IBMSolverValType val_type;
+    union {
+        struct {
+            double const_f1, const_f2, const_f3;
+        };
+        struct {
+            IBMSolverForceFunc func_f1, func_f2, func_f3;
+        };
+    };
+} IBMSolverForce;
 
 enum {
     FLAG_FLUID = 1,
@@ -152,6 +167,9 @@ typedef struct _ibm_solver {
 
     /* Fluxes. */
     double *N1, *N1_prev, *N2, *N2_prev, *N3, *N3_prev;
+
+    /* External force. */
+    IBMSolverForce ext_force;
 
     /* HYPRE matrices, vectors, solvers, and arrays. */
     HYPRE_IJMatrix     A_u1, A_u2, A_u3, A_p;

@@ -89,6 +89,11 @@ IBMSolver *IBMSolver_new(
     solver->ky_S = solver->ky_N = NULL;
     solver->kz_D = solver->kz_U = NULL;
 
+    solver->ext_force.val_type = VAL_CONST;
+    solver->ext_force.const_f1 = 0;
+    solver->ext_force.const_f2 = 0;
+    solver->ext_force.const_f3 = 0;
+
     return solver;
 }
 
@@ -279,6 +284,36 @@ void IBMSolver_set_params(IBMSolver *solver, const double Re, const double dt) {
 }
 
 /**
+ * @brief Sets external force term.
+ *
+ * @param solver IBMSolver.
+ * @param val_type Value type: VAL_CONST or VAL_FUNC.
+ * @param ... constant value or a function.
+ */
+void IBMSolver_set_ext_force(
+    IBMSolver *solver,
+    IBMSolverValType val_type,
+    ...
+) {
+    va_list ap;
+
+    solver->ext_force.val_type = val_type;
+
+    va_start(ap, val_type);
+    if (val_type == VAL_CONST) {
+        solver->ext_force.const_f1 = va_arg(ap, double);
+        solver->ext_force.const_f2 = va_arg(ap, double);
+        solver->ext_force.const_f3 = va_arg(ap, double);
+    }
+    else {
+        solver->ext_force.func_f1 = va_arg(ap, IBMSolverForceFunc);
+        solver->ext_force.func_f2 = va_arg(ap, IBMSolverForceFunc);
+        solver->ext_force.func_f3 = va_arg(ap, IBMSolverForceFunc);
+    }
+    va_end(ap);
+}
+
+/**
  * @brief Sets boundary condition of 6 cell boundaries in IBMSolver. Multiple
  *        boundary directions can be provided at once using bitwise-or operator
  *        (|), e.g., DIR_WEST | DIR_EAST.
@@ -293,7 +328,7 @@ void IBMSolver_set_bc(
     IBMSolverBCType type,
     ...
 ) {
-    IBMSolverBCValType val_type = BC_CONST;
+    IBMSolverValType val_type = VAL_CONST;
     double const_u1 = NAN, const_u2 = NAN, const_u3 = NAN, const_p = NAN;
     IBMSolverBCValFunc func_u1 = NULL, func_u2 = NULL, func_u3 = NULL, func_p = NULL;
     va_list ap;
@@ -301,8 +336,8 @@ void IBMSolver_set_bc(
     va_start(ap, type);
     switch (type) {
     case BC_VELOCITY_COMPONENT:
-        val_type = va_arg(ap, IBMSolverBCValType);
-        if (val_type == BC_CONST) {
+        val_type = va_arg(ap, IBMSolverValType);
+        if (val_type == VAL_CONST) {
             const_u1 = va_arg(ap, double);
             const_u2 = va_arg(ap, double);
             const_u3 = va_arg(ap, double);
@@ -315,8 +350,8 @@ void IBMSolver_set_bc(
         break;
     case BC_PRESSURE:
     case BC_VELOCITY_PERIODIC:
-        val_type = va_arg(ap, IBMSolverBCValType);
-        if (val_type == BC_CONST) {
+        val_type = va_arg(ap, IBMSolverValType);
+        if (val_type == VAL_CONST) {
             const_p = va_arg(ap, double);
         }
         else {
@@ -325,7 +360,7 @@ void IBMSolver_set_bc(
         break;
     case BC_STATIONARY_WALL:
         type = BC_VELOCITY_COMPONENT;
-        val_type = BC_CONST;
+        val_type = VAL_CONST;
         const_u1 = 0;
         const_u2 = 0;
         const_u3 = 0;
@@ -337,7 +372,7 @@ void IBMSolver_set_bc(
     }
     va_end(ap);
 
-    if (solver->rank == 0 && val_type != BC_CONST && val_type != BC_FUNC) {
+    if (solver->rank == 0 && val_type != VAL_CONST && val_type != VAL_FUNC) {
         fprintf(stderr, "error: invalid boundary condition value type\n");
     }
 
@@ -345,7 +380,7 @@ void IBMSolver_set_bc(
         if (direction & (1 << i)) {
             solver->bc[i].type = type;
             solver->bc[i].val_type = val_type;
-            if (val_type == BC_CONST) {
+            if (val_type == VAL_CONST) {
                 solver->bc[i].const_u1 = const_u1;
                 solver->bc[i].const_u2 = const_u2;
                 solver->bc[i].const_u3 = const_u3;
@@ -1497,10 +1532,19 @@ static HYPRE_IJMatrix create_matrix(IBMSolver *solver, int type) {
     double interp_coeff[8];
     double coeffsum;
 
+    bool is_p_singular;
+
     ifirst = solver->ri == 0 ? -2 : 0;
     ilast = solver->ri == solver->Px-1 ? solver->Nx+2 : solver->Nx;
     jfirst = solver->rj == 0 ? -2 : 0;
     jlast = solver->rj == solver->Py-1 ? solver->Ny+2 : solver->Ny;
+
+    is_p_singular = true;
+    for (int i = 0; i < 6; i++) {
+        if (solver->bc[i].type == BC_PRESSURE || solver->bc[i].type == BC_VELOCITY_PERIODIC) {
+            is_p_singular = false;
+        }
+    }
 
     HYPRE_IJMatrixCreate(
         MPI_COMM_WORLD,
@@ -1519,8 +1563,12 @@ static HYPRE_IJMatrix create_matrix(IBMSolver *solver, int type) {
         }
         cols[0] = c3e(solver->cell_idx, i, j, k);
 
+        if (solver->rank == 0 && type == 4 && is_p_singular && i == 0 && j == 0 && k == 0) {
+            values[0] = 1;
+        }
+
         /* Fluid cell. */
-        if (c3e(solver->flag, i, j, k) == FLAG_FLUID) {
+        else if (c3e(solver->flag, i, j, k) == FLAG_FLUID) {
             for (int l = 0; l < 6; l++) {
                 cols[l+1] = c3e(solver->cell_idx, i+adj[l][0], j+adj[l][1], k+adj[l][2]);
             }
