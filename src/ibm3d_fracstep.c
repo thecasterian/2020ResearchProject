@@ -253,7 +253,7 @@ static inline void calc_u_star(
                     + c1e(kx_W, i)*c3e(u[l], i-1, j, k) + c1e(kx_E, i)*c3e(u[l], i+1, j, k)
                     + c1e(ky_S, j)*c3e(u[l], i, j-1, k) + c1e(ky_N, j)*c3e(u[l], i, j+1, k)
                     + c1e(kz_D, k)*c3e(u[l], i, j, k-1) + c1e(kz_U, k)*c3e(u[l], i, j, k+1)
-                    + ext_force(solver, l, solver->time, c1e(xc, i), c1e(yc, j), c1e(zc, k));
+                    + dt * ext_force(solver, l, solver->time, c1e(xc, i), c1e(yc, j), c1e(zc, k));
             }
         }
 
@@ -860,8 +860,15 @@ static void update_outer(IBMSolver *solver) {
     const double ymin = solver->ymin, ymax = solver->ymax;
     const double zmin = solver->zmin, zmax = solver->zmax;
 
+    int ifirst, ilast, jfirst, jlast;
+
     double a, b;
     int cnt;
+
+    ifirst = solver->ri == 0 ? -2 : 0;
+    ilast = solver->ri == solver->Px-1 ? solver->Nx+2 : solver->Nx;
+    jfirst = solver->rj == 0 ? -2 : 0;
+    jlast = solver->rj == solver->Py-1 ? solver->Ny+2 : solver->Ny;
 
     /* Set velocity boundary conditions. */
 
@@ -871,8 +878,8 @@ static void update_outer(IBMSolver *solver) {
         case BC_VELOCITY_COMPONENT:
             a = c1e(solver->dx, -1) / 2;
             b = c1e(solver->dx, 0) / 2;
-            for (int j = -2; j < Ny+2; j++) {
-                for (int k = -2; k < Nz+2; k++) {
+            for (int j = 0; j < Ny; j++) {
+                for (int k = 0; k < Nz; k++) {
                     c3e(u1, -1, j, k) = (a+b)/b*bc_val_u(solver, 1, DIR_WEST, solver->time, xmin, c1e(yc, j), c1e(zc, k)) - a/b*c3e(u1, 0, j, k);
                     c3e(u2, -1, j, k) = (a+b)/b*bc_val_u(solver, 2, DIR_WEST, solver->time, xmin, c1e(yc, j), c1e(zc, k)) - a/b*c3e(u2, 0, j, k);
                     c3e(u3, -1, j, k) = (a+b)/b*bc_val_u(solver, 3, DIR_WEST, solver->time, xmin, c1e(yc, j), c1e(zc, k)) - a/b*c3e(u3, 0, j, k);
@@ -880,8 +887,8 @@ static void update_outer(IBMSolver *solver) {
             }
             a = c1e(solver->dx, -2) / 2 + c1e(solver->dx, -1);
             b = c1e(solver->dx, 0) + c1e(solver->dx, 1) / 2;
-            for (int j = -2; j < Ny+2; j++) {
-                for (int k = -2; k < Nz+2; k++) {
+            for (int j = 0; j < Ny; j++) {
+                for (int k = 0; k < Nz; k++) {
                     c3e(u1, -2, j, k) = (a+b)/b*bc_val_u(solver, 1, DIR_WEST, solver->time, xmin, c1e(yc, j), c1e(zc, k)) - a/b*c3e(u1, 1, j, k);
                     c3e(u2, -2, j, k) = (a+b)/b*bc_val_u(solver, 2, DIR_WEST, solver->time, xmin, c1e(yc, j), c1e(zc, k)) - a/b*c3e(u2, 1, j, k);
                     c3e(u3, -2, j, k) = (a+b)/b*bc_val_u(solver, 3, DIR_WEST, solver->time, xmin, c1e(yc, j), c1e(zc, k)) - a/b*c3e(u3, 1, j, k);
@@ -891,8 +898,8 @@ static void update_outer(IBMSolver *solver) {
         case BC_PRESSURE:
             a = c1e(solver->xc, 0) - c1e(solver->xc, -1);
             b = c1e(solver->xc, 1) - c1e(solver->xc, 0);
-            for (int j = -2; j < Ny+2; j++) {
-                for (int k = -2; k < Nz+2; k++) {
+            for (int j = 0; j < Ny; j++) {
+                for (int k = 0; k < Nz; k++) {
                     c3e(u1, -1, j, k) = (a+b)/b*c3e(u1, 0, j, k) - a/b*c3e(u1, 1, j, k);
                     c3e(u2, -1, j, k) = (a+b)/b*c3e(u2, 0, j, k) - a/b*c3e(u2, 1, j, k);
                     c3e(u3, -1, j, k) = (a+b)/b*c3e(u3, 0, j, k) - a/b*c3e(u3, 1, j, k);
@@ -900,8 +907,8 @@ static void update_outer(IBMSolver *solver) {
             }
             a = c1e(solver->xc, -1) - c1e(solver->xc, -2);
             b = c1e(solver->xc, 0) - c1e(solver->xc, -1);
-            for (int j = -2; j < Ny+2; j++) {
-                for (int k = -2; k < Nz+2; k++) {
+            for (int j = 0; j < Ny; j++) {
+                for (int k = 0; k < Nz; k++) {
                     c3e(u1, -2, j, k) = (a+b)/b*c3e(u1, -1, j, k) - a/b*c3e(u1, 0, j, k);
                     c3e(u2, -2, j, k) = (a+b)/b*c3e(u2, -1, j, k) - a/b*c3e(u2, 0, j, k);
                     c3e(u3, -2, j, k) = (a+b)/b*c3e(u3, -1, j, k) - a/b*c3e(u3, 0, j, k);
@@ -911,8 +918,8 @@ static void update_outer(IBMSolver *solver) {
         case BC_FREE_SLIP_WALL:
             a = c1e(solver->dx, -1) / 2;
             b = c1e(solver->dx, 0) / 2;
-            for (int j = -2; j < Ny+2; j++) {
-                for (int k = -2; k < Nz+2; k++) {
+            for (int j = 0; j < Ny; j++) {
+                for (int k = 0; k < Nz; k++) {
                     c3e(u1, -1, j, k) = -a/b*c3e(u1, 0, j, k);
                     c3e(u2, -1, j, k) = c3e(u2, 0, j, k);
                     c3e(u3, -1, j, k) = c3e(u3, 0, j, k);
@@ -920,8 +927,8 @@ static void update_outer(IBMSolver *solver) {
             }
             a = c1e(solver->dx, -2) / 2 + c1e(solver->dx, -1);
             b = c1e(solver->dx, 0) + c1e(solver->dx, 1) / 2;
-            for (int j = -2; j < Ny+2; j++) {
-                for (int k = -2; k < Nz+2; k++) {
+            for (int j = 0; j < Ny; j++) {
+                for (int k = 0; k < Nz; k++) {
                     c3e(u1, -2, j, k) = -a/b*c3e(u1, 1, j, k);
                     c3e(u2, -2, j, k) = c3e(u2, 1, j, k);
                     c3e(u3, -2, j, k) = c3e(u3, 1, j, k);
@@ -932,8 +939,8 @@ static void update_outer(IBMSolver *solver) {
         case BC_VELOCITY_PERIODIC:
             if (solver->Px == 1) {
                 for (int i = -2; i <= -1; i++) {
-                    for (int j = -2; j < Ny+2; j++) {
-                        for (int k = -2; k < Nz+2; k++) {
+                    for (int j = 0; j < Ny; j++) {
+                        for (int k = 0; k < Nz; k++) {
                             c3e(u1, i, j, k) = c3e(u1, i+Nx, j, k);
                             c3e(u2, i, j, k) = c3e(u2, i+Nx, j, k);
                             c3e(u3, i, j, k) = c3e(u3, i+Nx, j, k);
@@ -944,20 +951,20 @@ static void update_outer(IBMSolver *solver) {
             else {
                 cnt = 0;
                 for (int i = 0; i <= 1; i++) {
-                    for (int j = -2; j < Ny+2; j++) {
-                        for (int k = -2; k < Nz+2; k++) {
+                    for (int j = 0; j < Ny; j++) {
+                        for (int k = 0; k < Nz; k++) {
                             solver->x_exchg[cnt++] = c3e(u1, i, j, k);
                             solver->x_exchg[cnt++] = c3e(u2, i, j, k);
                             solver->x_exchg[cnt++] = c3e(u3, i, j, k);
                         }
                     }
                 }
-                MPI_Send(solver->x_exchg, 6*(Ny+4)*(Nz+4), MPI_DOUBLE, solver->rank + (solver->Px-1)*solver->Py*solver->Pz, 0, MPI_COMM_WORLD);
-                MPI_Recv(solver->x_exchg, 6*(Ny+4)*(Nz+4), MPI_DOUBLE, solver->rank + (solver->Px-1)*solver->Py*solver->Pz, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+                MPI_Send(solver->x_exchg, 6*Ny*Nz, MPI_DOUBLE, solver->rank + (solver->Px-1)*solver->Py*solver->Pz, 0, MPI_COMM_WORLD);
+                MPI_Recv(solver->x_exchg, 6*Ny*Nz, MPI_DOUBLE, solver->rank + (solver->Px-1)*solver->Py*solver->Pz, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
                 cnt = 0;
                 for (int i = -2; i <= -1; i++) {
-                    for (int j = -2; j < Ny+2; j++) {
-                        for (int k = -2; k < Nz+2; k++) {
+                    for (int j = 0; j < Ny; j++) {
+                        for (int k = 0; k < Nz; k++) {
                             c3e(u1, i, j, k) = solver->x_exchg[cnt++];
                             c3e(u2, i, j, k) = solver->x_exchg[cnt++];
                             c3e(u3, i, j, k) = solver->x_exchg[cnt++];
@@ -976,8 +983,8 @@ static void update_outer(IBMSolver *solver) {
         case BC_VELOCITY_COMPONENT:
             a = c1e(solver->dx, Nx-1) / 2;
             b = c1e(solver->dx, Nx) / 2;
-            for (int j = -2; j < Ny+2; j++) {
-                for (int k = -2; k < Nz+2; k++) {
+            for (int j = 0; j < Ny; j++) {
+                for (int k = 0; k < Nz; k++) {
                     c3e(u1, Nx, j, k) = (a+b)/a*bc_val_u(solver, 1, DIR_EAST, solver->time, xmax, c1e(yc, j), c1e(zc, k)) - b/a*c3e(u1, Nx-1, j, k);
                     c3e(u2, Nx, j, k) = (a+b)/a*bc_val_u(solver, 2, DIR_EAST, solver->time, xmax, c1e(yc, j), c1e(zc, k)) - b/a*c3e(u2, Nx-1, j, k);
                     c3e(u3, Nx, j, k) = (a+b)/a*bc_val_u(solver, 3, DIR_EAST, solver->time, xmax, c1e(yc, j), c1e(zc, k)) - b/a*c3e(u3, Nx-1, j, k);
@@ -985,8 +992,8 @@ static void update_outer(IBMSolver *solver) {
             }
             a = c1e(solver->dx, Nx-2) / 2 + c1e(solver->dx, Nx-1);
             b = c1e(solver->dx, Nx) + c1e(solver->dx, Nx+1) / 2;
-            for (int j = -2; j < Ny+2; j++) {
-                for (int k = -2; k < Nz+2; k++) {
+            for (int j = 0; j < Ny; j++) {
+                for (int k = 0; k < Nz; k++) {
                     c3e(u1, Nx+1, j, k) = (a+b)/a*bc_val_u(solver, 1, DIR_EAST, solver->time, xmax, c1e(yc, j), c1e(zc, k)) - b/a*c3e(u1, Nx-2, j, k);
                     c3e(u2, Nx+1, j, k) = (a+b)/a*bc_val_u(solver, 2, DIR_EAST, solver->time, xmax, c1e(yc, j), c1e(zc, k)) - b/a*c3e(u2, Nx-2, j, k);
                     c3e(u3, Nx+1, j, k) = (a+b)/a*bc_val_u(solver, 3, DIR_EAST, solver->time, xmax, c1e(yc, j), c1e(zc, k)) - b/a*c3e(u3, Nx-2, j, k);
@@ -996,8 +1003,8 @@ static void update_outer(IBMSolver *solver) {
         case BC_PRESSURE:
             a = c1e(solver->xc, Nx-1) - c1e(solver->xc, Nx-2);
             b = c1e(solver->xc, Nx) - c1e(solver->xc, Nx-1);
-            for (int j = -2; j < Ny+2; j++) {
-                for (int k = -2; k < Nz+2; k++) {
+            for (int j = 0; j < Ny; j++) {
+                for (int k = 0; k < Nz; k++) {
                     c3e(u1, Nx, j, k) = (a+b)/a*c3e(u1, Nx-1, j, k) - b/a*c3e(u1, Nx-2, j, k);
                     c3e(u2, Nx, j, k) = (a+b)/a*c3e(u2, Nx-1, j, k) - b/a*c3e(u2, Nx-2, j, k);
                     c3e(u3, Nx, j, k) = (a+b)/a*c3e(u3, Nx-1, j, k) - b/a*c3e(u3, Nx-2, j, k);
@@ -1005,8 +1012,8 @@ static void update_outer(IBMSolver *solver) {
             }
             a = c1e(solver->xc, Nx) - c1e(solver->xc, Nx-1);
             b = c1e(solver->xc, Nx+1) - c1e(solver->xc, Nx);
-            for (int j = -2; j < Ny+2; j++) {
-                for (int k = -2; k < Nz+2; k++) {
+            for (int j = 0; j < Ny; j++) {
+                for (int k = 0; k < Nz; k++) {
                     c3e(u1, Nx+1, j, k) = (a+b)/a*c3e(u1, Nx, j, k) - b/a*c3e(u1, Nx-1, j, k);
                     c3e(u2, Nx+1, j, k) = (a+b)/a*c3e(u2, Nx, j, k) - b/a*c3e(u2, Nx-1, j, k);
                     c3e(u3, Nx+1, j, k) = (a+b)/a*c3e(u3, Nx, j, k) - b/a*c3e(u3, Nx-1, j, k);
@@ -1016,8 +1023,8 @@ static void update_outer(IBMSolver *solver) {
         case BC_FREE_SLIP_WALL:
             a = c1e(solver->dx, Nx-1) / 2;
             b = c1e(solver->dx, Nx) / 2;
-            for (int j = -2; j < Ny+2; j++) {
-                for (int k = -2; k < Nz+2; k++) {
+            for (int j = 0; j < Ny; j++) {
+                for (int k = 0; k < Nz; k++) {
                     c3e(u1, Nx, j, k) = -b/a*c3e(u1, Nx-1, j, k);
                     c3e(u2, Nx, j, k) = c3e(u2, Nx-1, j, k);
                     c3e(u3, Nx, j, k) = c3e(u3, Nx-1, j, k);
@@ -1037,8 +1044,8 @@ static void update_outer(IBMSolver *solver) {
         case BC_VELOCITY_PERIODIC:
             if (solver->Px == 1) {
                 for (int i = Nx; i <= Nx+1; i++) {
-                    for (int j = -2; j < Ny+2; j++) {
-                        for (int k = -2; k < Nz+2; k++) {
+                    for (int j = 0; j < Ny; j++) {
+                        for (int k = 0; k < Nz; k++) {
                             c3e(u1, i, j, k) = c3e(u1, i-Nx, j, k);
                             c3e(u2, i, j, k) = c3e(u2, i-Nx, j, k);
                             c3e(u3, i, j, k) = c3e(u3, i-Nx, j, k);
@@ -1047,11 +1054,11 @@ static void update_outer(IBMSolver *solver) {
                 }
             }
             else {
-                MPI_Recv(solver->x_exchg, 6*(Ny+4)*(Nz+4), MPI_DOUBLE, solver->rank - (solver->Px-1)*solver->Py*solver->Pz, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+                MPI_Recv(solver->x_exchg, 6*Ny*Nz, MPI_DOUBLE, solver->rank - (solver->Px-1)*solver->Py*solver->Pz, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
                 cnt = 0;
                 for (int i = Nx; i <= Nx+1; i++) {
-                    for (int j = -2; j < Ny+2; j++) {
-                        for (int k = -2; k < Nz+2; k++) {
+                    for (int j = 0; j < Ny; j++) {
+                        for (int k = 0; k < Nz; k++) {
                             c3e(u1, i, j, k) = solver->x_exchg[cnt++];
                             c3e(u2, i, j, k) = solver->x_exchg[cnt++];
                             c3e(u3, i, j, k) = solver->x_exchg[cnt++];
@@ -1060,15 +1067,15 @@ static void update_outer(IBMSolver *solver) {
                 }
                 cnt = 0;
                 for (int i = Nx-2; i <= Nx-1; i++) {
-                    for (int j = -2; j < Ny+2; j++) {
-                        for (int k = -2; k < Nz+2; k++) {
+                    for (int j = 0; j < Ny; j++) {
+                        for (int k = 0; k < Nz; k++) {
                             solver->x_exchg[cnt++] = c3e(u1, i, j, k);
                             solver->x_exchg[cnt++] = c3e(u2, i, j, k);
                             solver->x_exchg[cnt++] = c3e(u3, i, j, k);
                         }
                     }
                 }
-                MPI_Send(solver->x_exchg, 6*(Ny+4)*(Nz+4), MPI_DOUBLE, solver->rank - (solver->Px-1)*solver->Py*solver->Pz, 0, MPI_COMM_WORLD);
+                MPI_Send(solver->x_exchg, 6*Ny*Nz, MPI_DOUBLE, solver->rank - (solver->Px-1)*solver->Py*solver->Pz, 0, MPI_COMM_WORLD);
             }
             break;
         default:;
@@ -1081,8 +1088,8 @@ static void update_outer(IBMSolver *solver) {
         case BC_VELOCITY_COMPONENT:
             a = c1e(solver->dy, -1) / 2;
             b = c1e(solver->dy, 0) / 2;
-            for (int i = -2; i < Nx+2; i++) {
-                for (int k = -2; k < Nz+2; k++) {
+            for (int i = ifirst; i < ilast; i++) {
+                for (int k = 0; k < Nz; k++) {
                     c3e(u1, i, -1, k) = (a+b)/b*bc_val_u(solver, 1, DIR_SOUTH, solver->time, c1e(xc, i), ymin, c1e(zc, k)) - a/b*c3e(u1, i, 0, k);
                     c3e(u2, i, -1, k) = (a+b)/b*bc_val_u(solver, 2, DIR_SOUTH, solver->time, c1e(xc, i), ymin, c1e(zc, k)) - a/b*c3e(u2, i, 0, k);
                     c3e(u3, i, -1, k) = (a+b)/b*bc_val_u(solver, 3, DIR_SOUTH, solver->time, c1e(xc, i), ymin, c1e(zc, k)) - a/b*c3e(u3, i, 0, k);
@@ -1090,8 +1097,8 @@ static void update_outer(IBMSolver *solver) {
             }
             a = c1e(solver->dy, -2) / 2 + c1e(solver->dy, -1);
             b = c1e(solver->dy, 0) + c1e(solver->dy, 1) / 2;
-            for (int i = -2; i < Nx+2; i++) {
-                for (int k = -2; k < Nz+2; k++) {
+            for (int i = ifirst; i < ilast; i++) {
+                for (int k = 0; k < Nz; k++) {
                     c3e(u1, i, -2, k) = (a+b)/b*bc_val_u(solver, 1, DIR_SOUTH, solver->time, c1e(xc, i), ymin, c1e(zc, k)) - a/b*c3e(u1, i, 1, k);
                     c3e(u2, i, -2, k) = (a+b)/b*bc_val_u(solver, 2, DIR_SOUTH, solver->time, c1e(xc, i), ymin, c1e(zc, k)) - a/b*c3e(u2, i, 1, k);
                     c3e(u3, i, -2, k) = (a+b)/b*bc_val_u(solver, 3, DIR_SOUTH, solver->time, c1e(xc, i), ymin, c1e(zc, k)) - a/b*c3e(u3, i, 1, k);
@@ -1101,8 +1108,8 @@ static void update_outer(IBMSolver *solver) {
         case BC_PRESSURE:
             a = c1e(solver->yc, 0) - c1e(solver->yc, -1);
             b = c1e(solver->yc, 1) - c1e(solver->yc, 0);
-            for (int i = -2; i < Nx+2; i++) {
-                for (int k = -2; k < Nz+2; k++) {
+            for (int i = ifirst; i < ilast; i++) {
+                for (int k = 0; k < Nz; k++) {
                     c3e(u1, i, -1, k) = (a+b)/b*c3e(u1, i, 0, k) - a/b*c3e(u1, i, 1, k);
                     c3e(u2, i, -1, k) = (a+b)/b*c3e(u2, i, 0, k) - a/b*c3e(u2, i, 1, k);
                     c3e(u3, i, -1, k) = (a+b)/b*c3e(u3, i, 0, k) - a/b*c3e(u3, i, 1, k);
@@ -1110,8 +1117,8 @@ static void update_outer(IBMSolver *solver) {
             }
             a = c1e(solver->yc, -1) - c1e(solver->yc, -2);
             b = c1e(solver->yc, 0) - c1e(solver->yc, -1);
-            for (int i = -2; i < Nx+2; i++) {
-                for (int k = -2; k < Nz+2; k++) {
+            for (int i = ifirst; i < ilast; i++) {
+                for (int k = 0; k < Nz; k++) {
                     c3e(u1, i, -2, k) = (a+b)/b*c3e(u1, i, -1, k) - a/b*c3e(u1, i, 0, k);
                     c3e(u2, i, -2, k) = (a+b)/b*c3e(u2, i, -1, k) - a/b*c3e(u2, i, 0, k);
                     c3e(u3, i, -2, k) = (a+b)/b*c3e(u3, i, -1, k) - a/b*c3e(u3, i, 0, k);
@@ -1121,8 +1128,8 @@ static void update_outer(IBMSolver *solver) {
         case BC_FREE_SLIP_WALL:
             a = c1e(solver->dy, -1) / 2;
             b = c1e(solver->dy, 0) / 2;
-            for (int i = -2; i < Nx+2; i++) {
-                for (int k = -2; k < Nz+2; k++) {
+            for (int i = ifirst; i < ilast; i++) {
+                for (int k = 0; k < Nz; k++) {
                     c3e(u1, i, -1, k) = c3e(u1, i, 0, k);
                     c3e(u2, i, -1, k) = -a/b*c3e(u2, i, 0, k);
                     c3e(u3, i, -1, k) = c3e(u3, i, 0, k);
@@ -1130,8 +1137,8 @@ static void update_outer(IBMSolver *solver) {
             }
             a = c1e(solver->dy, -2) / 2 + c1e(solver->dy, -1);
             b = c1e(solver->dy, 0) + c1e(solver->dy, 1) / 2;
-            for (int i = -2; i < Nx+2; i++) {
-                for (int k = -2; k < Nz+2; k++) {
+            for (int i = ifirst; i < ilast; i++) {
+                for (int k = 0; k < Nz; k++) {
                     c3e(u1, i, -2, k) = c3e(u1, i, 1, k);
                     c3e(u2, i, -2, k) = -a/b*c3e(u2, i, 1, k);
                     c3e(u3, i, -2, k) = c3e(u3, i, 1, k);
@@ -1141,9 +1148,9 @@ static void update_outer(IBMSolver *solver) {
         case BC_ALL_PERIODIC:
         case BC_VELOCITY_PERIODIC:
             if (solver->Py == 1) {
-                for (int i = -2; i < Nx+2; i++) {
+                for (int i = ifirst; i < ilast; i++) {
                     for (int j = -2; j <= -1; j++) {
-                        for (int k = -2; k < Nz+2; k++) {
+                        for (int k = 0; k < Nz; k++) {
                             c3e(u1, i, j, k) = c3e(u1, i, j+Ny, k);
                             c3e(u2, i, j, k) = c3e(u2, i, j+Ny, k);
                             c3e(u3, i, j, k) = c3e(u3, i, j+Ny, k);
@@ -1153,21 +1160,21 @@ static void update_outer(IBMSolver *solver) {
             }
             else {
                 cnt = 0;
-                for (int i = -2; i < Nx+2; i++) {
+                for (int i = ifirst; i < ilast; i++) {
                     for (int j = 0; j <= 1; j++) {
-                        for (int k = -2; k < Nz+2; k++) {
+                        for (int k = 0; k < Nz; k++) {
                             solver->y_exchg[cnt++] = c3e(u1, i, j, k);
                             solver->y_exchg[cnt++] = c3e(u2, i, j, k);
                             solver->y_exchg[cnt++] = c3e(u3, i, j, k);
                         }
                     }
                 }
-                MPI_Send(solver->y_exchg, 6*(Nx+4)*(Nz+4), MPI_DOUBLE, solver->rank + (solver->Py-1)*solver->Pz, 0, MPI_COMM_WORLD);
-                MPI_Recv(solver->y_exchg, 6*(Nx+4)*(Nz+4), MPI_DOUBLE, solver->rank + (solver->Py-1)*solver->Pz, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+                MPI_Send(solver->y_exchg, 6*(ilast-ifirst)*Nz, MPI_DOUBLE, solver->rank + (solver->Py-1)*solver->Pz, 0, MPI_COMM_WORLD);
+                MPI_Recv(solver->y_exchg, 6*(ilast-ifirst)*Nz, MPI_DOUBLE, solver->rank + (solver->Py-1)*solver->Pz, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
                 cnt = 0;
-                for (int i = -2; i < Nx+2; i++) {
+                for (int i = ifirst; i < ilast; i++) {
                     for (int j = -2; j <= -1; j++) {
-                        for (int k = -2; k < Nz+2; k++) {
+                        for (int k = 0; k < Nz; k++) {
                             c3e(u1, i, j, k) = solver->y_exchg[cnt++];
                             c3e(u2, i, j, k) = solver->y_exchg[cnt++];
                             c3e(u3, i, j, k) = solver->y_exchg[cnt++];
@@ -1186,8 +1193,8 @@ static void update_outer(IBMSolver *solver) {
         case BC_VELOCITY_COMPONENT:
             a = c1e(solver->dy, Ny-1) / 2;
             b = c1e(solver->dy, Ny) / 2;
-            for (int i = -2; i < Nx+2; i++) {
-                for (int k = -2; k < Nz+2; k++) {
+            for (int i = ifirst; i < ilast; i++) {
+                for (int k = 0; k < Nz; k++) {
                     c3e(u1, i, Ny, k) = (a+b)/a*bc_val_u(solver, 1, DIR_NORTH, solver->time, c1e(xc, i), ymax, c1e(zc, k)) - b/a*c3e(u1, i, Ny-1, k);
                     c3e(u2, i, Ny, k) = (a+b)/a*bc_val_u(solver, 2, DIR_NORTH, solver->time, c1e(xc, i), ymax, c1e(zc, k)) - b/a*c3e(u2, i, Ny-1, k);
                     c3e(u3, i, Ny, k) = (a+b)/a*bc_val_u(solver, 3, DIR_NORTH, solver->time, c1e(xc, i), ymax, c1e(zc, k)) - b/a*c3e(u3, i, Ny-1, k);
@@ -1195,8 +1202,8 @@ static void update_outer(IBMSolver *solver) {
             }
             a = c1e(solver->dy, Ny-2) / 2 + c1e(solver->dy, Ny-1);
             b = c1e(solver->dy, Ny) + c1e(solver->dy, Ny+1) / 2;
-            for (int i = -2; i < Nx+2; i++) {
-                for (int k = -2; k < Nz+2; k++) {
+            for (int i = ifirst; i < ilast; i++) {
+                for (int k = 0; k < Nz; k++) {
                     c3e(u1, i, Ny+1, k) = (a+b)/a*bc_val_u(solver, 1, DIR_NORTH, solver->time, c1e(xc, i), ymax, c1e(zc, k)) - b/a*c3e(u1, i, Ny-2, k);
                     c3e(u2, i, Ny+1, k) = (a+b)/a*bc_val_u(solver, 2, DIR_NORTH, solver->time, c1e(xc, i), ymax, c1e(zc, k)) - b/a*c3e(u2, i, Ny-2, k);
                     c3e(u3, i, Ny+1, k) = (a+b)/a*bc_val_u(solver, 3, DIR_NORTH, solver->time, c1e(xc, i), ymax, c1e(zc, k)) - b/a*c3e(u3, i, Ny-2, k);
@@ -1206,8 +1213,8 @@ static void update_outer(IBMSolver *solver) {
         case BC_PRESSURE:
             a = c1e(solver->yc, Ny-1) - c1e(solver->yc, Ny-2);
             b = c1e(solver->yc, Ny) - c1e(solver->yc, Ny-1);
-            for (int i = -2; i < Nx+2; i++) {
-                for (int k = -2; k < Nz+2; k++) {
+            for (int i = ifirst; i < ilast; i++) {
+                for (int k = 0; k < Nz; k++) {
                     c3e(u1, i, Ny, k) = (a+b)/a*c3e(u1, i, Ny-1, k) - b/a*c3e(u1, i, Ny-2, k);
                     c3e(u2, i, Ny, k) = (a+b)/a*c3e(u2, i, Ny-1, k) - b/a*c3e(u2, i, Ny-2, k);
                     c3e(u3, i, Ny, k) = (a+b)/a*c3e(u3, i, Ny-1, k) - b/a*c3e(u3, i, Ny-2, k);
@@ -1215,8 +1222,8 @@ static void update_outer(IBMSolver *solver) {
             }
             a = c1e(solver->yc, Ny) - c1e(solver->yc, Ny-1);
             b = c1e(solver->yc, Ny+1) - c1e(solver->yc, Ny);
-            for (int i = -2; i < Nx+2; i++) {
-                for (int k = -2; k < Nz+2; k++) {
+            for (int i = ifirst; i < ilast; i++) {
+                for (int k = 0; k < Nz; k++) {
                     c3e(u1, i, Ny+1, k) = (a+b)/a*c3e(u1, i, Ny, k) - b/a*c3e(u1, i, Ny-1, k);
                     c3e(u2, i, Ny+1, k) = (a+b)/a*c3e(u2, i, Ny, k) - b/a*c3e(u2, i, Ny-1, k);
                     c3e(u3, i, Ny+1, k) = (a+b)/a*c3e(u3, i, Ny, k) - b/a*c3e(u3, i, Ny-1, k);
@@ -1226,8 +1233,8 @@ static void update_outer(IBMSolver *solver) {
         case BC_FREE_SLIP_WALL:
             a = c1e(solver->dy, Ny-1) / 2;
             b = c1e(solver->dy, Ny) / 2;
-            for (int i = -2; i < Nx+2; i++) {
-                for (int k = -2; k < Nz+2; k++) {
+            for (int i = ifirst; i < ilast; i++) {
+                for (int k = 0; k < Nz; k++) {
                     c3e(u1, i, Ny, k) = c3e(u1, i, Ny-1, k);
                     c3e(u2, i, Ny, k) = -b/a*c3e(u2, i, Ny-1, k);
                     c3e(u3, i, Ny, k) = c3e(u3, i, Ny-1, k);
@@ -1235,8 +1242,8 @@ static void update_outer(IBMSolver *solver) {
             }
             a = c1e(solver->dy, Ny-2) / 2 + c1e(solver->dy, Ny-1);
             b = c1e(solver->dy, Ny) + c1e(solver->dy, Ny+1) / 2;
-            for (int i = -2; i < Nx+2; i++) {
-                for (int k = -2; k < Nz+2; k++) {
+            for (int i = ifirst; i < ilast; i++) {
+                for (int k = 0; k < Nz; k++) {
                     c3e(u1, i, Ny+1, k) = c3e(u1, i, Ny-2, k);
                     c3e(u2, i, Ny+1, k) = -b/a*c3e(u2, i, Ny-2, k);
                     c3e(u3, i, Ny+1, k) = c3e(u3, i, Ny-2, k);
@@ -1246,9 +1253,9 @@ static void update_outer(IBMSolver *solver) {
         case BC_ALL_PERIODIC:
         case BC_VELOCITY_PERIODIC:
             if (solver->Py == 1) {
-                for (int i = -2; i < Nx+2; i++) {
+                for (int i = ifirst; i < ilast; i++) {
                     for (int j = Ny; j <= Ny+1; j++) {
-                        for (int k = -2; k < Nz+2; k++) {
+                        for (int k = 0; k < Nz; k++) {
                             c3e(u1, i, j, k) = c3e(u1, i, j-Ny, k);
                             c3e(u2, i, j, k) = c3e(u2, i, j-Ny, k);
                             c3e(u3, i, j, k) = c3e(u3, i, j-Ny, k);
@@ -1257,11 +1264,11 @@ static void update_outer(IBMSolver *solver) {
                 }
             }
             else {
-                MPI_Recv(solver->y_exchg, 6*(Nx+4)*(Nz+4), MPI_DOUBLE, solver->rank - (solver->Py-1)*solver->Pz, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+                MPI_Recv(solver->y_exchg, 6*(ilast-ifirst)*Nz, MPI_DOUBLE, solver->rank - (solver->Py-1)*solver->Pz, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
                 cnt = 0;
-                for (int i = -2; i < Nx+2; i++) {
+                for (int i = ifirst; i < ilast; i++) {
                     for (int j = Ny; j <= Ny+1; j++) {
-                        for (int k = -2; k < Nz+2; k++) {
+                        for (int k = 0; k < Nz; k++) {
                             c3e(u1, i, j, k) = solver->y_exchg[cnt++];
                             c3e(u2, i, j, k) = solver->y_exchg[cnt++];
                             c3e(u3, i, j, k) = solver->y_exchg[cnt++];
@@ -1269,16 +1276,16 @@ static void update_outer(IBMSolver *solver) {
                     }
                 }
                 cnt = 0;
-                for (int i = -2; i < Nx+2; i++) {
+                for (int i = ifirst; i < ilast; i++) {
                     for (int j = Ny-2; j <= Ny-1; j++) {
-                        for (int k = -2; k < Nz+2; k++) {
+                        for (int k = 0; k < Nz; k++) {
                             solver->y_exchg[cnt++] = c3e(u1, i, j, k);
                             solver->y_exchg[cnt++] = c3e(u2, i, j, k);
                             solver->y_exchg[cnt++] = c3e(u3, i, j, k);
                         }
                     }
                 }
-                MPI_Send(solver->y_exchg, 6*(Nx+4)*(Nz+4), MPI_DOUBLE, solver->rank - (solver->Py-1)*solver->Pz, 0, MPI_COMM_WORLD);
+                MPI_Send(solver->y_exchg, 6*(ilast-ifirst)*Nz, MPI_DOUBLE, solver->rank - (solver->Py-1)*solver->Pz, 0, MPI_COMM_WORLD);
             }
             break;
         default:;
@@ -1291,8 +1298,8 @@ static void update_outer(IBMSolver *solver) {
         case BC_VELOCITY_COMPONENT:
             a = c1e(solver->dz, -1) / 2;
             b = c1e(solver->dz, 0) / 2;
-            for (int i = -2; i < Nx+2; i++) {
-                for (int j = -2; j < Ny+2; j++) {
+            for (int i = ifirst; i < ilast; i++) {
+                for (int j = jfirst; j < jlast; j++) {
                     c3e(u1, i, j, -1) = (a+b)/b*bc_val_u(solver, 1, DIR_DOWN, solver->time, c1e(xc, i), c1e(yc, j), zmin) - a/b*c3e(u1, i, j, 0);
                     c3e(u2, i, j, -1) = (a+b)/b*bc_val_u(solver, 2, DIR_DOWN, solver->time, c1e(xc, i), c1e(yc, j), zmin) - a/b*c3e(u2, i, j, 0);
                     c3e(u3, i, j, -1) = (a+b)/b*bc_val_u(solver, 3, DIR_DOWN, solver->time, c1e(xc, i), c1e(yc, j), zmin) - a/b*c3e(u3, i, j, 0);
@@ -1300,8 +1307,8 @@ static void update_outer(IBMSolver *solver) {
             }
             a = c1e(solver->dz, -2) / 2 + c1e(solver->dz, -1);
             b = c1e(solver->dz, 0) + c1e(solver->dz, 1) / 2;
-            for (int i = -2; i < Nx+2; i++) {
-                for (int j = -2; j < Ny+2; j++) {
+            for (int i = ifirst; i < ilast; i++) {
+                for (int j = jfirst; j < jlast; j++) {
                     c3e(u1, i, j, -2) = (a+b)/b*bc_val_u(solver, 1, DIR_DOWN, solver->time, c1e(xc, i), c1e(yc, j), zmin) - a/b*c3e(u1, i, j, 1);
                     c3e(u2, i, j, -2) = (a+b)/b*bc_val_u(solver, 2, DIR_DOWN, solver->time, c1e(xc, i), c1e(yc, j), zmin) - a/b*c3e(u2, i, j, 1);
                     c3e(u3, i, j, -2) = (a+b)/b*bc_val_u(solver, 3, DIR_DOWN, solver->time, c1e(xc, i), c1e(yc, j), zmin) - a/b*c3e(u3, i, j, 1);
@@ -1311,8 +1318,8 @@ static void update_outer(IBMSolver *solver) {
         case BC_PRESSURE:
             a = c1e(solver->zc, 0) - c1e(solver->zc, -1);
             b = c1e(solver->zc, 1) - c1e(solver->zc, 0);
-            for (int i = -2; i < Nx+2; i++) {
-                for (int j = -2; j < Ny+2; j++) {
+            for (int i = ifirst; i < ilast; i++) {
+                for (int j = jfirst; j < jlast; j++) {
                     c3e(u1, i, j, -1) = (a+b)/b*c3e(u1, i, j, 0) - a/b*c3e(u1, i, j, 1);
                     c3e(u2, i, j, -1) = (a+b)/b*c3e(u2, i, j, 0) - a/b*c3e(u2, i, j, 1);
                     c3e(u3, i, j, -1) = (a+b)/b*c3e(u3, i, j, 0) - a/b*c3e(u3, i, j, 1);
@@ -1320,8 +1327,8 @@ static void update_outer(IBMSolver *solver) {
             }
             a = c1e(solver->zc, -1) - c1e(solver->zc, -2);
             b = c1e(solver->zc, 0) - c1e(solver->zc, -1);
-            for (int i = -2; i < Nx+2; i++) {
-                for (int j = -2; j < Ny+2; j++) {
+            for (int i = ifirst; i < ilast; i++) {
+                for (int j = jfirst; j < jlast; j++) {
                     c3e(u1, i, j, -2) = (a+b)/b*c3e(u1, i, j, -1) - a/b*c3e(u1, i, j, 0);
                     c3e(u2, i, j, -2) = (a+b)/b*c3e(u2, i, j, -1) - a/b*c3e(u2, i, j, 0);
                     c3e(u3, i, j, -2) = (a+b)/b*c3e(u3, i, j, -1) - a/b*c3e(u3, i, j, 0);
@@ -1331,8 +1338,8 @@ static void update_outer(IBMSolver *solver) {
         case BC_FREE_SLIP_WALL:
             a = c1e(solver->dz, -1) / 2;
             b = c1e(solver->dz, 0) / 2;
-            for (int i = -2; i < Nx+2; i++) {
-                for (int j = -2; j < Ny+2; j++) {
+            for (int i = ifirst; i < ilast; i++) {
+                for (int j = jfirst; j < jlast; j++) {
                     c3e(u1, i, j, -1) = c3e(u1, i, j, 0);
                     c3e(u2, i, j, -1) = c3e(u2, i, j, 0);
                     c3e(u3, i, j, -1) = -a/b*c3e(u3, i, j, 0);
@@ -1340,8 +1347,8 @@ static void update_outer(IBMSolver *solver) {
             }
             a = c1e(solver->dz, -2) / 2 + c1e(solver->dz, -1);
             b = c1e(solver->dz, 0) + c1e(solver->dz, 1) / 2;
-            for (int i = -2; i < Nx+2; i++) {
-                for (int j = -2; j < Ny+2; j++) {
+            for (int i = ifirst; i < ilast; i++) {
+                for (int j = jfirst; j < jlast; j++) {
                     c3e(u1, i, j, -2) = c3e(u1, i, j, 1);
                     c3e(u2, i, j, -2) = c3e(u2, i, j, 1);
                     c3e(u3, i, j, -2) = -a/b*c3e(u3, i, j, 1);
@@ -1351,8 +1358,8 @@ static void update_outer(IBMSolver *solver) {
         case BC_ALL_PERIODIC:
         case BC_VELOCITY_PERIODIC:
             if (solver->Pz == 1) {
-                for (int i = -2; i < Nx+2; i++) {
-                    for (int j = -2; j < Ny+2; j++) {
+                for (int i = ifirst; i < ilast; i++) {
+                    for (int j = jfirst; j < jlast; j++) {
                         for (int k = -2; k <= -1; k++) {
                             c3e(u1, i, j, k) = c3e(u1, i, j, k+Nz);
                             c3e(u2, i, j, k) = c3e(u2, i, j, k+Nz);
@@ -1363,8 +1370,8 @@ static void update_outer(IBMSolver *solver) {
             }
             else {
                 cnt = 0;
-                for (int i = -2; i < Nx+2; i++) {
-                    for (int j = -2; j < Ny+2; j++) {
+                for (int i = ifirst; i < ilast; i++) {
+                    for (int j = jfirst; j < jlast; j++) {
                         for (int k = 0; k <= 1; k++) {
                             solver->z_exchg[cnt++] = c3e(u1, i, j, k);
                             solver->z_exchg[cnt++] = c3e(u2, i, j, k);
@@ -1372,11 +1379,11 @@ static void update_outer(IBMSolver *solver) {
                         }
                     }
                 }
-                MPI_Send(solver->z_exchg, 6*(Nx+4)*(Ny+4), MPI_DOUBLE, solver->rank + (solver->Pz-1), 0, MPI_COMM_WORLD);
-                MPI_Recv(solver->z_exchg, 6*(Nx+4)*(Ny+4), MPI_DOUBLE, solver->rank + (solver->Pz-1), 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+                MPI_Send(solver->z_exchg, 6*(ilast-ifirst)*(jlast-jfirst), MPI_DOUBLE, solver->rank + (solver->Pz-1), 0, MPI_COMM_WORLD);
+                MPI_Recv(solver->z_exchg, 6*(ilast-ifirst)*(jlast-jfirst), MPI_DOUBLE, solver->rank + (solver->Pz-1), 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
                 cnt = 0;
-                for (int i = -2; i < Nx+2; i++) {
-                    for (int j = -2; j < Ny+2; j++) {
+                for (int i = ifirst; i < ilast; i++) {
+                    for (int j = jfirst; j < jlast; j++) {
                         for (int k = -2; k <= -1; k++) {
                             c3e(u1, i, j, k) = solver->z_exchg[cnt++];
                             c3e(u2, i, j, k) = solver->z_exchg[cnt++];
@@ -1396,8 +1403,8 @@ static void update_outer(IBMSolver *solver) {
         case BC_VELOCITY_COMPONENT:
             a = c1e(solver->dz, Nz-1) / 2;
             b = c1e(solver->dz, Nz) / 2;
-            for (int i = -2; i < Nx+2; i++) {
-                for (int j = -2; j < Ny+2; j++) {
+            for (int i = ifirst; i < ilast; i++) {
+                for (int j = jfirst; j < jlast; j++) {
                     c3e(u1, i, j, Nz) = (a+b)/a*bc_val_u(solver, 1, DIR_UP, solver->time, c1e(xc, i), c1e(yc, j), zmax) - b/a*c3e(u1, i, j, Nz-1);
                     c3e(u2, i, j, Nz) = (a+b)/a*bc_val_u(solver, 2, DIR_UP, solver->time, c1e(xc, i), c1e(yc, j), zmax) - b/a*c3e(u2, i, j, Nz-1);
                     c3e(u3, i, j, Nz) = (a+b)/a*bc_val_u(solver, 3, DIR_UP, solver->time, c1e(xc, i), c1e(yc, j), zmax) - b/a*c3e(u3, i, j, Nz-1);
@@ -1405,8 +1412,8 @@ static void update_outer(IBMSolver *solver) {
             }
             a = c1e(solver->dz, Nz-2) / 2 + c1e(solver->dz, Nz-1);
             b = c1e(solver->dz, Nz) + c1e(solver->dz, Nz+1) / 2;
-            for (int i = -2; i < Nx+2; i++) {
-                for (int j = -2; j < Ny+2; j++) {
+            for (int i = ifirst; i < ilast; i++) {
+                for (int j = jfirst; j < jlast; j++) {
                     c3e(u1, i, j, Nz+1) = (a+b)/a*bc_val_u(solver, 1, DIR_UP, solver->time, c1e(xc, i), c1e(yc, j), zmax) - b/a*c3e(u1, i, j, Nz-2);
                     c3e(u2, i, j, Nz+1) = (a+b)/a*bc_val_u(solver, 2, DIR_UP, solver->time, c1e(xc, i), c1e(yc, j), zmax) - b/a*c3e(u2, i, j, Nz-2);
                     c3e(u3, i, j, Nz+1) = (a+b)/a*bc_val_u(solver, 3, DIR_UP, solver->time, c1e(xc, i), c1e(yc, j), zmax) - b/a*c3e(u3, i, j, Nz-2);
@@ -1416,8 +1423,8 @@ static void update_outer(IBMSolver *solver) {
         case BC_PRESSURE:
             a = c1e(solver->zc, Nz-1) - c1e(solver->zc, Nz-2);
             b = c1e(solver->zc, Nz) - c1e(solver->zc, Nz-1);
-            for (int i = -2; i < Nx+2; i++) {
-                for (int j = -2; j < Ny+2; j++) {
+            for (int i = ifirst; i < ilast; i++) {
+                for (int j = jfirst; j < jlast; j++) {
                     c3e(u1, i, j, Nz) = (a+b)/a*c3e(u1, i, j, Nz-1) - b/a*c3e(u1, i, j, Nz-2);
                     c3e(u2, i, j, Nz) = (a+b)/a*c3e(u2, i, j, Nz-1) - b/a*c3e(u2, i, j, Nz-2);
                     c3e(u3, i, j, Nz) = (a+b)/a*c3e(u3, i, j, Nz-1) - b/a*c3e(u3, i, j, Nz-2);
@@ -1425,8 +1432,8 @@ static void update_outer(IBMSolver *solver) {
             }
             a = c1e(solver->zc, Nz) - c1e(solver->zc, Nz-1);
             b = c1e(solver->zc, Nz+1) - c1e(solver->zc, Nz);
-            for (int i = -2; i < Nx+2; i++) {
-                for (int j = -2; j < Ny+2; j++) {
+            for (int i = ifirst; i < ilast; i++) {
+                for (int j = jfirst; j < jlast; j++) {
                     c3e(u1, i, j, Nz+1) = (a+b)/a*c3e(u1, i, j, Nz) - b/a*c3e(u1, i, j, Nz-1);
                     c3e(u2, i, j, Nz+1) = (a+b)/a*c3e(u2, i, j, Nz) - b/a*c3e(u2, i, j, Nz-1);
                     c3e(u3, i, j, Nz+1) = (a+b)/a*c3e(u3, i, j, Nz) - b/a*c3e(u3, i, j, Nz-1);
@@ -1436,8 +1443,8 @@ static void update_outer(IBMSolver *solver) {
         case BC_FREE_SLIP_WALL:
             a = c1e(solver->dz, Nz-1) / 2;
             b = c1e(solver->dz, Nz) / 2;
-            for (int i = -2; i < Nx+2; i++) {
-                for (int j = -2; j < Ny+2; j++) {
+            for (int i = ifirst; i < ilast; i++) {
+                for (int j = jfirst; j < jlast; j++) {
                     c3e(u1, i, j, Nz) = c3e(u1, i, j, Nz-1);
                     c3e(u2, i, j, Nz) = c3e(u2, i, j, Nz-1);
                     c3e(u3, i, j, Nz) = -b/a*c3e(u3, i, j, Nz-1);
@@ -1445,8 +1452,8 @@ static void update_outer(IBMSolver *solver) {
             }
             a = c1e(solver->dz, Nz-2) / 2 + c1e(solver->dz, Nz-1);
             b = c1e(solver->dz, Nz) + c1e(solver->dz, Nz+1) / 2;
-            for (int i = -2; i < Nx+2; i++) {
-                for (int j = -2; j < Ny+2; j++) {
+            for (int i = ifirst; i < ilast; i++) {
+                for (int j = jfirst; j < jlast; j++) {
                     c3e(u1, i, j, Nz+1) = c3e(u1, i, j, Nz-2);
                     c3e(u2, i, j, Nz+1) = c3e(u2, i, j, Nz-2);
                     c3e(u3, i, j, Nz+1) = -b/a*c3e(u3, i, j, Nz-2);
@@ -1456,8 +1463,8 @@ static void update_outer(IBMSolver *solver) {
         case BC_ALL_PERIODIC:
         case BC_VELOCITY_PERIODIC:
             if (solver->Pz == 1) {
-                for (int i = -2; i < Nx+2; i++) {
-                    for (int j = -2; j < Ny+2; j++) {
+                for (int i = ifirst; i < ilast; i++) {
+                    for (int j = jfirst; j < jlast; j++) {
                         for (int k = Nz; k <= Nz+1; k++) {
                             c3e(u1, i, j, k) = c3e(u1, i, j, k-Nz);
                             c3e(u2, i, j, k) = c3e(u2, i, j, k-Nz);
@@ -1467,10 +1474,10 @@ static void update_outer(IBMSolver *solver) {
                 }
             }
             else {
-                MPI_Recv(solver->z_exchg, 6*(Nx+4)*(Ny+4), MPI_DOUBLE, solver->rank - (solver->Pz-1), 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+                MPI_Recv(solver->z_exchg, 6*(ilast-ifirst)*(jlast-jfirst), MPI_DOUBLE, solver->rank - (solver->Pz-1), 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
                 cnt = 0;
-                for (int i = -2; i < Nx+2; i++) {
-                    for (int j = -2; j < Ny+2; j++) {
+                for (int i = ifirst; i < ilast; i++) {
+                    for (int j = jfirst; j < jlast; j++) {
                         for (int k = Nz; k <= Nz+1; k++) {
                             c3e(u1, i, j, k) = solver->z_exchg[cnt++];
                             c3e(u2, i, j, k) = solver->z_exchg[cnt++];
@@ -1479,8 +1486,8 @@ static void update_outer(IBMSolver *solver) {
                     }
                 }
                 cnt = 0;
-                for (int i = -2; i < Nx+2; i++) {
-                    for (int j = -2; j < Ny+2; j++) {
+                for (int i = ifirst; i < ilast; i++) {
+                    for (int j = jfirst; j < jlast; j++) {
                         for (int k = Nz-2; k <= Nz-1; k++) {
                             solver->z_exchg[cnt++] = c3e(u1, i, j, k);
                             solver->z_exchg[cnt++] = c3e(u2, i, j, k);
@@ -1488,7 +1495,7 @@ static void update_outer(IBMSolver *solver) {
                         }
                     }
                 }
-                MPI_Send(solver->z_exchg, 6*(Nx+4)*(Ny+4), MPI_DOUBLE, solver->rank - (solver->Pz-1), 0, MPI_COMM_WORLD);
+                MPI_Send(solver->z_exchg, 6*(ilast-ifirst)*(jlast-jfirst), MPI_DOUBLE, solver->rank - (solver->Pz-1), 0, MPI_COMM_WORLD);
             }
             break;
         default:;
@@ -1503,8 +1510,8 @@ static void update_outer(IBMSolver *solver) {
         case BC_VELOCITY_COMPONENT:
         case BC_STATIONARY_WALL:
         case BC_FREE_SLIP_WALL:
-            for (int j = -2; j < Ny+2; j++) {
-                for (int k = -2; k < Nz+2; k++) {
+            for (int j = 0; j < Ny; j++) {
+                for (int k = 0; k < Nz; k++) {
                     c3e(p, -1, j, k) = c3e(p, 0, j, k);
                     c3e(p, -2, j, k) = c3e(p, 1, j, k);
                 }
@@ -1514,15 +1521,15 @@ static void update_outer(IBMSolver *solver) {
         case BC_VELOCITY_PERIODIC:
             a = c1e(solver->dx, -1) / 2;
             b = c1e(solver->dx, 0) / 2;
-            for (int j = -2; j < Ny+2; j++) {
-                for (int k = -2; k < Nz+2; k++) {
+            for (int j = 0; j < Ny; j++) {
+                for (int k = 0; k < Nz; k++) {
                     c3e(p, -1, j, k) = (a+b)/b*bc_val_p(solver, DIR_WEST, solver->time, xmin, c1e(yc, j), c1e(zc, k)) - a/b*c3e(p, 0, j, k);
                 }
             }
             a = c1e(solver->dx, -2) / 2 + c1e(solver->dx, -1);
             b = c1e(solver->dx, 0) + c1e(solver->dx, 1) / 2;
-            for (int j = -2; j < Ny+2; j++) {
-                for (int k = -2; k < Nz+2; k++) {
+            for (int j = 0; j < Ny; j++) {
+                for (int k = 0; k < Nz; k++) {
                     c3e(p, -2, j, k) = (a+b)/b*bc_val_p(solver, DIR_WEST, solver->time, xmin, c1e(yc, j), c1e(zc, k)) - a/b*c3e(p, 1, j, k);
                 }
             }
@@ -1530,8 +1537,8 @@ static void update_outer(IBMSolver *solver) {
         case BC_ALL_PERIODIC:
             if (solver->Px == 1) {
                 for (int i = -2; i <= -1; i++) {
-                    for (int j = -2; j < Ny+2; j++) {
-                        for (int k = -2; k < Nz+2; k++) {
+                    for (int j = 0; j < Ny; j++) {
+                        for (int k = 0; k < Nz; k++) {
                             c3e(p, i, j, k) = c3e(p, i+Nx, j, k);
                         }
                     }
@@ -1540,18 +1547,18 @@ static void update_outer(IBMSolver *solver) {
             else {
                 cnt = 0;
                 for (int i = 0; i <= 1; i++) {
-                    for (int j = -2; j < Ny+2; j++) {
-                        for (int k = -2; k < Nz+2; k++) {
+                    for (int j = 0; j < Ny; j++) {
+                        for (int k = 0; k < Nz; k++) {
                             solver->x_exchg[cnt++] = c3e(p, i, j, k);
                         }
                     }
                 }
-                MPI_Send(solver->x_exchg, 2*(Ny+4)*(Nz+4), MPI_DOUBLE, solver->rank + (solver->Px-1)*solver->Py*solver->Pz, 0, MPI_COMM_WORLD);
-                MPI_Recv(solver->x_exchg, 2*(Ny+4)*(Nz+4), MPI_DOUBLE, solver->rank + (solver->Px-1)*solver->Py*solver->Pz, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+                MPI_Send(solver->x_exchg, 2*Ny*Nz, MPI_DOUBLE, solver->rank + (solver->Px-1)*solver->Py*solver->Pz, 0, MPI_COMM_WORLD);
+                MPI_Recv(solver->x_exchg, 2*Ny*Nz, MPI_DOUBLE, solver->rank + (solver->Px-1)*solver->Py*solver->Pz, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
                 cnt = 0;
                 for (int i = -2; i <= -1; i++) {
-                    for (int j = -2; j < Ny+2; j++) {
-                        for (int k = -2; k < Nz+2; k++) {
+                    for (int j = 0; j < Ny; j++) {
+                        for (int k = 0; k < Nz; k++) {
                             c3e(p, i, j, k) = solver->x_exchg[cnt++];
                         }
                     }
@@ -1568,8 +1575,8 @@ static void update_outer(IBMSolver *solver) {
         case BC_VELOCITY_COMPONENT:
         case BC_STATIONARY_WALL:
         case BC_FREE_SLIP_WALL:
-            for (int j = -2; j < Ny+2; j++) {
-                for (int k = -2; k < Nz+2; k++) {
+            for (int j = 0; j < Ny; j++) {
+                for (int k = 0; k < Nz; k++) {
                     c3e(p, Nx, j, k) = c3e(p, Nx-1, j, k);
                     c3e(p, Nx+1, j, k) = c3e(p, Nx-2, j, k);
                 }
@@ -1579,15 +1586,15 @@ static void update_outer(IBMSolver *solver) {
         case BC_VELOCITY_PERIODIC:
             a = c1e(solver->dx, Nx-1) / 2;
             b = c1e(solver->dx, Nx) / 2;
-            for (int j = -2; j < Ny+2; j++) {
-                for (int k = -2; k < Nz+2; k++) {
+            for (int j = 0; j < Ny; j++) {
+                for (int k = 0; k < Nz; k++) {
                     c3e(p, Nx, j, k) = (a+b)/a*bc_val_p(solver, DIR_EAST, solver->time, xmax, c1e(yc, j), c1e(zc, k)) - b/a*c3e(p, Nx-1, j, k);
                 }
             }
             a = c1e(solver->dx, Nx-2) / 2 + c1e(solver->dx, Nx-1);
             b = c1e(solver->dx, Nx) + c1e(solver->dx, Nx+1) / 2;
-            for (int j = -2; j < Ny+2; j++) {
-                for (int k = -2; k < Nz+2; k++) {
+            for (int j = 0; j < Ny; j++) {
+                for (int k = 0; k < Nz; k++) {
                     c3e(p, Nx+1, j, k) = (a+b)/a*bc_val_p(solver, DIR_EAST, solver->time, xmax, c1e(yc, j), c1e(zc, k)) - b/a*c3e(p, Nx-2, j, k);
                 }
             }
@@ -1595,32 +1602,32 @@ static void update_outer(IBMSolver *solver) {
         case BC_ALL_PERIODIC:
             if (solver->Px == 1) {
                 for (int i = Nx; i <= Nx+1; i++) {
-                    for (int j = -2; j < Ny+2; j++) {
-                        for (int k = -2; k < Nz+2; k++) {
+                    for (int j = 0; j < Ny; j++) {
+                        for (int k = 0; k < Nz; k++) {
                             c3e(p, i, j, k) = c3e(p, i-Nx, j, k);
                         }
                     }
                 }
             }
             else {
-                MPI_Recv(solver->x_exchg, 2*(Ny+4)*(Nz+4), MPI_DOUBLE, solver->rank - (solver->Px-1)*solver->Py*solver->Pz, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+                MPI_Recv(solver->x_exchg, 2*Ny*Nz, MPI_DOUBLE, solver->rank - (solver->Px-1)*solver->Py*solver->Pz, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
                 cnt = 0;
                 for (int i = Nx; i <= Nx+1; i++) {
-                    for (int j = -2; j < Ny+2; j++) {
-                        for (int k = -2; k < Nz+2; k++) {
+                    for (int j = 0; j < Ny; j++) {
+                        for (int k = 0; k < Nz; k++) {
                             c3e(p, i, j, k) = solver->x_exchg[cnt++];
                         }
                     }
                 }
                 cnt = 0;
                 for (int i = Nx-2; i <= Nx-1; i++) {
-                    for (int j = -2; j < Ny+2; j++) {
-                        for (int k = -2; k < Nz+2; k++) {
+                    for (int j = 0; j < Ny; j++) {
+                        for (int k = 0; k < Nz; k++) {
                             solver->x_exchg[cnt++] = c3e(p, i, j, k);
                         }
                     }
                 }
-                MPI_Send(solver->x_exchg, 2*(Ny+4)*(Nz+4), MPI_DOUBLE, solver->rank - (solver->Px-1)*solver->Py*solver->Pz, 0, MPI_COMM_WORLD);
+                MPI_Send(solver->x_exchg, 2*Ny*Nz, MPI_DOUBLE, solver->rank - (solver->Px-1)*solver->Py*solver->Pz, 0, MPI_COMM_WORLD);
             }
             break;
         default:;
@@ -1633,8 +1640,8 @@ static void update_outer(IBMSolver *solver) {
         case BC_VELOCITY_COMPONENT:
         case BC_STATIONARY_WALL:
         case BC_FREE_SLIP_WALL:
-            for (int i = -2; i < Nx+2; i++) {
-                for (int k = -2; k < Nz+2; k++) {
+            for (int i = ifirst; i < ilast; i++) {
+                for (int k = 0; k < Nz; k++) {
                     c3e(p, i, -1, k) = c3e(p, i, 0, k);
                     c3e(p, i, -2, k) = c3e(p, i, 1, k);
                 }
@@ -1644,24 +1651,24 @@ static void update_outer(IBMSolver *solver) {
         case BC_VELOCITY_PERIODIC:
             a = c1e(solver->dy, -1) / 2;
             b = c1e(solver->dy, 0) / 2;
-            for (int i = -2; i < Nx+2; i++) {
-                for (int k = -2; k < Nz+2; k++) {
+            for (int i = ifirst; i < ilast; i++) {
+                for (int k = 0; k < Nz; k++) {
                     c3e(p, i, -1, k) = (a+b)/b*bc_val_p(solver, DIR_SOUTH, solver->time, c1e(xc, i), ymin, c1e(zc, k)) - a/b*c3e(p, i, 0, k);
                 }
             }
             a = c1e(solver->dy, -2) / 2 + c1e(solver->dy, -1);
             b = c1e(solver->dy, 0) + c1e(solver->dy, 1) / 2;
-            for (int i = -2; i < Nx+2; i++) {
-                for (int k = -2; k < Nz+2; k++) {
+            for (int i = ifirst; i < ilast; i++) {
+                for (int k = 0; k < Nz; k++) {
                     c3e(p, i, -2, k) = (a+b)/b*bc_val_p(solver, DIR_SOUTH, solver->time, c1e(xc, i), ymin, c1e(zc, k)) - a/b*c3e(p, i, 1, k);
                 }
             }
             break;
         case BC_ALL_PERIODIC:
             if (solver->Py == 1) {
-                for (int i = -2; i < Nx+2; i++) {
+                for (int i = ifirst; i < ilast; i++) {
                     for (int j = -2; j <= -1; j++) {
-                        for (int k = -2; k < Nz+2; k++) {
+                        for (int k = 0; k < Nz; k++) {
                             c3e(p, i, j, k) = c3e(p, i, j+Ny, k);
                         }
                     }
@@ -1669,19 +1676,19 @@ static void update_outer(IBMSolver *solver) {
             }
             else {
                 cnt = 0;
-                for (int i = 0; i <= 1; i++) {
-                    for (int j = -2; j < Ny+2; j++) {
-                        for (int k = -2; k < Nz+2; k++) {
+                for (int i = ifirst; i < ilast; i++) {
+                    for (int j = 0; j <= 1; j++) {
+                        for (int k = 0; k < Nz; k++) {
                             solver->y_exchg[cnt++] = c3e(p, i, j, k);
                         }
                     }
                 }
-                MPI_Send(solver->y_exchg, 2*(Nx+4)*(Nz+4), MPI_DOUBLE, solver->rank + (solver->Py-1)*solver->Pz, 0, MPI_COMM_WORLD);
-                MPI_Recv(solver->y_exchg, 2*(Nx+4)*(Nz+4), MPI_DOUBLE, solver->rank + (solver->Py-1)*solver->Pz, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+                MPI_Send(solver->y_exchg, 2*(ilast-ifirst)*Nz, MPI_DOUBLE, solver->rank + (solver->Py-1)*solver->Pz, 0, MPI_COMM_WORLD);
+                MPI_Recv(solver->y_exchg, 2*(ilast-ifirst)*Nz, MPI_DOUBLE, solver->rank + (solver->Py-1)*solver->Pz, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
                 cnt = 0;
-                for (int i = -2; i <= -1; i++) {
-                    for (int j = -2; j < Ny+2; j++) {
-                        for (int k = -2; k < Nz+2; k++) {
+                for (int i = ifirst; i < ilast; i++) {
+                    for (int j = -2; j <= -1; j++) {
+                        for (int k = 0; k < Nz; k++) {
                             c3e(p, i, j, k) = solver->y_exchg[cnt++];
                         }
                     }
@@ -1698,8 +1705,8 @@ static void update_outer(IBMSolver *solver) {
         case BC_VELOCITY_COMPONENT:
         case BC_STATIONARY_WALL:
         case BC_FREE_SLIP_WALL:
-            for (int i = -2; i < Nx+2; i++) {
-                for (int k = -2; k < Nz+2; k++) {
+            for (int i = ifirst; i < ilast; i++) {
+                for (int k = 0; k < Nz; k++) {
                     c3e(p, i, Ny, k) = c3e(p, i, Ny-1, k);
                     c3e(p, i, Ny+1, k) = c3e(p, i, Ny-2, k);
                 }
@@ -1709,48 +1716,48 @@ static void update_outer(IBMSolver *solver) {
         case BC_VELOCITY_PERIODIC:
             a = c1e(solver->dy, Ny-1) / 2;
             b = c1e(solver->dy, Ny) / 2;
-            for (int i = -2; i < Nx+2; i++) {
-                for (int k = -2; k < Nz+2; k++) {
+            for (int i = ifirst; i < ilast; i++) {
+                for (int k = 0; k < Nz; k++) {
                     c3e(p, i, Ny, k) = (a+b)/a*bc_val_p(solver, DIR_NORTH, solver->time, c1e(xc, i), ymax, c1e(zc, k)) - b/a*c3e(p, i, Ny-1, k);
                 }
             }
             a = c1e(solver->dy, Ny-2) / 2 + c1e(solver->dy, Ny-1);
             b = c1e(solver->dy, Ny) + c1e(solver->dy, Ny+1) / 2;
-            for (int i = -2; i < Nx+2; i++) {
-                for (int k = -2; k < Nz+2; k++) {
+            for (int i = ifirst; i < ilast; i++) {
+                for (int k = 0; k < Nz; k++) {
                     c3e(p, i, Ny+1, k) = (a+b)/a*bc_val_p(solver, DIR_NORTH, solver->time, c1e(xc, i), ymax, c1e(zc, k)) - b/a*c3e(p, i, Ny-2, k);
                 }
             }
             break;
         case BC_ALL_PERIODIC:
             if (solver->Py == 1) {
-                for (int i = -2; i < Nx+2; i++) {
+                for (int i = ifirst; i < ilast; i++) {
                     for (int j = Ny; j <= Ny+1; j++) {
-                        for (int k = -2; k < Nz+2; k++) {
+                        for (int k = 0; k < Nz; k++) {
                             c3e(p, i, j, k) = c3e(p, i, j-Ny, k);
                         }
                     }
                 }
             }
             else {
-                MPI_Recv(solver->y_exchg, 2*(Nx+4)*(Nz+4), MPI_DOUBLE, solver->rank - (solver->Py-1)*solver->Pz, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+                MPI_Recv(solver->y_exchg, 2*(ilast-ifirst)*Nz, MPI_DOUBLE, solver->rank - (solver->Py-1)*solver->Pz, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
                 cnt = 0;
-                for (int i = -2; i < Nx+2; i++) {
+                for (int i = ifirst; i < ilast; i++) {
                     for (int j = Ny; j <= Ny+1; j++) {
-                        for (int k = -2; k < Nz+2; k++) {
+                        for (int k = 0; k < Nz; k++) {
                             c3e(p, i, j, k) = solver->y_exchg[cnt++];
                         }
                     }
                 }
                 cnt = 0;
-                for (int i = -2; i < Nx+2; i++) {
+                for (int i = ifirst; i < ilast; i++) {
                     for (int j = Ny-2; j <= Ny-1; j++) {
-                        for (int k = -2; k < Nz+2; k++) {
+                        for (int k = 0; k < Nz; k++) {
                             solver->y_exchg[cnt++] = c3e(p, i, j, k);
                         }
                     }
                 }
-                MPI_Send(solver->y_exchg, 2*(Nx+4)*(Nz+4), MPI_DOUBLE, solver->rank - (solver->Py-1)*solver->Pz, 0, MPI_COMM_WORLD);
+                MPI_Send(solver->y_exchg, 2*(ilast-ifirst)*Nz, MPI_DOUBLE, solver->rank - (solver->Py-1)*solver->Pz, 0, MPI_COMM_WORLD);
             }
             break;
         default:;
@@ -1763,8 +1770,8 @@ static void update_outer(IBMSolver *solver) {
         case BC_VELOCITY_COMPONENT:
         case BC_STATIONARY_WALL:
         case BC_FREE_SLIP_WALL:
-            for (int i = -2; i < Nx+2; i++) {
-                for (int j = -2; j < Ny+2; j++) {
+            for (int i = ifirst; i < ilast; i++) {
+                for (int j = jfirst; j < jlast; j++) {
                     c3e(p, i, j, -1) = c3e(p, i, j, 0);
                     c3e(p, i, j, -2) = c3e(p, i, j, 1);
                 }
@@ -1774,23 +1781,23 @@ static void update_outer(IBMSolver *solver) {
         case BC_VELOCITY_PERIODIC:
             a = c1e(solver->dx, -1) / 2;
             b = c1e(solver->dx, 0) / 2;
-            for (int i = -2; i < Nx+2; i++) {
-                for (int j = -2; j < Ny+2; j++) {
+            for (int i = ifirst; i < ilast; i++) {
+                for (int j = jfirst; j < jlast; j++) {
                     c3e(p, i, j, -1) = (a+b)/b*bc_val_p(solver, DIR_DOWN, solver->time, c1e(xc, i), c1e(yc, j), zmin) - a/b*c3e(p, i, j, 0);
                 }
             }
             a = c1e(solver->dx, -2) / 2 + c1e(solver->dx, -1);
             b = c1e(solver->dx, 0) + c1e(solver->dx, 1) / 2;
-            for (int i = -2; i < Nx+2; i++) {
-                for (int j = -2; j < Ny+2; j++) {
+            for (int i = ifirst; i < ilast; i++) {
+                for (int j = jfirst; j < jlast; j++) {
                     c3e(p, i, j, -2) = (a+b)/b*bc_val_p(solver, DIR_DOWN, solver->time, c1e(xc, i), c1e(yc, j), zmin) - a/b*c3e(p, i, j, 1);
                 }
             }
             break;
         case BC_ALL_PERIODIC:
             if (solver->Pz == 1) {
-                for (int i = -2; i < Nx+2; i++) {
-                    for (int j = -2; j < Ny+2; j++) {
+                for (int i = ifirst; i < ilast; i++) {
+                    for (int j = jfirst; j < jlast; j++) {
                         for (int k = -2; k <= -1; k++) {
                             c3e(p, i, j, k) = c3e(p, i, j, k+Nz);
                         }
@@ -1799,18 +1806,18 @@ static void update_outer(IBMSolver *solver) {
             }
             else {
                 cnt = 0;
-                for (int i = -2; i < Nx+2; i++) {
-                    for (int j = -2; j < Ny+2; j++) {
+                for (int i = ifirst; i < ilast; i++) {
+                    for (int j = jfirst; j < jlast; j++) {
                         for (int k = 0; k <= 1; k++) {
                             solver->z_exchg[cnt++] = c3e(p, i, j, k);
                         }
                     }
                 }
-                MPI_Send(solver->z_exchg, 2*(Nx+4)*(Ny+4), MPI_DOUBLE, solver->rank + (solver->Pz-1), 0, MPI_COMM_WORLD);
-                MPI_Recv(solver->z_exchg, 2*(Nx+4)*(Ny+4), MPI_DOUBLE, solver->rank + (solver->Pz-1), 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+                MPI_Send(solver->z_exchg, 2*(ilast-ifirst)*(jlast-jfirst), MPI_DOUBLE, solver->rank + (solver->Pz-1), 0, MPI_COMM_WORLD);
+                MPI_Recv(solver->z_exchg, 2*(ilast-ifirst)*(jlast-jfirst), MPI_DOUBLE, solver->rank + (solver->Pz-1), 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
                 cnt = 0;
-                for (int i = -2; i < Nx+2; i++) {
-                    for (int j = -2; j < Ny+2; j++) {
+                for (int i = ifirst; i < ilast; i++) {
+                    for (int j = jfirst; j < jlast; j++) {
                         for (int k = -2; k <= -1; k++) {
                             c3e(p, i, j, k) = solver->z_exchg[cnt++];
                         }
@@ -1828,8 +1835,8 @@ static void update_outer(IBMSolver *solver) {
         case BC_VELOCITY_COMPONENT:
         case BC_STATIONARY_WALL:
         case BC_FREE_SLIP_WALL:
-            for (int i = -2; i < Nx+2; i++) {
-                for (int j = -2; j < Ny+2; j++) {
+            for (int i = ifirst; i < ilast; i++) {
+                for (int j = jfirst; j < jlast; j++) {
                     c3e(p, i, j, Nz) = c3e(p, i, j, Nz-1);
                     c3e(p, i, j, Nz+1) = c3e(p, i, j, Nz-2);
                 }
@@ -1839,23 +1846,23 @@ static void update_outer(IBMSolver *solver) {
         case BC_VELOCITY_PERIODIC:
             a = c1e(solver->dz, Nz-1) / 2;
             b = c1e(solver->dz, Nz) / 2;
-            for (int i = -2; i < Nx+2; i++) {
-                for (int j = -2; j < Ny+2; j++) {
+            for (int i = ifirst; i < ilast; i++) {
+                for (int j = jfirst; j < jlast; j++) {
                     c3e(p, i, j, Nz) = (a+b)/a*bc_val_p(solver, DIR_UP, solver->time, c1e(xc, i), c1e(yc, j), zmax) - b/a*c3e(p, i, j, Nz-1);
                 }
             }
             a = c1e(solver->dz, Nz-2) / 2 + c1e(solver->dz, Nz-1);
             b = c1e(solver->dz, Nz) + c1e(solver->dz, Nz+1) / 2;
-            for (int i = -2; i < Nx+2; i++) {
-                for (int j = -2; j < Ny+2; j++) {
+            for (int i = ifirst; i < ilast; i++) {
+                for (int j = jfirst; j < jlast; j++) {
                     c3e(p, i, j, Nz+1) = (a+b)/a*bc_val_p(solver, DIR_UP, solver->time, c1e(xc, i), c1e(yc, j), zmax) - b/a*c3e(p, i, j, Nz-2);
                 }
             }
             break;
         case BC_ALL_PERIODIC:
             if (solver->Pz == 1) {
-                for (int i = -2; i < Nx+2; i++) {
-                    for (int j = -2; j < Ny+2; j++) {
+                for (int i = ifirst; i < ilast; i++) {
+                    for (int j = jfirst; j < jlast; j++) {
                         for (int k = Nz; k <= Nz+1; k++) {
                                 c3e(p, i, j, k) = c3e(p, i, j, k-Nz);
                             }
@@ -1863,24 +1870,24 @@ static void update_outer(IBMSolver *solver) {
                     }
                 }
             else {
-                MPI_Recv(solver->z_exchg, 2*(Nx+4)*(Ny+4), MPI_DOUBLE, solver->rank - (solver->Pz-1), 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+                MPI_Recv(solver->z_exchg, 2*(ilast-ifirst)*(jlast-jfirst), MPI_DOUBLE, solver->rank - (solver->Pz-1), 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
                 cnt = 0;
-                for (int i = -2; i < Nx+2; i++) {
-                    for (int j = -2; j < Ny+2; j++) {
+                for (int i = ifirst; i < ilast; i++) {
+                    for (int j = jfirst; j < jlast; j++) {
                         for (int k = Nz; k <= Nz+1; k++) {
                             c3e(p, i, j, k) = solver->z_exchg[cnt++];
                         }
                     }
                 }
                 cnt = 0;
-                for (int i = -2; i < Nx+2; i++) {
-                    for (int j = -2; j < Ny+2; j++) {
+                for (int i = ifirst; i < ilast; i++) {
+                    for (int j = jfirst; j < jlast; j++) {
                         for (int k = Nz-2; k <= Nz-1; k++) {
                             solver->z_exchg[cnt++] = c3e(p, i, j, k);
                         }
                     }
                 }
-                MPI_Send(solver->z_exchg, 2*(Nx+4)*(Ny+4), MPI_DOUBLE, solver->rank - (solver->Pz-1), 0, MPI_COMM_WORLD);
+                MPI_Send(solver->z_exchg, 2*(ilast-ifirst)*(jlast-jfirst), MPI_DOUBLE, solver->rank - (solver->Pz-1), 0, MPI_COMM_WORLD);
             }
             break;
         default:;
