@@ -16,6 +16,7 @@ void IBMSolver_set_grid(
 void IBMSolver_set_params(IBMSolver *, const double, const double);
 
 void IBMSolver_set_ext_force(IBMSolver *, IBMSolverValType, ...);
+void IBMSolver_set_turb_model(IBMSolver *, IBMSolverTurbModelType, ...);
 void IBMSolver_set_bc(IBMSolver *, IBMSolverDirection, IBMSolverBCType, ...);
 void IBMSolver_set_obstacle(IBMSolver *, Polyhedron *);
 void IBMSolver_set_linear_solver(IBMSolver *, IBMSolverLinearSolverType, IBMSolverPrecondType, const double);

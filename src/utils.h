@@ -42,6 +42,8 @@
 
 FILE *fopen_check(const char *restrict filename, const char *restrict modes);
 
+double sq(const double);
+
 int lower_bound(const int, const double [], const double);
 int upper_bound(const int, const double [], const double);
 

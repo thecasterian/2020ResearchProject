@@ -80,6 +80,17 @@ typedef struct _force {
     };
 } IBMSolverForce;
 
+typedef enum _turb_model_type {
+    TURBMODEL_NONE,                 /* No turbulent model. */
+    TURBMODEL_SMAGORINSKY,          /* Smagorinsky SGS model. */
+    TURBMODEL_WALE,                 /* WALE SGS model. */
+} IBMSolverTurbModelType;
+
+typedef struct _turb_model {
+    IBMSolverTurbModelType type;
+    double Cs;                      /* Smagorinsky coefficient. */
+} IBMSolverTurbModel;
+
 enum {
     FLAG_FLUID = 1,
     FLAG_GHOST,
@@ -168,8 +179,16 @@ typedef struct _ibm_solver {
     /* Fluxes. */
     double *N1, *N1_prev, *N2, *N2_prev, *N3, *N3_prev;
 
+    /* Rate of strain. */
+    double *S[4][4];
+
     /* External force. */
     IBMSolverForce ext_force;
+
+    /* Turbulence model. */
+    IBMSolverTurbModel turb_model;
+    /* Deviatoric turbulent/residual stress tensor. */
+    double *tau_r[4][4];
 
     /* HYPRE matrices, vectors, solvers, and arrays. */
     HYPRE_IJMatrix     A_u1, A_u2, A_u3, A_p;

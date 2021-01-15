@@ -20,6 +20,16 @@ FILE *fopen_check(const char *restrict filename, const char *restrict modes) {
 }
 
 /**
+ * @brief Square a number.
+ *
+ * @param x Number to square.
+ * @return Square of x.
+ */
+double sq(double x) {
+    return x*x;
+}
+
+/**
  * @brief Finds the index of the first element in \p arr which is greater than
  *        or equal to \p val. \p arr must be sorted in increasing order.
  *

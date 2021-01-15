@@ -52,11 +52,15 @@ IBMSolver *IBMSolver_new(
     IBMSolver *solver = calloc(1, sizeof(IBMSolver));
 
     if (rank < 0 || rank > num_process) {
-        printf("Invalid rank: %d\n", rank);
+        fprintf(stderr, "Invalid rank: %d\n", rank);
         MPI_Abort(MPI_COMM_WORLD, -1);
     }
     if (Px * Py * Pz != num_process && rank == 0) {
-        printf("Number of processes does not match\n");
+        fprintf(
+            stderr,
+            "Number of processes (%d) does not match (%d x %d x %d)\n",
+            num_process, Px, Py, Pz
+        );
         MPI_Abort(MPI_COMM_WORLD, -1);
     }
 
@@ -123,6 +127,13 @@ void IBMSolver_destroy(IBMSolver *solver) {
     free(solver->N1); free(solver->N1_prev);
     free(solver->N2); free(solver->N2_prev);
     free(solver->N3); free(solver->N3_prev);
+
+    for (int i = 1; i <= 3; i++) {
+        for (int j = i; j <= 3; j++) {
+            free(solver->S[i][j]);
+            free(solver->tau_r[i][j]);
+        }
+    }
 
     free(solver->kx_W); free(solver->kx_E);
     free(solver->ky_S); free(solver->ky_N);
@@ -309,6 +320,35 @@ void IBMSolver_set_ext_force(
         solver->ext_force.func_f1 = va_arg(ap, IBMSolverForceFunc);
         solver->ext_force.func_f2 = va_arg(ap, IBMSolverForceFunc);
         solver->ext_force.func_f3 = va_arg(ap, IBMSolverForceFunc);
+    }
+    va_end(ap);
+}
+
+/**
+ * @brief Set turbulence model.
+ *
+ * @param solver IBMSolver.
+ * @param type Turbulence model type.
+ * @param ... Any parameters used in the model.
+ */
+void IBMSolver_set_turb_model(
+    IBMSolver *solver,
+    IBMSolverTurbModelType type,
+    ...
+) {
+    va_list ap;
+
+    solver->turb_model.type = type;
+
+    va_start(ap, type);
+    switch (type) {
+    case TURBMODEL_NONE:
+        break;
+    case TURBMODEL_SMAGORINSKY:
+        solver->turb_model.Cs = va_arg(ap, double);
+        break;
+    default:
+        MPI_Abort(MPI_COMM_WORLD, -1);
     }
     va_end(ap);
 }
@@ -657,6 +697,20 @@ static void alloc_arrays(IBMSolver *solver) {
     solver->N2_prev = calloc((Nx+4)*(Ny+4)*(Nz+4), sizeof(double));
     solver->N3      = calloc((Nx+4)*(Ny+4)*(Nz+4), sizeof(double));
     solver->N3_prev = calloc((Nx+4)*(Ny+4)*(Nz+4), sizeof(double));
+
+    solver->S[1][1] = calloc((Nx+4)*(Ny+4)*(Nz+4), sizeof(double));
+    solver->S[1][2] = solver->S[2][1] = calloc((Nx+4)*(Ny+4)*(Nz+4), sizeof(double));
+    solver->S[1][3] = solver->S[3][1] = calloc((Nx+4)*(Ny+4)*(Nz+4), sizeof(double));
+    solver->S[2][2] = calloc((Nx+4)*(Ny+4)*(Nz+4), sizeof(double));
+    solver->S[2][3] = solver->S[3][2] = calloc((Nx+4)*(Ny+4)*(Nz+4), sizeof(double));
+    solver->S[3][3] = calloc((Nx+4)*(Ny+4)*(Nz+4), sizeof(double));
+
+    solver->tau_r[1][1] = calloc((Nx+4)*(Ny+4)*(Nz+4), sizeof(double));
+    solver->tau_r[1][2] = solver->tau_r[2][1] = calloc((Nx+4)*(Ny+4)*(Nz+4), sizeof(double));
+    solver->tau_r[1][3] = solver->tau_r[3][1] = calloc((Nx+4)*(Ny+4)*(Nz+4), sizeof(double));
+    solver->tau_r[2][2] = calloc((Nx+4)*(Ny+4)*(Nz+4), sizeof(double));
+    solver->tau_r[2][3] = solver->tau_r[3][2] = calloc((Nx+4)*(Ny+4)*(Nz+4), sizeof(double));
+    solver->tau_r[3][3] = calloc((Nx+4)*(Ny+4)*(Nz+4), sizeof(double));
 
     solver->kx_W = calloc(Nx+4, sizeof(double));
     solver->kx_E = calloc(Nx+4, sizeof(double));
@@ -1355,7 +1409,7 @@ static void build_hypre(IBMSolver *solver) {
     /* Set velocity solver. */
     HYPRE_ParCSRBiCGSTABCreate(MPI_COMM_WORLD, &solver->linear_solver);
     HYPRE_BiCGSTABSetMaxIter(solver->linear_solver, 100);
-    HYPRE_BiCGSTABSetTol(solver->linear_solver, 1e-6);
+    HYPRE_BiCGSTABSetTol(solver->linear_solver, solver->tol);
     HYPRE_BiCGSTABSetLogging(solver->linear_solver, 1);
     // HYPRE_BiCGSTABSetPrintLevel(solver->linear_solver, 2);
 

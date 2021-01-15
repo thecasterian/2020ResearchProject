@@ -218,7 +218,7 @@ static inline void calc_u_star(
 
     int ifirst, ilast, jfirst, jlast, kfirst, klast;
     int idx;
-    double dpdxl;
+    double dpdxl, div_tau;
 
     int hypre_ierr = 0;
 
@@ -245,6 +245,14 @@ static inline void calc_u_star(
                 dpdxl = (c3e(p, i, j, k+1) - c3e(p, i, j, k-1)) / (c1e(zc, k+1) - c1e(zc, k-1));
                 break;
             }
+            div_tau
+                = (c3e(solver->tau_r[l][1], i+1, j, k) - c3e(solver->tau_r[l][1], i-1, j, k))
+                    / (c1e(xc, i+1) - c1e(xc, i-1))
+                + (c3e(solver->tau_r[l][2], i, j+1, k) - c3e(solver->tau_r[l][2], i, j-1, k))
+                    / (c1e(yc, j+1) - c1e(yc, j-1))
+                + (c3e(solver->tau_r[l][3], i, j, k+1) - c3e(solver->tau_r[l][3], i, j, k-1))
+                    / (c1e(zc, k+1) - c1e(zc, k-1));
+
             if (c3e(solver->flag, i, j, k) == FLAG_FLUID) {
                 solver->vector_values[idx]
                     = -dt/2 * (3*c3e(N[l], i, j, k) - c3e(N_prev[l], i, j, k))
@@ -253,7 +261,8 @@ static inline void calc_u_star(
                     + c1e(kx_W, i)*c3e(u[l], i-1, j, k) + c1e(kx_E, i)*c3e(u[l], i+1, j, k)
                     + c1e(ky_S, j)*c3e(u[l], i, j-1, k) + c1e(ky_N, j)*c3e(u[l], i, j+1, k)
                     + c1e(kz_D, k)*c3e(u[l], i, j, k-1) + c1e(kz_U, k)*c3e(u[l], i, j, k+1)
-                    + dt * ext_force(solver, l, solver->time, c1e(xc, i), c1e(yc, j), c1e(zc, k));
+                    + dt * ext_force(solver, l, solver->time, c1e(xc, i), c1e(yc, j), c1e(zc, k))
+                    - dt * div_tau;
             }
         }
 
