@@ -6,12 +6,12 @@
 
 const int Nx = 192;
 const int Ny = 160;
-const int Nz = 129;
+const int Nz = 257;
 
 #define PATH "/home/jeonukim/data/channel"
 
 const double Re = 3300;
-const double dt = 0.01;
+const double dt = 0.0025;
 
 const double PI = 3.1415926535897932;
 
@@ -69,23 +69,23 @@ int main(int argc, char **argv) {
 
     IBMSolver_set_linear_solver(solver, SOLVER_BiCGSTAB, PRECOND_AMG, 1e-6);
 
-    IBMSolver_set_autosave(solver, PATH "/channel", 10);
+    IBMSolver_set_autosave(solver, PATH "/channel", 100);
 
     IBMSolver_assemble(solver);
 
     /* Initialize. */
-    if (1) {
+    if (0) {
         IBMSolver_init_flow_func(
             solver,
             initfunc_u1, initfunc_u2, initfunc_u3, initfunc_p
         );
     }
     else {
-        IBMSolver_init_flow_file(solver, PATH "/channel");
+        IBMSolver_init_flow_file(solver, PATH "/channel-00070");
     }
 
     /* Iterate. */
-    IBMSolver_iterate(solver, 10000, true);
+    IBMSolver_iterate(solver, 10, true);
 
     /* Export. */
     IBMSolver_export_result(solver, PATH "/channel");

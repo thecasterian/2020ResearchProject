@@ -10,7 +10,7 @@ void IBMSolver_calc_tau_r(IBMSolver *solver) {
     const int Ny = solver->Ny;
     const int Nz = solver->Nz;
 
-    double filter_width, S_mag;
+    double delta, S_mag, l;
 
     switch (solver->turb_model.type) {
     case TURBMODEL_NONE:
@@ -19,7 +19,7 @@ void IBMSolver_calc_tau_r(IBMSolver *solver) {
         IBMSolver_calc_S(solver);
         FOR_INNER_CELL (i, j, k) {
             if (c3e(solver->flag, i, j, k) == FLAG_FLUID) {
-                filter_width = cbrt(c1e(solver->dx, i) * c1e(solver->dy, j) * c1e(solver->dz, k));
+                delta = 2 * cbrt(c1e(solver->dx, i) * c1e(solver->dy, j) * c1e(solver->dz, k));
 
                 S_mag = 0;
                 for (int ii = 1; ii <= 3; ii++) {
@@ -29,11 +29,12 @@ void IBMSolver_calc_tau_r(IBMSolver *solver) {
                 }
                 S_mag = sqrt(S_mag);
 
+                l = min(solver->turb_model.Cs * delta, 0.41 * c3e(solver->lvset, i, j, k));
+
                 for (int ii = 1; ii <= 3; ii++) {
                     for (int jj = ii; jj <= 3; jj++) {
                         c3e(solver->tau_r[ii][jj], i, j, k)
-                            = -2 * sq(solver->turb_model.Cs * filter_width) * S_mag
-                            * c3e(solver->S[ii][jj], i, j, k);
+                            = -2 * sq(l) * S_mag * c3e(solver->S[ii][jj], i, j, k);
                     }
                 }
             }

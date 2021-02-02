@@ -22,6 +22,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
+#include "/usr/include/time.h"
 #include "HYPRE_krylov.h"
 #include "HYPRE.h"
 #include "HYPRE_parcsr_ls.h"
@@ -306,6 +307,8 @@ int main (int argc, char *argv[])
 
    /* Choose a solver and solve the system */
 
+   struct timespec t_start, t_end;
+
    /* AMG */
    if (solver_id == 0)
    {
@@ -326,7 +329,9 @@ int main (int argc, char *argv[])
 
       /* Now setup and solve! */
       HYPRE_BoomerAMGSetup(solver, parcsr_A, par_b, par_x);
+      clock_gettime(CLOCK_REALTIME, &t_start);
       HYPRE_BoomerAMGSolve(solver, parcsr_A, par_b, par_x);
+      clock_gettime(CLOCK_REALTIME, &t_end);
 
       /* Run info - needed logging turned on */
       HYPRE_BoomerAMGGetNumIterations(solver, &num_iterations);
@@ -360,7 +365,9 @@ int main (int argc, char *argv[])
 
       /* Now setup and solve! */
       HYPRE_ParCSRPCGSetup(solver, parcsr_A, par_b, par_x);
+      clock_gettime(CLOCK_REALTIME, &t_start);
       HYPRE_ParCSRPCGSolve(solver, parcsr_A, par_b, par_x);
+      clock_gettime(CLOCK_REALTIME, &t_end);
 
       /* Run info - needed logging turned on */
       HYPRE_PCGGetNumIterations(solver, &num_iterations);
@@ -408,7 +415,9 @@ int main (int argc, char *argv[])
 
       /* Now setup and solve! */
       HYPRE_ParCSRPCGSetup(solver, parcsr_A, par_b, par_x);
+      clock_gettime(CLOCK_REALTIME, &t_start);
       HYPRE_ParCSRPCGSolve(solver, parcsr_A, par_b, par_x);
+      clock_gettime(CLOCK_REALTIME, &t_end);
 
       /* Run info - needed logging turned on */
       HYPRE_PCGGetNumIterations(solver, &num_iterations);
@@ -524,7 +533,9 @@ int main (int argc, char *argv[])
 
       /* Now setup and solve! */
       HYPRE_ParCSRFlexGMRESSetup(solver, parcsr_A, par_b, par_x);
+      clock_gettime(CLOCK_REALTIME, &t_start);
       HYPRE_ParCSRFlexGMRESSolve(solver, parcsr_A, par_b, par_x);
+      clock_gettime(CLOCK_REALTIME, &t_end);
 
       /* Run info - needed logging turned on */
       HYPRE_FlexGMRESGetNumIterations(solver, &num_iterations);
@@ -546,6 +557,10 @@ int main (int argc, char *argv[])
    {
       if (myid ==0) printf("Invalid solver id specified.\n");
    }
+
+   long elapsed_time = (t_end.tv_sec*1000+t_end.tv_nsec/1000000)
+      - (t_start.tv_sec*1000+t_start.tv_nsec/1000000);
+   printf("%ld\n", elapsed_time);
 
    /* Save the solution for GLVis visualization, see vis/glvis-ex5.sh */
    if (vis)

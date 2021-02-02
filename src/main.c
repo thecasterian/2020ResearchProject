@@ -5,7 +5,7 @@
 #include "geo3d.h"
 #include "ibm3d.h"
 
-#define PATH "/home/jeongukim/data/sphere"
+#define PATH "/home/jeonukim/data/building"
 
 int main(int argc, char **argv) {
     /*===== Initialize program and parse arguments. ==========================*/
@@ -130,20 +130,20 @@ int main(int argc, char **argv) {
 
     /*===== Set solver. ======================================================*/
 
-    IBMSolver *solver = IBMSolver_new(num_process, rank, 6, 1, 1);
+    IBMSolver *solver = IBMSolver_new(num_process, rank, 16, 1, 1);
 
     IBMSolver_set_grid(solver, Nx, Ny, Nz, xf, yf, zf);
     IBMSolver_set_params(solver, Re, dt);
 
-    IBMSolver_set_bc(solver, DIR_WEST, BC_VELOCITY_COMPONENT, BC_CONST, 1., 0., 0.);
-    IBMSolver_set_bc(solver, DIR_EAST, BC_PRESSURE, BC_CONST, 0.);
+    IBMSolver_set_bc(solver, DIR_WEST, BC_VELOCITY_COMPONENT, VAL_CONST, 1., 0., 0.);
+    IBMSolver_set_bc(solver, DIR_EAST, BC_PRESSURE, VAL_CONST, 0.);
     IBMSolver_set_bc(solver, DIR_NORTH | DIR_SOUTH | DIR_DOWN | DIR_UP, BC_FREE_SLIP_WALL);
 
     IBMSolver_set_obstacle(solver, poly);
 
     IBMSolver_set_linear_solver(solver, SOLVER_BiCGSTAB, PRECOND_AMG, 1e-6);
 
-    // IBMSolver_set_autosave(solver, output_file, 10);
+    IBMSolver_set_autosave(solver, output_file, 0);
 
     IBMSolver_assemble(solver);
 

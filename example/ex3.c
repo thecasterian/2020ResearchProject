@@ -40,6 +40,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
+#include <time.h>
 #include "HYPRE_struct_ls.h"
 
 #ifdef HYPRE_EXVIS
@@ -343,6 +344,8 @@ int main (int argc, char *argv[])
 
    /* 6. Set up and use a struct solver
       (Solver options can be found in the Reference Manual.) */
+   struct timespec t_start, t_end;
+
    if (solver_id == 0)
    {
       HYPRE_StructPCGCreate(MPI_COMM_WORLD, &solver);
@@ -366,7 +369,9 @@ int main (int argc, char *argv[])
       HYPRE_StructPCGSetPrecond(solver, HYPRE_StructSMGSolve,
                                   HYPRE_StructSMGSetup, precond);
       HYPRE_StructPCGSetup(solver, A, b, x);
+      clock_gettime(CLOCK_REALTIME, &t_start);
       HYPRE_StructPCGSolve(solver, A, b, x);
+      clock_gettime(CLOCK_REALTIME, &t_end);
 
       /* Get some info on the run */
       HYPRE_StructPCGGetNumIterations(solver, &num_iterations);
@@ -391,7 +396,9 @@ int main (int argc, char *argv[])
 
       /* Setup and solve */
       HYPRE_StructSMGSetup(solver, A, b, x);
+      clock_gettime(CLOCK_REALTIME, &t_start);
       HYPRE_StructSMGSolve(solver, A, b, x);
+      clock_gettime(CLOCK_REALTIME, &t_end);
 
       /* Get some info on the run */
       HYPRE_StructSMGGetNumIterations(solver, &num_iterations);
@@ -400,6 +407,10 @@ int main (int argc, char *argv[])
       /* Clean up */
       HYPRE_StructSMGDestroy(solver);
    }
+
+   long elapsed_time = (t_end.tv_sec*1000+t_end.tv_nsec/1000000)
+                - (t_start.tv_sec*1000+t_start.tv_nsec/1000000);
+   printf("%ld\n", elapsed_time);
 
    /* Save the solution for GLVis visualization, see vis/glvis-ex3.sh */
    if (vis)

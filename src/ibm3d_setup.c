@@ -98,6 +98,8 @@ IBMSolver *IBMSolver_new(
     solver->ext_force.const_f2 = 0;
     solver->ext_force.const_f3 = 0;
 
+    solver->turb_model.type = TURBMODEL_NONE;
+
     return solver;
 }
 
@@ -1106,7 +1108,7 @@ static void calc_lvset_flag(IBMSolver *solver) {
         solver->poly,
         Nx+4, Ny+4, Nz+4,
         solver->xc, solver->yc, solver->zc,
-        (double (*)[Ny+4][Nz+4])solver->lvset, .5
+        (double (*)[Ny+4][Nz+4])solver->lvset, 15
     );
 
     /* Exchange lvel set function between the adjacent processes. */
@@ -1408,7 +1410,7 @@ static void build_hypre(IBMSolver *solver) {
 
     /* Set velocity solver. */
     HYPRE_ParCSRBiCGSTABCreate(MPI_COMM_WORLD, &solver->linear_solver);
-    HYPRE_BiCGSTABSetMaxIter(solver->linear_solver, 100);
+    HYPRE_BiCGSTABSetMaxIter(solver->linear_solver, 200);
     HYPRE_BiCGSTABSetTol(solver->linear_solver, solver->tol);
     HYPRE_BiCGSTABSetLogging(solver->linear_solver, 1);
     // HYPRE_BiCGSTABSetPrintLevel(solver->linear_solver, 2);
