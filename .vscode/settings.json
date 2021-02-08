@@ -48,6 +48,8 @@
         "stdexcept": "cpp",
         "streambuf": "cpp",
         "cstdbool": "cpp",
-        "typeinfo": "cpp"
+        "typeinfo": "cpp",
+        "ibm3d.h": "c",
+        "netcdf.h": "c"
     }
 }
