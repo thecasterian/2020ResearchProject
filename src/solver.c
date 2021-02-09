@@ -45,6 +45,8 @@ void Solver_Iterate(Solver *solver, int ntimesteps, bool verbose) {
 
     FlowVars_UpdateOuter(solver->vars, solver->mesh);
     FlowVars_AdjExchg(solver->vars, solver->mesh);
+    FlowVars_InterpF(solver->vars, solver->mesh);
+
 }
 
 void Solver_ExportNetCDF(Solver *solver, NetCDFWriter *writer) {

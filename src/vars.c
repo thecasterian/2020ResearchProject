@@ -66,7 +66,7 @@ void FlowVars_Initialize(FlowVars *vars, PartMesh *mesh, Initializer *init) {
 
     switch (init->type) {
     case INIT_CONST:
-        FOR_U (i, j, k) {
+        FOR_U_ALL (i, j, k) {
             e(vars->u1, i, j, k) = init->const_u1;
             e(vars->u2, i, j, k) = init->const_u2;
             e(vars->u3, i, j, k) = init->const_u3;
@@ -74,7 +74,7 @@ void FlowVars_Initialize(FlowVars *vars, PartMesh *mesh, Initializer *init) {
         }
         break;
     case INIT_FUNC:
-        FOR_U (i, j, k) {
+        FOR_U_ALL (i, j, k) {
             ig = i + mesh->ilower;
             jg = j + mesh->jlower;
             kg = k + mesh->klower;
@@ -242,7 +242,15 @@ void FlowVars_AdjExchg(FlowVars *vars, PartMesh *mesh) {
 }
 
 void FlowVars_InterpF(FlowVars *vars, PartMesh *mesh) {
-
+    FOR_F1_ALL (i, j, k)
+        e(vars->F1, i, j, k) = 1/(e(mesh->deta_dy_c, j)*e(mesh->dzeta_dz_c, k))
+                               * (9./8 * (u1P+u1W)/2 - 1./8 * (u1E+u1WW)/2);
+    FOR_F2_ALL (i, j, k)
+        e(vars->F2, i, j, k) = 1/(e(mesh->dxi_dx_c, i)*e(mesh->dzeta_dz_c, k))
+                               * (9./8 * (u2P+u2S)/2 - 1./8 * (u2N+u2SS)/2);
+    FOR_F3_ALL (i, j, k)
+        e(vars->F3, i, j, k) = 1/(e(mesh->dxi_dx_c, i)*e(mesh->deta_dy_c, j))
+                               * (9./8 * (u3P+u3D)/2 - 1./8 * (u3U+u3DD)/2);
 }
 
 void FlowVars_CalcH(FlowVars *vars, PartMesh *mesh) {

@@ -112,24 +112,20 @@ void PartMesh_CalcTransform(PartMesh *mesh) {
         b = e(mesh->zf, mesh->klower+k+1) - e(mesh->zf, mesh->klower+k);
         e(mesh->dzeta_dz_f, k) = (a*a+b*b) / (a*b*(a+b));
     }
-    for (int i = -3; i <= mesh->Nx_l+2; i++) {
-        e(mesh->dxi_dx_c, i) = 1 / (e(mesh->xf, mesh->ilower+i+1) - e(mesh->xf, mesh->ilower+i));
-    }
-    for (int j = -3; j <= mesh->Ny_l+2; j++) {
-        e(mesh->deta_dy_c, j) = 1 / (e(mesh->yf, mesh->jlower+j+1) - e(mesh->yf, mesh->jlower+j));
-    }
-    for (int k = -3; k <= mesh->Nz_l+2; k++) {
-        e(mesh->dzeta_dz_c, k) = 1 / (e(mesh->zf, mesh->klower+k+1) - e(mesh->zf, mesh->klower+k));
-    }
+    for (int i = -3; i <= mesh->Nx_l+2; i++)
+        e(mesh->dxi_dx_c, i) = 1 / (e(mesh->xf, mesh->ilower+i+1)
+                                    - e(mesh->xf, mesh->ilower+i));
+    for (int j = -3; j <= mesh->Ny_l+2; j++)
+        e(mesh->deta_dy_c, j) = 1 / (e(mesh->yf, mesh->jlower+j+1)
+                                     - e(mesh->yf, mesh->jlower+j));
+    for (int k = -3; k <= mesh->Nz_l+2; k++)
+        e(mesh->dzeta_dz_c, k) = 1 / (e(mesh->zf, mesh->klower+k+1)
+                                      - e(mesh->zf, mesh->klower+k));
 
     /* Calculate the Jacobian. */
-    for (int i = -3; i <= mesh->Nx_l+2; i++) {
-        for (int j = -3; j <= mesh->Ny_l+2; j++) {
-            for (int k = -3; k <= mesh->Nz_l+2; k++) {
-                e(mesh->J, i, j, k) = e(mesh->dxi_dx_c, i) * e(mesh->deta_dy_c, j) * e(mesh->dzeta_dz_c, k);
-            }
-        }
-    }
+    FOR_U_ALL (i, j, k)
+        e(mesh->J, i, j, k) = e(mesh->dxi_dx_c, i) * e(mesh->deta_dy_c, j)
+                              * e(mesh->dzeta_dz_c, k);
 }
 
 void PartMesh_Destroy(PartMesh *mesh) {

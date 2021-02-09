@@ -16,6 +16,24 @@
         for (int j = 0; j < mesh->Ny_l; j++) \
             for (int k = 0; k < mesh->Nz_l; k++)
 
+
+#define FOR_U_ALL(i, j, k) \
+    for (int i = -3; i < mesh->Nx_l+3; i++) \
+        for (int j = -3; j < mesh->Ny_l+3; j++) \
+            for (int k = -3; k < mesh->Nz_l+3; k++)
+#define FOR_F1_ALL(i, j, k) \
+    for (int i = -2; i <= mesh->Nx_l+2; i++) \
+        for (int j = -3; j < mesh->Ny_l+3; j++) \
+            for (int k = -3; k < mesh->Nz_l+3; k++)
+#define FOR_F2_ALL(i, j, k) \
+    for (int i = -3; i < mesh->Nx_l+3; i++) \
+        for (int j = -2; j <= mesh->Ny_l+2; j++) \
+            for (int k = -3; k < mesh->Nz_l+3; k++)
+#define FOR_F3_ALL(i, j, k) \
+    for (int i = -3; i < mesh->Nx_l+3; i++) \
+        for (int j = -3; j < mesh->Ny_l+3; j++) \
+            for (int k = -2; k <= mesh->Nz_l+2; k++)
+
 #define FOR_OUTER_WEST(i, j, k) \
     for (int i = -3; i <= -1; i++) \
         for (int j = -3; j < mesh->Ny_l+3; j++) \
